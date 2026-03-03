@@ -8,7 +8,7 @@ COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
 
-# Stub sources so cargo can resolve the workspace
+# TODO: Stub sources so cargo can resolve the workspace
 RUN mkdir -p crates/data-plane/src crates/control-plane/src crates/shared/src \
     && echo 'fn main(){}' > crates/data-plane/src/main.rs \
     && echo 'fn main(){}' > crates/control-plane/src/main.rs \
@@ -39,7 +39,7 @@ RUN chmod +x /app/data-plane \
     # Allow binding to port 53 without root
     && setcap 'cap_net_bind_service=+ep' /app/data-plane
 
-COPY docker/enclave-entrypoint.sh /entrypoint.sh
+COPY docker/data-plane-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

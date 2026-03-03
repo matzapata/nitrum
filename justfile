@@ -1,17 +1,7 @@
-build:
-    docker compose build
+build-control-plane:
+    docker build -f docker/control-plane.dockerfile -t nitrum/control-plane:latest .
 
-up:
-    docker compose up
+build-data-plane:
+    docker build -f docker/data-plane.dockerfile -t nitrum/data-plane:latest .
 
-down:
-    docker compose down
-
-logs:
-    docker compose logs -f
-
-rebuild:
-    docker compose build --no-cache
-
-restart:
-    docker compose down && docker compose up
+build: build-control-plane build-data-plane

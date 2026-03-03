@@ -1,0 +1,17 @@
+build:
+    docker build -t nitrum/hello:latest .
+
+up:
+    docker compose up
+
+down:
+    docker compose down
+
+logs:
+    docker compose logs -f
+
+rebuild:
+    docker build --no-cache -t nitrum/hello:latest .
+
+restart:
+    docker compose down && docker compose up

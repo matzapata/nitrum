@@ -32,5 +32,6 @@ COPY --from=builder /build/target/release/control-plane /app/control-plane
 RUN chmod +x /app/control-plane
 
 EXPOSE 8181
+EXPOSE 3031
 
 CMD ["/app/control-plane"]

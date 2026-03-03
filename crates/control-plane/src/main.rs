@@ -6,6 +6,7 @@ use tracing::{error, info, warn};
 
 const TCP_PROXY_PORT: u16 = 8181;
 const DNS_PROXY_PORT: u16 = 5354;
+const INGRESS_PROXY_PORT: u16 = 3031;
 
 // ── TCP egress proxy ──────────────────────────────────────────────────────────
 
@@ -129,6 +130,54 @@ async fn run_dns_proxy(upstream_dns: String) {
     }
 }
 
+// ── TCP ingress proxy ─────────────────────────────────────────────────────────
+
+async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAddr, enclave_addr: String) {
+    info!(client = %client_addr, enclave = %enclave_addr, "ingress: new connection, forwarding to enclave");
+
+    let mut upstream = match TcpStream::connect(&enclave_addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(enclave = %enclave_addr, error = %e, "ingress: failed to connect to enclave");
+            return;
+        }
+    };
+
+    match io::copy_bidirectional(&mut client, &mut upstream).await {
+        Ok((from_client, from_upstream)) => {
+            info!(
+                client = %client_addr,
+                bytes_from_client = from_client,
+                bytes_from_upstream = from_upstream,
+                "ingress: connection closed"
+            );
+        }
+        Err(e) => {
+            warn!(client = %client_addr, error = %e, "ingress: connection error");
+        }
+    }
+}
+
+async fn run_ingress_proxy(enclave_host: String, enclave_ingress_port: u16) {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", INGRESS_PROXY_PORT))
+        .await
+        .expect("failed to bind ingress proxy");
+
+    info!(port = INGRESS_PROXY_PORT, enclave = %enclave_host, enclave_port = enclave_ingress_port, "ingress proxy listening");
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let enclave_addr = format!("{}:{}", enclave_host, enclave_ingress_port);
+                tokio::spawn(async move {
+                    handle_ingress_connection(stream, addr, enclave_addr).await;
+                });
+            }
+            Err(e) => error!(error = %e, "ingress: accept error"),
+        }
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -141,11 +190,17 @@ async fn main() {
         .init();
 
     let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8:53".to_string());
+    let enclave_host = std::env::var("ENCLAVE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let enclave_ingress_port = std::env::var("ENCLAVE_INGRESS_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7777u16);
 
     info!("control-plane starting");
 
     tokio::join!(
         run_tcp_proxy(),
         run_dns_proxy(upstream_dns),
+        run_ingress_proxy(enclave_host, enclave_ingress_port),
     );
 }

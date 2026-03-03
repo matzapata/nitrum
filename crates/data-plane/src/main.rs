@@ -9,6 +9,7 @@ use tracing::{error, info, warn};
 
 const TCP_PROXY_PORT: u16 = 8080;
 const DNS_LISTEN_ADDR: &str = "127.0.0.1:53";
+const INGRESS_LISTEN_PORT: u16 = 7777;
 const SOL_IP: libc::c_int = 0;
 const SO_ORIGINAL_DST: libc::c_int = 80;
 
@@ -176,6 +177,54 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
     }
 }
 
+// ── TCP ingress listener ──────────────────────────────────────────────────────
+
+async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAddr, app_addr: String) {
+    info!(client = %client_addr, app = %app_addr, "ingress: new connection, forwarding to app");
+
+    let mut upstream = match TcpStream::connect(&app_addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(app = %app_addr, error = %e, "ingress: failed to connect to app");
+            return;
+        }
+    };
+
+    match io::copy_bidirectional(&mut client, &mut upstream).await {
+        Ok((from_client, from_upstream)) => {
+            info!(
+                client = %client_addr,
+                bytes_from_client = from_client,
+                bytes_from_upstream = from_upstream,
+                "ingress: connection closed"
+            );
+        }
+        Err(e) => {
+            warn!(client = %client_addr, error = %e, "ingress: connection error");
+        }
+    }
+}
+
+async fn run_ingress_listener(app_addr: String) {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", INGRESS_LISTEN_PORT))
+        .await
+        .expect("failed to bind ingress listener");
+
+    info!(port = INGRESS_LISTEN_PORT, app = %app_addr, "ingress listener");
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let app = app_addr.clone();
+                tokio::spawn(async move {
+                    handle_ingress_connection(stream, addr, app).await;
+                });
+            }
+            Err(e) => error!(error = %e, "ingress: accept error"),
+        }
+    }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -190,14 +239,17 @@ async fn main() {
     let control_plane_host = std::env::var("CONTROL_PLANE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let tcp_proxy_port = std::env::var("CONTROL_PLANE_PORT").unwrap_or_else(|_| "8181".to_string());
     let dns_proxy_port = std::env::var("CONTROL_PLANE_DNS_PORT").unwrap_or_else(|_| "5354".to_string());
+    let app_port = std::env::var("APP_PORT").unwrap_or_else(|_| "8008".to_string());
 
     let control_plane_tcp = format!("{}:{}", control_plane_host, tcp_proxy_port);
     let control_plane_dns = format!("{}:{}", control_plane_host, dns_proxy_port);
+    let app_addr = format!("127.0.0.1:{}", app_port);
 
     info!("data-plane starting");
 
     tokio::join!(
         run_tcp_proxy(control_plane_tcp),
         run_dns_proxy(control_plane_dns),
+        run_ingress_listener(app_addr),
     );
 }
