@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod bridge;
+pub mod server;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// VSock CID of the enclave. In AWS Nitro the enclave's own CID is assigned
+/// at launch; adjust this value or read it from an env var as needed.
+#[cfg(feature = "enclave")]
+pub const ENCLAVE_CID: u32 = 16;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+/// VSock CID of the parent/host. In AWS Nitro the parent is always CID 3.
+#[cfg(feature = "enclave")]
+pub const PARENT_CID: u32 = 3;

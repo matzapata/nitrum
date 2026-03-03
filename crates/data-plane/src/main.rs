@@ -3,13 +3,23 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tracing::{error, info, warn};
 
+use shared::bridge::{Bridge, BridgeInterface, Direction};
+use shared::server::Listener;
+
+/// Port the iptables REDIRECT rule sends egress TCP traffic to.
 const TCP_PROXY_PORT: u16 = 8080;
 const DNS_LISTEN_ADDR: &str = "127.0.0.1:53";
+/// Port the data-plane listens on for ingress from the control-plane.
 const INGRESS_LISTEN_PORT: u16 = 7777;
+/// Port the control-plane's TCP proxy is listening on.
+const CONTROL_PLANE_TCP_PORT: u16 = 8181;
+/// Port the control-plane's DNS proxy is listening on.
+const CONTROL_PLANE_DNS_PORT: u16 = 5354;
+
 const SOL_IP: libc::c_int = 0;
 const SO_ORIGINAL_DST: libc::c_int = 80;
 
@@ -38,11 +48,11 @@ fn get_original_dst(stream: &TcpStream) -> io::Result<SocketAddrV4> {
 
 // ── TCP egress proxy ──────────────────────────────────────────────────────────
 
-async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr, control_plane_addr: String) {
+async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
     let original_dst = match get_original_dst(&client) {
         Ok(dst) => dst,
         Err(e) => {
-            warn!(client = %client_addr, error = %e, "failed to get original destination, dropping connection");
+            warn!(client = %client_addr, error = %e, "tcp: failed to get original destination, dropping connection");
             return;
         }
     };
@@ -53,20 +63,27 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr, c
         "tcp: accepted connection, forwarding to control plane"
     );
 
-    let mut upstream = match TcpStream::connect(&control_plane_addr).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(control_plane = %control_plane_addr, error = %e, "tcp: failed to connect to control plane");
-            return;
-        }
-    };
+    let mut upstream =
+        match Bridge::get_client_connection(CONTROL_PLANE_TCP_PORT, Direction::EnclaveToHost)
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "tcp: failed to connect to control plane");
+                return;
+            }
+        };
 
     // Send 6-byte header: [4 bytes IPv4 big-endian][2 bytes port big-endian]
     let ip_bytes = original_dst.ip().octets();
     let port_bytes = original_dst.port().to_be_bytes();
     let header = [
-        ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3],
-        port_bytes[0], port_bytes[1],
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
+        port_bytes[0],
+        port_bytes[1],
     ];
 
     if let Err(e) = upstream.write_all(&header).await {
@@ -90,19 +107,18 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr, c
     }
 }
 
-async fn run_tcp_proxy(control_plane_addr: String) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", TCP_PROXY_PORT))
+async fn run_tcp_proxy() {
+    let listener = TcpListener::bind(format!("0.0.0.0:{TCP_PROXY_PORT}"))
         .await
         .expect("failed to bind TCP proxy");
 
-    info!(port = TCP_PROXY_PORT, control_plane = %control_plane_addr, "tcp proxy listening");
+    info!(port = TCP_PROXY_PORT, "tcp proxy listening");
 
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let cp_addr = control_plane_addr.clone();
                 tokio::spawn(async move {
-                    handle_tcp_connection(stream, addr, cp_addr).await;
+                    handle_tcp_connection(stream, addr).await;
                 });
             }
             Err(e) => error!(error = %e, "tcp: accept error"),
@@ -112,7 +128,7 @@ async fn run_tcp_proxy(control_plane_addr: String) {
 
 // ── DNS proxy (UDP → TCP tunnel to control plane) ────────────────────────────
 
-async fn run_dns_proxy(control_plane_dns_addr: String) {
+async fn run_dns_proxy() {
     let listen_addr = std::env::var("DNS_LISTEN_ADDR")
         .unwrap_or_else(|_| DNS_LISTEN_ADDR.to_string());
 
@@ -122,7 +138,7 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
             .expect("failed to bind DNS proxy"),
     );
 
-    info!(addr = %listen_addr, control_plane = %control_plane_dns_addr, "dns proxy listening");
+    info!(addr = %listen_addr, "dns proxy listening");
 
     let mut buf = vec![0u8; 4096];
     loop {
@@ -135,18 +151,21 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
         };
 
         let query = buf[..len].to_vec();
-        let cp_addr = control_plane_dns_addr.clone();
         let sock = Arc::clone(&socket);
 
         tokio::spawn(async move {
             info!(client = %client_addr, bytes = len, "dns: received query, forwarding to control plane");
 
-            // One TCP connection per DNS query (mirrors the VSock bridge approach).
-            // The control-plane reads the raw bytes, resolves, and writes the raw response.
-            let mut stream = match TcpStream::connect(&cp_addr).await {
+            // One bridge connection per DNS query.
+            let mut stream = match Bridge::get_client_connection(
+                CONTROL_PLANE_DNS_PORT,
+                Direction::EnclaveToHost,
+            )
+            .await
+            {
                 Ok(s) => s,
                 Err(e) => {
-                    error!(control_plane = %cp_addr, error = %e, "dns: failed to connect to control plane");
+                    error!(error = %e, "dns: failed to connect to control plane");
                     return;
                 }
             };
@@ -155,7 +174,7 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
                 error!(error = %e, "dns: failed to write query");
                 return;
             }
-            // Signal end of request so the control-plane's read completes
+            // Signal end of request so the control-plane's read_to_end completes.
             if let Err(e) = stream.shutdown().await {
                 error!(error = %e, "dns: failed to shutdown write side");
                 return;
@@ -164,8 +183,14 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
             let mut resp = [0u8; 512];
             let resp_len = match stream.read(&mut resp).await {
                 Ok(n) if n > 0 => n,
-                Ok(_) => { error!("dns: empty response from control plane"); return; }
-                Err(e) => { error!(error = %e, "dns: failed to read response"); return; }
+                Ok(_) => {
+                    error!("dns: empty response from control plane");
+                    return;
+                }
+                Err(e) => {
+                    error!(error = %e, "dns: failed to read response");
+                    return;
+                }
             };
 
             info!(client = %client_addr, bytes = resp_len, "dns: received response, forwarding to client");
@@ -179,8 +204,11 @@ async fn run_dns_proxy(control_plane_dns_addr: String) {
 
 // ── TCP ingress listener ──────────────────────────────────────────────────────
 
-async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAddr, app_addr: String) {
-    info!(client = %client_addr, app = %app_addr, "ingress: new connection, forwarding to app");
+async fn handle_ingress_connection<S>(mut client: S, app_addr: String)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    info!(app = %app_addr, "ingress: new connection, forwarding to app");
 
     let mut upstream = match TcpStream::connect(&app_addr).await {
         Ok(s) => s,
@@ -193,20 +221,19 @@ async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAdd
     match io::copy_bidirectional(&mut client, &mut upstream).await {
         Ok((from_client, from_upstream)) => {
             info!(
-                client = %client_addr,
                 bytes_from_client = from_client,
                 bytes_from_upstream = from_upstream,
                 "ingress: connection closed"
             );
         }
         Err(e) => {
-            warn!(client = %client_addr, error = %e, "ingress: connection error");
+            warn!(error = %e, "ingress: connection error");
         }
     }
 }
 
 async fn run_ingress_listener(app_addr: String) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", INGRESS_LISTEN_PORT))
+    let mut listener = Bridge::get_listener(INGRESS_LISTEN_PORT, Direction::HostToEnclave)
         .await
         .expect("failed to bind ingress listener");
 
@@ -214,10 +241,10 @@ async fn run_ingress_listener(app_addr: String) {
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => {
+            Ok(stream) => {
                 let app = app_addr.clone();
                 tokio::spawn(async move {
-                    handle_ingress_connection(stream, addr, app).await;
+                    handle_ingress_connection(stream, app).await;
                 });
             }
             Err(e) => error!(error = %e, "ingress: accept error"),
@@ -236,20 +263,14 @@ async fn main() {
         )
         .init();
 
-    let control_plane_host = std::env::var("CONTROL_PLANE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let tcp_proxy_port = std::env::var("CONTROL_PLANE_PORT").unwrap_or_else(|_| "8181".to_string());
-    let dns_proxy_port = std::env::var("CONTROL_PLANE_DNS_PORT").unwrap_or_else(|_| "5354".to_string());
     let app_port = std::env::var("APP_PORT").unwrap_or_else(|_| "8008".to_string());
-
-    let control_plane_tcp = format!("{}:{}", control_plane_host, tcp_proxy_port);
-    let control_plane_dns = format!("{}:{}", control_plane_host, dns_proxy_port);
-    let app_addr = format!("127.0.0.1:{}", app_port);
+    let app_addr = format!("127.0.0.1:{app_port}");
 
     info!("data-plane starting");
 
     tokio::join!(
-        run_tcp_proxy(control_plane_tcp),
-        run_dns_proxy(control_plane_dns),
+        run_tcp_proxy(),
+        run_dns_proxy(),
         run_ingress_listener(app_addr),
     );
 }

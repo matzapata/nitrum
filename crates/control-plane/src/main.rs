@@ -1,20 +1,31 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tracing::{error, info, warn};
 
+use shared::bridge::{Bridge, BridgeInterface, Direction};
+use shared::server::Listener;
+
+/// Port the control-plane's TCP proxy listens on (matches data-plane's CONTROL_PLANE_TCP_PORT).
 const TCP_PROXY_PORT: u16 = 8181;
+/// Port the control-plane's DNS proxy listens on (matches data-plane's CONTROL_PLANE_DNS_PORT).
 const DNS_PROXY_PORT: u16 = 5354;
+/// Port the control-plane listens on for external ingress traffic.
 const INGRESS_PROXY_PORT: u16 = 3031;
+/// Port the data-plane's ingress listener is bound to (matches data-plane's INGRESS_LISTEN_PORT).
+const ENCLAVE_INGRESS_PORT: u16 = 7777;
 
 // ── TCP egress proxy ──────────────────────────────────────────────────────────
 
-async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
+async fn handle_tcp_connection<S>(mut client: S)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
     // Read 6-byte header: [4 bytes IPv4 big-endian][2 bytes port big-endian]
     let mut header = [0u8; 6];
     if let Err(e) = client.read_exact(&mut header).await {
-        warn!(client = %client_addr, error = %e, "tcp: failed to read destination header");
+        warn!(error = %e, "tcp: failed to read destination header");
         return;
     }
 
@@ -22,7 +33,7 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
     let port = u16::from_be_bytes([header[4], header[5]]);
     let target = SocketAddrV4::new(ip, port);
 
-    info!(client = %client_addr, target = %target, "tcp: received connection, connecting to target");
+    info!(target = %target, "tcp: received connection, connecting to target");
 
     let mut upstream = match TcpStream::connect(target).await {
         Ok(s) => s,
@@ -35,7 +46,6 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
     match io::copy_bidirectional(&mut client, &mut upstream).await {
         Ok((from_client, from_upstream)) => {
             info!(
-                client = %client_addr,
                 target = %target,
                 bytes_from_client = from_client,
                 bytes_from_upstream = from_upstream,
@@ -43,13 +53,13 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
             );
         }
         Err(e) => {
-            warn!(client = %client_addr, target = %target, error = %e, "tcp: connection error");
+            warn!(target = %target, error = %e, "tcp: connection error");
         }
     }
 }
 
 async fn run_tcp_proxy() {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", TCP_PROXY_PORT))
+    let mut listener = Bridge::get_listener(TCP_PROXY_PORT, Direction::EnclaveToHost)
         .await
         .expect("failed to bind TCP proxy");
 
@@ -57,9 +67,9 @@ async fn run_tcp_proxy() {
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => {
+            Ok(stream) => {
                 tokio::spawn(async move {
-                    handle_tcp_connection(stream, addr).await;
+                    handle_tcp_connection(stream).await;
                 });
             }
             Err(e) => error!(error = %e, "tcp: accept error"),
@@ -69,18 +79,20 @@ async fn run_tcp_proxy() {
 
 // ── DNS proxy (TCP tunnel → upstream UDP resolver) ───────────────────────────
 
-async fn handle_dns_connection(mut client: TcpStream, client_addr: SocketAddr, upstream_dns: String) {
-    // Read raw DNS query bytes (one per connection — the enclave shuts down its
-    // write side when done, so read_to_end captures exactly the query).
+async fn handle_dns_connection<S>(mut client: S, upstream_dns: String)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    // The data-plane shuts down its write side after sending the query, so
+    // read_to_end captures exactly one DNS request per connection.
     let mut query = Vec::new();
     if let Err(e) = client.read_to_end(&mut query).await {
-        warn!(client = %client_addr, error = %e, "dns: failed to read query");
+        warn!(error = %e, "dns: failed to read query");
         return;
     }
 
-    info!(client = %client_addr, bytes = query.len(), upstream = %upstream_dns, "dns: received query, forwarding upstream");
+    info!(bytes = query.len(), upstream = %upstream_dns, "dns: received query, forwarding upstream");
 
-    // Forward raw DNS bytes to upstream resolver via UDP
     let udp = match UdpSocket::bind("0.0.0.0:0").await {
         Ok(s) => s,
         Err(e) => {
@@ -103,7 +115,7 @@ async fn handle_dns_connection(mut client: TcpStream, client_addr: SocketAddr, u
         }
     };
 
-    info!(client = %client_addr, bytes = resp_len, "dns: received response, sending back");
+    info!(bytes = resp_len, "dns: received response, sending back");
 
     if let Err(e) = client.write_all(&resp_buf[..resp_len]).await {
         error!(error = %e, "dns: failed to write response");
@@ -111,7 +123,7 @@ async fn handle_dns_connection(mut client: TcpStream, client_addr: SocketAddr, u
 }
 
 async fn run_dns_proxy(upstream_dns: String) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", DNS_PROXY_PORT))
+    let mut listener = Bridge::get_listener(DNS_PROXY_PORT, Direction::EnclaveToHost)
         .await
         .expect("failed to bind DNS proxy");
 
@@ -119,10 +131,10 @@ async fn run_dns_proxy(upstream_dns: String) {
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => {
+            Ok(stream) => {
                 let dns_upstream = upstream_dns.clone();
                 tokio::spawn(async move {
-                    handle_dns_connection(stream, addr, dns_upstream).await;
+                    handle_dns_connection(stream, dns_upstream).await;
                 });
             }
             Err(e) => error!(error = %e, "dns: accept error"),
@@ -132,16 +144,17 @@ async fn run_dns_proxy(upstream_dns: String) {
 
 // ── TCP ingress proxy ─────────────────────────────────────────────────────────
 
-async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAddr, enclave_addr: String) {
-    info!(client = %client_addr, enclave = %enclave_addr, "ingress: new connection, forwarding to enclave");
+async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAddr) {
+    info!(client = %client_addr, "ingress: new connection, forwarding to enclave");
 
-    let mut upstream = match TcpStream::connect(&enclave_addr).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(enclave = %enclave_addr, error = %e, "ingress: failed to connect to enclave");
-            return;
-        }
-    };
+    let mut upstream =
+        match Bridge::get_client_connection(ENCLAVE_INGRESS_PORT, Direction::HostToEnclave).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "ingress: failed to connect to enclave");
+                return;
+            }
+        };
 
     match io::copy_bidirectional(&mut client, &mut upstream).await {
         Ok((from_client, from_upstream)) => {
@@ -158,19 +171,18 @@ async fn handle_ingress_connection(mut client: TcpStream, client_addr: SocketAdd
     }
 }
 
-async fn run_ingress_proxy(enclave_host: String, enclave_ingress_port: u16) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", INGRESS_PROXY_PORT))
+async fn run_ingress_proxy() {
+    let listener = TcpListener::bind(format!("0.0.0.0:{INGRESS_PROXY_PORT}"))
         .await
         .expect("failed to bind ingress proxy");
 
-    info!(port = INGRESS_PROXY_PORT, enclave = %enclave_host, enclave_port = enclave_ingress_port, "ingress proxy listening");
+    info!(port = INGRESS_PROXY_PORT, "ingress proxy listening");
 
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let enclave_addr = format!("{}:{}", enclave_host, enclave_ingress_port);
                 tokio::spawn(async move {
-                    handle_ingress_connection(stream, addr, enclave_addr).await;
+                    handle_ingress_connection(stream, addr).await;
                 });
             }
             Err(e) => error!(error = %e, "ingress: accept error"),
@@ -190,17 +202,12 @@ async fn main() {
         .init();
 
     let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8:53".to_string());
-    let enclave_host = std::env::var("ENCLAVE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let enclave_ingress_port = std::env::var("ENCLAVE_INGRESS_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(7777u16);
 
     info!("control-plane starting");
 
     tokio::join!(
         run_tcp_proxy(),
         run_dns_proxy(upstream_dns),
-        run_ingress_proxy(enclave_host, enclave_ingress_port),
+        run_ingress_proxy(),
     );
 }

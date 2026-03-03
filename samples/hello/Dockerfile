@@ -1,4 +1,5 @@
-FROM nitrum/data-plane:latest
+ARG DATA_PLANE_IMAGE=nitrum/data-plane:dev
+FROM ${DATA_PLANE_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \

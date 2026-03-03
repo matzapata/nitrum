@@ -1,5 +1,17 @@
+# ── Dev (TCP transport) ───────────────────────────────────────────────────────
+
 build:
-    docker build -t nitrum/hello:latest .
+    docker build -t nitrum/hello:dev .
+
+rebuild:
+    docker build --no-cache -t nitrum/hello:dev .
+
+# ── Enclave (VSock transport) ─────────────────────────────────────────────────
+
+build-enclave:
+    docker build --build-arg DATA_PLANE_IMAGE=nitrum/data-plane:latest -t nitrum/hello:latest .
+
+# ── Compose ───────────────────────────────────────────────────────────────────
 
 up:
     docker compose up
@@ -9,9 +21,6 @@ down:
 
 logs:
     docker compose logs -f
-
-rebuild:
-    docker build --no-cache -t nitrum/hello:latest .
 
 restart:
     docker compose down && docker compose up

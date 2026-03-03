@@ -2,7 +2,7 @@ name: nitrum
 
 services:
   control-plane:
-    image: nitrum/control-plane:latest
+    image: nitrum/control-plane:dev
     container_name: nitrum-control-plane
     ports:
       - "8181:8181"
@@ -18,12 +18,9 @@ services:
       # Docker's embedded DNS — handles internal container names and forwards
       # unknown domains upstream. Available in every container at 127.0.0.11.
       - DNS_UPSTREAM=127.0.0.11:53
-      # TODO: Service name resolves via Docker's internal DNS within the nitrum network.
-      - ENCLAVE_HOST=enclave
-      - ENCLAVE_INGRESS_PORT=7777
 
   enclave:
-    image: nitrum/hello:latest
+    image: nitrum/hello:dev
     container_name: nitrum-enclave
     depends_on:
       - control-plane
@@ -34,9 +31,6 @@ services:
         ipv4_address: 172.20.0.11
     environment:
       - RUST_LOG=info
-      - CONTROL_PLANE_HOST=172.20.0.10
-      - CONTROL_PLANE_PORT=8181
-      - CONTROL_PLANE_DNS_PORT=5354
       - APP_PORT=8008
 
 networks:
