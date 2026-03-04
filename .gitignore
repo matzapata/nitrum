@@ -1,4 +1,1 @@
 /target/
-
-# Generated TLS certificates – run `just gen-certs` inside samples/hello to create them
-samples/hello/certs/*.pem

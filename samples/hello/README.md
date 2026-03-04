@@ -5,6 +5,5 @@ Build with: `just build`
 
 Run with: `just up`
 
-Test ingress with: `curl http://localhost:3031/health`
+Run e2e tests with: `just e2e`
 
-Test egress with: `curl http://localhost:3031/egress`

@@ -1,0 +1,12 @@
+[tls_termination]
+# When true, the data-plane terminates TLS on ingress and forwards plain HTTP to the app.
+# When false, ingress connections are forwarded as raw TCP (no TLS handling).
+enabled = true
+
+# When true, use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
+# When false, a self-signed certificate is generated at startup for the configured domain.
+acme = false
+
+# Domain name used for the TLS certificate (subject / SAN).
+# For self-signed certs this is the CN; for ACME this will be the domain to request.
+domain = "localhost"

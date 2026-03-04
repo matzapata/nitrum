@@ -13,4 +13,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
 tokio-rustls = "0.26"
-rustls-pemfile = "2"
+rcgen = "0.14"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
