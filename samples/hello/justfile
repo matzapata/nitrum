@@ -1,3 +1,16 @@
+# ── Certificates ──────────────────────────────────────────────────────────────
+
+# Generate a self-signed TLS certificate valid for 365 days.
+# Run this once before building TLS-enabled images.
+gen-certs:
+    mkdir -p certs
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout certs/key.pem \
+        -out certs/cert.pem \
+        -days 365 \
+        -nodes \
+        -subj "/CN=localhost"
+
 # ── Dev (TCP transport) ───────────────────────────────────────────────────────
 
 build:
@@ -5,6 +18,7 @@ build:
 
 rebuild:
     docker build --no-cache -t nitrum/hello:dev .
+
 
 # ── Enclave (VSock transport) ─────────────────────────────────────────────────
 

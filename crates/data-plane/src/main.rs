@@ -7,6 +7,9 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tracing::{error, info, warn};
 
+const TLS_CERT_PATH: &str = "/app/certs/cert.pem";
+const TLS_KEY_PATH: &str = "/app/certs/key.pem";
+
 use shared::bridge::{Bridge, BridgeInterface, Direction};
 use shared::server::Listener;
 
@@ -204,6 +207,37 @@ async fn run_dns_proxy() {
 
 // ── TCP ingress listener ──────────────────────────────────────────────────────
 
+fn make_tls_acceptor() -> tokio_rustls::TlsAcceptor {
+    use tokio_rustls::rustls::ServerConfig;
+    use rustls_pemfile::{certs, private_key};
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let cert_path =
+        std::env::var("TLS_CERT_PATH").unwrap_or_else(|_| TLS_CERT_PATH.to_string());
+    let key_path =
+        std::env::var("TLS_KEY_PATH").unwrap_or_else(|_| TLS_KEY_PATH.to_string());
+
+    let cert_chain = certs(&mut BufReader::new(
+        File::open(&cert_path).expect("TLS cert file not found"),
+    ))
+    .collect::<Result<Vec<_>, _>>()
+    .expect("failed to parse TLS certificate");
+
+    let key = private_key(&mut BufReader::new(
+        File::open(&key_path).expect("TLS key file not found"),
+    ))
+    .expect("failed to read TLS key file")
+    .expect("no private key found in TLS key file");
+
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .expect("invalid TLS server config");
+
+    tokio_rustls::TlsAcceptor::from(Arc::new(config))
+}
+
 async fn handle_ingress_connection<S>(mut client: S, app_addr: String)
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
@@ -233,6 +267,8 @@ where
 }
 
 async fn run_ingress_listener(app_addr: String) {
+    let tls_acceptor = make_tls_acceptor();
+
     let mut listener = Bridge::get_listener(INGRESS_LISTEN_PORT, Direction::HostToEnclave)
         .await
         .expect("failed to bind ingress listener");
@@ -243,8 +279,13 @@ async fn run_ingress_listener(app_addr: String) {
         match listener.accept().await {
             Ok(stream) => {
                 let app = app_addr.clone();
+                let acceptor = tls_acceptor.clone();
+
                 tokio::spawn(async move {
-                    handle_ingress_connection(stream, app).await;
+                    match acceptor.accept(stream).await {
+                        Ok(tls_stream) => handle_ingress_connection(tls_stream, app).await,
+                        Err(e) => error!(error = %e, "ingress: TLS handshake failed"),
+                    }
                 });
             }
             Err(e) => error!(error = %e, "ingress: accept error"),
