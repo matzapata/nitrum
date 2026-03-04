@@ -16,3 +16,4 @@ tokio-rustls = "0.26"
 rcgen = "0.14"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+regex = "1"

@@ -14,8 +14,19 @@ pub struct TlsTermination {
 }
 
 #[derive(serde::Deserialize)]
+pub struct Egress {
+    /// When false, all outbound traffic is allowed regardless of whitelist.
+    pub enabled: bool,
+
+    /// Regex patterns for allowed destination hostnames.
+    /// Only evaluated when enabled = true. An empty list blocks all DNS-resolved traffic.
+    pub whitelist: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
 pub struct Config {
     pub tls_termination: TlsTermination,
+    pub egress: Egress,
 }
 
 pub fn load() -> Config {

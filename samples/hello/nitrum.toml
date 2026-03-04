@@ -3,10 +3,21 @@
 # When false, ingress connections are forwarded as raw TCP (no TLS handling).
 enabled = true
 
-# When true, use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
+# When true (future), use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
 # When false, a self-signed certificate is generated at startup for the configured domain.
 acme = false
 
 # Domain name used for the TLS certificate (subject / SAN).
 # For self-signed certs this is the CN; for ACME this will be the domain to request.
 domain = "localhost"
+
+[egress]
+# When false, all outbound traffic is allowed regardless of the whitelist below.
+enabled = true
+
+# Regex patterns matched against outbound hostnames at DNS query time.
+# A hostname must match at least one pattern to be resolved. Blocked queries receive
+# NXDOMAIN. Connections to hard-coded IPs (bypassing DNS) are not filtered.
+whitelist = [
+    "httpbin\\.org$",
+]

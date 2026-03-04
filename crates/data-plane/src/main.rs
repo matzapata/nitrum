@@ -11,6 +11,7 @@ use shared::bridge::{Bridge, BridgeInterface, Direction};
 use shared::server::Listener;
 
 mod config;
+mod egress;
 
 /// Port the iptables REDIRECT rule sends egress TCP traffic to.
 const TCP_PROXY_PORT: u16 = 8080;
@@ -50,7 +51,7 @@ fn get_original_dst(stream: &TcpStream) -> io::Result<SocketAddrV4> {
 
 // ── TCP egress proxy ──────────────────────────────────────────────────────────
 
-async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
+async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr, _egress: Arc<egress::EgressFilter>) {
     let original_dst = match get_original_dst(&client) {
         Ok(dst) => dst,
         Err(e) => {
@@ -109,7 +110,7 @@ async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
     }
 }
 
-async fn run_tcp_proxy() {
+async fn run_tcp_proxy(egress: Arc<egress::EgressFilter>) {
     let listener = TcpListener::bind(format!("0.0.0.0:{TCP_PROXY_PORT}"))
         .await
         .expect("failed to bind TCP proxy");
@@ -119,8 +120,9 @@ async fn run_tcp_proxy() {
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
+                let egress = Arc::clone(&egress);
                 tokio::spawn(async move {
-                    handle_tcp_connection(stream, addr).await;
+                    handle_tcp_connection(stream, addr, egress).await;
                 });
             }
             Err(e) => error!(error = %e, "tcp: accept error"),
@@ -130,7 +132,7 @@ async fn run_tcp_proxy() {
 
 // ── DNS proxy (UDP → TCP tunnel to control plane) ────────────────────────────
 
-async fn run_dns_proxy() {
+async fn run_dns_proxy(egress: Arc<egress::EgressFilter>) {
     let listen_addr = std::env::var("DNS_LISTEN_ADDR")
         .unwrap_or_else(|_| DNS_LISTEN_ADDR.to_string());
 
@@ -154,9 +156,22 @@ async fn run_dns_proxy() {
 
         let query = buf[..len].to_vec();
         let sock = Arc::clone(&socket);
+        let egress = Arc::clone(&egress);
 
         tokio::spawn(async move {
-            info!(client = %client_addr, bytes = len, "dns: received query, forwarding to control plane");
+            let hostname = egress::parse_query_name(&query);
+
+            // Egress whitelist check — block before forwarding to control-plane.
+            if let Some(ref h) = hostname {
+                if !egress.is_allowed(h) {
+                    warn!(hostname = %h, "dns: egress blocked by whitelist");
+                    let nxdomain = egress::make_nxdomain(&query);
+                    let _ = sock.send_to(&nxdomain, client_addr).await;
+                    return;
+                }
+            }
+
+            info!(client = %client_addr, bytes = len, hostname = ?hostname, "dns: received query, forwarding to control plane");
 
             // One bridge connection per DNS query.
             let mut stream = match Bridge::get_client_connection(
@@ -305,14 +320,19 @@ async fn main() {
 
     let config = config::load();
 
+    let egress_filter = Arc::new(egress::EgressFilter::new(
+        config.egress.enabled,
+        &config.egress.whitelist,
+    ));
+
     let app_port = std::env::var("APP_PORT").unwrap_or_else(|_| "8008".to_string());
     let app_addr = format!("127.0.0.1:{app_port}");
 
     info!("data-plane starting");
 
     tokio::join!(
-        run_tcp_proxy(),
-        run_dns_proxy(),
+        run_tcp_proxy(Arc::clone(&egress_filter)),
+        run_dns_proxy(Arc::clone(&egress_filter)),
         run_ingress_listener(app_addr, config),
     );
 }
