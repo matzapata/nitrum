@@ -6,7 +6,7 @@ services:
     container_name: nitrum-control-plane
     ports:
       - "8181:8181"
-      - "3031:3031"
+      - "443:443"
     networks:
       nitrum:
         # Static IP so the enclave can reach the control-plane by address,
@@ -18,6 +18,8 @@ services:
       # Docker's embedded DNS — handles internal container names and forwards
       # unknown domains upstream. Available in every container at 127.0.0.11.
       - DNS_UPSTREAM=127.0.0.11:53
+      # Set to 80 if tls_termination.enabled = false in the data-plane config.
+      - INGRESS_PORT=443
 
   enclave:
     image: nitrum/hello:dev

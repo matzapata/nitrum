@@ -28,11 +28,11 @@ restart:
 
 # ── E2E ───────────────────────────────────────────────────────────────────────
 
-# Hit all app endpoints via ingress (HTTPS on port 3031). Requires stack to be up.
+# Hit all app endpoints via ingress (HTTPS on port 443).
 e2e:
     #!/usr/bin/env bash
     set -e
-    base="https://localhost:3031"
+    base="https://localhost"
     echo "→ GET $base/health"
     curl -sfk "$base/health" && echo ""
     echo "→ GET $base/egress"
