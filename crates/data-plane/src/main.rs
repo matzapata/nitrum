@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use tracing::info;
 
+mod api;
+mod attestation;
 mod config;
 mod constants;
 mod dns_proxy;
@@ -28,11 +30,15 @@ async fn main() {
     let app_port = std::env::var("APP_PORT").unwrap_or_else(|_| "8008".to_string());
     let app_addr = format!("127.0.0.1:{app_port}");
 
+    let api_port = std::env::var("NITRUM_API_PORT").unwrap_or_else(|_| "3000".to_string());
+    let api_addr = format!("127.0.0.1:{api_port}");
+
     info!("data-plane starting");
 
     tokio::join!(
         tcp_proxy::run(Arc::clone(&egress_filter)),
         dns_proxy::run(Arc::clone(&egress_filter)),
         ingress::run(app_addr, config.tls_termination),
+        api::run(api_addr),
     );
 }
