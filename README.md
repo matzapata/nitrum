@@ -9,6 +9,11 @@ TODO: TLS certificate sync
 
 KMS to encrypt decript data (use public key to wrap a sync key and store the sync key in db)
 
+IMDS? 
+- KMS
+- Cloudwatch
+- Dynamodb
+
 attestations
 JS sdk for attestation verification client side
 
