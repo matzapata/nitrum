@@ -1,16 +1,29 @@
+DOCKERHUB_USER := "matzapata"
+
 # ── Dev (TCP transport) ───────────────────────────────────────────────────────
 
-build:
-    docker build -t nitrum/hello:dev .
+build-dev:
+    docker build --platform linux/amd64 -t nitrum/hello:dev .
 
-rebuild:
-    docker build --no-cache -t nitrum/hello:dev .
+rebuild-dev:
+    docker build --platform linux/amd64 --no-cache -t nitrum/hello:dev .
+
+push-dev: rebuild-dev
+    docker tag nitrum/hello:dev {{DOCKERHUB_USER}}/nitrum-hello:dev
+    docker push {{DOCKERHUB_USER}}/nitrum-hello:dev
 
 
 # ── Enclave (VSock transport) ─────────────────────────────────────────────────
 
-build-enclave:
-    docker build --build-arg DATA_PLANE_IMAGE=nitrum/data-plane:latest -t nitrum/hello:latest .
+build:
+    docker build --build-arg DATA_PLANE_IMAGE=matzapata/nitrum-data-plane:latest -t nitrum/hello:latest .
+
+rebuild:
+    docker build --platform linux/amd64 --no-cache --build-arg DATA_PLANE_IMAGE=matzapata/nitrum-data-plane:latest -t nitrum/hello:latest .
+
+push: 
+    docker tag nitrum/hello:latest {{DOCKERHUB_USER}}/nitrum-hello:latest
+    docker push {{DOCKERHUB_USER}}/nitrum-hello:latest
 
 # ── Compose ───────────────────────────────────────────────────────────────────
 

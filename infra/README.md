@@ -20,6 +20,7 @@ The `cdk.json` file tells the CDK Toolkit how to execute your app.
 export DEPLOYMENT=dev
 export CDK_DEPLOY_REGION=sa-east-1
 export CDK_DEPLOY_ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
+export APP_DIRECTORY=/Users/matzapata/git/enclaves-poc/nitrum/samples/hello
 
 cdk deploy NitrumStack -O out.json --require-approval never
 ```
@@ -31,11 +32,68 @@ This document covers common issues and how to debug the nitrum deployment
 
 ---
 
-## Getting cloudwatch logs
-
 ```bash
+export DEPLOYMENT=dev
+export CDK_DEPLOY_REGION=sa-east-1
+export CDK_DEPLOY_ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
+export APP_DIRECTORY=/Users/matzapata/git/enclaves-poc/nitrum/samples/hello
+aws ssm start-session --target $(./scripts/get_asg_instances.sh "$(jq -r '.NitrumStack.ASGGroupName' out.json)") --region "$CDK_DEPLOY_REGION"
+
+# rebuild
+sudo -H -u ec2-user bash /home/ec2-user/app/server/build.sh
+
+# Get services statuses
+sudo systemctl status control-plane.service
+sudo systemctl status enclave.service
+
+# Get enclave
+nitro-cli describe-enclaves
+
+sudo cat /var/log/user-data.log
+sudo journalctl -u control-plane.service -n 200
+sudo journalctl -u enclave.service -n 200
+
+# terminate it all
+sudo systemctl stop control-plane.service
+sudo systemctl stop enclave.service
+sudo nitro-cli terminate-enclave --all
+sudo docker rm -f nitrum-control-plane
+
+# Start with console attached
+sudo nitro-cli run-enclave --cpu-count 2 --memory 4320 --eif-path "/home/ec2-user/app/server/enclave.eif" --enclave-cid 16 --enclave-name app --attach-console
+
 aws logs tail /nitrum/${CDK_PREFIX}/enclave --follow --region $CDK_DEPLOY_REGION --since 1h
 ```
+
+<!-- TODO: better organize these docs -->
+
+(
+sudo docker run --rm --name nitrum-control-plane \
+  --privileged \
+  --security-opt seccomp=unconfined \
+  -p 443:443 \
+  -e RUST_LOG=info \
+  -e INGRESS_PORT=443 \
+  nitrum/control-plane:latest \
+| sed 's/^/[control-plane] /'
+) &
+(
+sudo nitro-cli run-enclave \
+  --cpu-count 2 \
+  --memory 4320 \
+  --eif-path "/home/ec2-user/app/server/enclave.eif" \
+  --enclave-cid 16 \
+  --enclave-name app \
+  --attach-console \
+| sed 's/^/[enclave] /'
+) &
+(
+while true; do
+  curl -s https://localhost:443 | sed 's/^/[curl] /'
+  sleep 3
+done
+) &
+wait
 
 ---
 
@@ -53,7 +111,8 @@ Ensure SSM Session Manager is available (instance role with `AmazonSSMManagedIns
 **Check host services:**
 
 ```bash
-sudo systemctl status enclave-watchdog.service
+sudo systemctl status control-plane.service
+sudo systemctl status enclave.service
 ```
 
 All should be active. Inspect logs with `journalctl -u <unit> -f` if needed.
@@ -76,11 +135,14 @@ If the output is `[]`, no enclave is running.
 
 1. Stop the watchdog so it does not restart the enclave while you debug:
    ```bash
-   sudo systemctl stop enclave-watchdog.service
+   sudo systemctl stop control-plane.service
+   sudo systemctl stop enclave.service
    sudo nitro-cli terminate-enclave --all
    ```
 2. Start the enclave with console attached (paths may differ; adjust if your playbook uses different locations):
    ```bash
+
+
    sudo nitro-cli run-enclave --cpu-count 2 --memory 4320 \
      --eif-path "/home/ec2-user/app/server/enclave.eif" \
      --enclave-cid 16 --enclave-name app --attach-console

@@ -1,5 +1,5 @@
 ARG DATA_PLANE_IMAGE=nitrum/data-plane:dev
-FROM ${DATA_PLANE_IMAGE}
+FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
@@ -13,4 +13,4 @@ COPY src/main.js src/main.js
 
 COPY nitrum.toml /app/nitrum.toml
 
-CMD ["node", "src/main.js"]
+CMD ["--config", "/app/nitrum.toml", "--", "node", "/app/src/main.js"]

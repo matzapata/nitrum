@@ -11,7 +11,7 @@ use shared::bridge::{Bridge, BridgeInterface, Direction};
 use shared::{ports, protocol};
 
 use crate::constants::TCP_PROXY_PORT;
-use crate::egress::EgressFilter;
+use crate::egress::filter::EgressFilter;
 
 const SOL_IP: libc::c_int = 0;
 const SO_ORIGINAL_DST: libc::c_int = 80;

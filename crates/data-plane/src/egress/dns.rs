@@ -8,7 +8,74 @@ use shared::bridge::{Bridge, BridgeInterface, Direction};
 use shared::ports;
 
 use crate::constants::DNS_LISTEN_ADDR;
-use crate::egress::{self, EgressFilter};
+use crate::egress::filter::EgressFilter;
+
+/// Build a minimal NXDOMAIN response for the given raw DNS query.
+fn make_nxdomain(query: &[u8]) -> Vec<u8> {
+    let mut resp = Vec::with_capacity(query.len());
+
+    // Transaction ID: copy from query bytes 0-1
+    if query.len() >= 2 {
+        resp.extend_from_slice(&query[0..2]);
+    } else {
+        resp.extend_from_slice(&[0, 0]);
+    }
+
+    // Flags: QR=1 Opcode=0 AA=0 TC=0 RD=1 | RA=1 Z=0 RCODE=3 (NXDOMAIN)
+    resp.push(0x81);
+    resp.push(0x83);
+
+    // QDCOUNT: copy from query bytes 4-5
+    if query.len() >= 6 {
+        resp.extend_from_slice(&query[4..6]);
+    } else {
+        resp.extend_from_slice(&[0, 1]);
+    }
+
+    // ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
+    resp.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+
+    // Question section: everything after the 12-byte header
+    if query.len() > 12 {
+        resp.extend_from_slice(&query[12..]);
+    }
+
+    resp
+}
+
+
+/// Extract the queried hostname from a raw DNS query packet.
+///
+/// Returns `None` if the packet is malformed or too short.
+fn parse_query_name(query: &[u8]) -> Option<String> {
+    if query.len() < 13 {
+        return None;
+    }
+    let mut pos = 12; // skip 12-byte DNS header
+    let mut labels: Vec<&str> = Vec::new();
+    loop {
+        if pos >= query.len() {
+            return None;
+        }
+        let len = query[pos] as usize;
+        if len == 0 {
+            break;
+        }
+        // Compression pointers (top 2 bits set) are not expected in queries.
+        if len & 0xC0 == 0xC0 {
+            return None;
+        }
+        pos += 1;
+        if pos + len > query.len() {
+            return None;
+        }
+        labels.push(std::str::from_utf8(&query[pos..pos + len]).ok()?);
+        pos += len;
+    }
+    Some(labels.join("."))
+}
+
+
 
 pub async fn run(egress: Arc<EgressFilter>) {
     let listen_addr = std::env::var("DNS_LISTEN_ADDR")
@@ -37,13 +104,13 @@ pub async fn run(egress: Arc<EgressFilter>) {
         let egress = Arc::clone(&egress);
 
         tokio::spawn(async move {
-            let hostname = egress::parse_query_name(&query);
+            let hostname = parse_query_name(&query);
 
             // Egress whitelist check — block before forwarding to control-plane.
             if let Some(ref h) = hostname {
                 if !egress.is_allowed(h) {
                     warn!(hostname = %h, "dns: egress blocked by whitelist");
-                    let nxdomain = egress::make_nxdomain(&query);
+                    let nxdomain = make_nxdomain(&query);
                     let _ = sock.send_to(&nxdomain, client_addr).await;
                     return;
                 }
@@ -95,3 +162,4 @@ pub async fn run(egress: Arc<EgressFilter>) {
         });
     }
 }
+

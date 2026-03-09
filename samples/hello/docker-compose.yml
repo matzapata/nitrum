@@ -3,6 +3,7 @@ name: nitrum
 services:
   control-plane:
     image: nitrum/control-plane:dev
+    platform: linux/amd64
     container_name: nitrum-control-plane
     ports:
       - "8181:8181"
@@ -23,6 +24,7 @@ services:
 
   enclave:
     image: nitrum/hello:dev
+    platform: linux/amd64
     container_name: nitrum-enclave
     depends_on:
       - control-plane

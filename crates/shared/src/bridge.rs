@@ -1,6 +1,7 @@
 use crate::server::{error::ServerError, Listener};
 use async_trait::async_trait;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::info;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ContextID {
@@ -67,6 +68,7 @@ mod enclave_bridge {
                 ContextID::Enclave => crate::ENCLAVE_CID,
                 ContextID::Parent => crate::PARENT_CID,
             };
+            info!(transport = "vsock", cid, port, "bridge: opening client connection");
             Ok(VsockStream::connect(tokio_vsock::VsockAddr::new(cid, port.into())).await?)
         }
 
@@ -74,8 +76,10 @@ mod enclave_bridge {
             port: u16,
             _direction: Direction,
         ) -> Result<Self::Listener, ServerError> {
-            // VMADDR_CID_ANY (u32::MAX) — accept connections on any local CID.
-            VsockServer::bind(u32::MAX, port.into()).await
+            // VMADDR_CID_ANY — accept connections from any peer CID.
+            let cid = tokio_vsock::VMADDR_CID_ANY;
+            info!(transport = "vsock", cid, port, "bridge: binding listener");
+            VsockServer::bind(cid, port.into()).await
         }
     }
 
@@ -121,6 +125,7 @@ mod local_bridge {
             direction: Direction,
         ) -> Result<Self::ClientConnection, ServerError> {
             let ip: IpAddr = direction.get_client_cid().into();
+            info!(transport = "tcp", %ip, port, "bridge: opening client connection");
             Ok(TcpStream::connect((ip, port)).await?)
         }
 
@@ -129,6 +134,7 @@ mod local_bridge {
             _direction: Direction,
         ) -> Result<Self::Listener, ServerError> {
             // Bind to all interfaces — the client uses the specific container IP to reach us.
+            info!(transport = "tcp", addr = "0.0.0.0", port, "bridge: binding listener");
             TcpServer::bind(("0.0.0.0", port)).await
         }
     }

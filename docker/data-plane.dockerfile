@@ -25,7 +25,7 @@ RUN find crates/data-plane/src crates/shared/src -name "*.rs" | xargs touch \
     && cargo build --release -p data-plane ${FEATURES:+--features $FEATURES}
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM --platform=linux/amd64 debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
@@ -39,10 +39,7 @@ RUN useradd -u 1500 -M -s /bin/sh dataplane
 
 COPY --from=builder /build/target/release/data-plane /app/data-plane
 RUN chmod +x /app/data-plane \
-    # Allow binding to port 53 without root
+    # Allow binding to privileged ports (e.g. DNS on 53) without full root.
     && setcap 'cap_net_bind_service=+ep' /app/data-plane
 
-COPY docker/data-plane-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/data-plane"]

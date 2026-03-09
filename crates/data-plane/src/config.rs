@@ -1,5 +1,3 @@
-const CONFIG_PATH: &str = "/app/nitrum.toml";
-
 #[derive(serde::Deserialize)]
 pub struct TlsTermination {
     /// Whether to terminate TLS at the data-plane and forward plain HTTP to the app.
@@ -29,10 +27,9 @@ pub struct Config {
     pub egress: Egress,
 }
 
-pub fn load() -> Config {
-    let path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| CONFIG_PATH.to_string());
-    let contents = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read config file {path}: {e}"));
+pub fn load(path: &std::path::Path) -> Config {
+    let contents = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read config file {}: {e}", path.display()));
     toml::from_str(&contents)
-        .unwrap_or_else(|e| panic!("failed to parse config file {path}: {e}"))
+        .unwrap_or_else(|e| panic!("failed to parse config file {}: {e}", path.display()))
 }

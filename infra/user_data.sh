@@ -78,71 +78,6 @@ chown -R ec2-user:ec2-user /home/ec2-user/app
 
 sudo -H -u ec2-user bash /home/ec2-user/app/server/build.sh
 
-# ── Watchdog script ───────────────────────────────────────────────────────────
-cat > /home/ec2-user/app/watchdog.py <<'WATCHDOG_EOF'
-#!/usr/bin/env python3
-"""Enclave watchdog: polls nitro-cli every CHECK_INTERVAL seconds and restarts
-the enclave systemd unit whenever the enclave is no longer in RUNNING state."""
-
-import json
-import logging
-import subprocess
-import time
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-CHECK_INTERVAL_SECONDS = 30
-
-
-def describe_enclaves() -> list:
-    try:
-        result = subprocess.run(
-            ["nitro-cli", "describe-enclaves"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return json.loads(result.stdout)
-    except Exception as exc:
-        logger.error("describe-enclaves failed: %s", exc)
-        return []
-
-
-def is_enclave_running() -> bool:
-    enclaves = describe_enclaves()
-    return any(e.get("State") == "RUNNING" for e in enclaves)
-
-
-def restart_enclave() -> None:
-    logger.info("Restarting enclave.service via systemctl...")
-    subprocess.run(["systemctl", "restart", "enclave.service"], check=True)
-    logger.info("enclave.service restarted.")
-
-
-def main() -> None:
-    logger.info("Watchdog started (interval=%ds).", CHECK_INTERVAL_SECONDS)
-    while True:
-        try:
-            if not is_enclave_running():
-                logger.warning("Enclave not running - triggering restart.")
-                restart_enclave()
-            else:
-                logger.debug("Enclave is running.")
-        except Exception as exc:
-            logger.error("Watchdog iteration failed: %s", exc)
-        time.sleep(CHECK_INTERVAL_SECONDS)
-
-
-if __name__ == "__main__":
-    main()
-WATCHDOG_EOF
-
-chmod +x /home/ec2-user/app/watchdog.py
-
 # ── Systemd units ─────────────────────────────────────────────────────────────
 cat > /etc/systemd/system/control-plane.service <<'CTRL_EOF'
 [Unit]
@@ -157,9 +92,9 @@ RestartSec=10
 ExecStartPre=-/usr/bin/docker rm -f nitrum-control-plane
 ExecStart=/usr/bin/docker run --rm \
     --name nitrum-control-plane \
-    --device /dev/vsock \
+    --privileged \
+    --security-opt seccomp=unconfined \
     -p 443:443 \
-    -p 8181:8181 \
     -e RUST_LOG=info \
     -e INGRESS_PORT=443 \
     nitrum/control-plane:latest
@@ -193,25 +128,8 @@ RestartSec=15
 WantedBy=multi-user.target
 ENCLAVE_EOF
 
-cat > /etc/systemd/system/enclave-watchdog.service <<'WATCHDOG_SVC_EOF'
-[Unit]
-Description=Nitrum Enclave Watchdog
-After=enclave.service
-Wants=enclave.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /home/ec2-user/app/watchdog.py
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-WATCHDOG_SVC_EOF
-
 systemctl daemon-reload
 systemctl enable --now control-plane.service
 systemctl enable --now enclave.service
-systemctl enable --now enclave-watchdog.service
 
 --//--

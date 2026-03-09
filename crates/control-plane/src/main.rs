@@ -1,9 +1,8 @@
 use tracing::info;
 
 mod constants;
-mod dns_proxy;
+mod egress;
 mod ingress;
-mod tcp_proxy;
 
 #[tokio::main]
 async fn main() {
@@ -14,18 +13,16 @@ async fn main() {
         )
         .init();
 
-    let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8:53".to_string());
+    let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or(constants::DNS_UPSTREAM.to_string());
 
     let ingress_port = std::env::var("INGRESS_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(constants::INGRESS_PORT);
 
-    info!("control-plane starting");
-
     tokio::join!(
-        tcp_proxy::run(),
-        dns_proxy::run(upstream_dns),
-        ingress::run(ingress_port),
+        egress::tcp::run(),
+        egress::dns::run(upstream_dns),
+        ingress::tcp::run(ingress_port),
     );
 }

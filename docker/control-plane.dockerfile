@@ -25,7 +25,7 @@ RUN find crates/control-plane/src crates/shared/src -name "*.rs" | xargs touch \
     && cargo build --release -p control-plane ${FEATURES:+--features $FEATURES}
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM --platform=linux/amd64 debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

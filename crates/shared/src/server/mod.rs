@@ -3,6 +3,7 @@ pub mod error;
 use async_trait::async_trait;
 use error::ServerError;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::info;
 
 /// Abstracts over TCP and VSock listeners so callers can accept connections
 /// without knowing the underlying transport.
@@ -17,7 +18,9 @@ pub struct TcpServer(tokio::net::TcpListener);
 
 impl TcpServer {
     pub async fn bind(addr: impl tokio::net::ToSocketAddrs) -> Result<Self, ServerError> {
-        Ok(Self(tokio::net::TcpListener::bind(addr).await?))
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        info!(local_addr = ?listener.local_addr(), "tcp listener bound");
+        Ok(Self(listener))
     }
 }
 
@@ -37,9 +40,9 @@ pub struct VsockServer(tokio_vsock::VsockListener);
 #[cfg(feature = "enclave")]
 impl VsockServer {
     pub async fn bind(cid: u32, port: u32) -> Result<Self, ServerError> {
-        Ok(Self(tokio_vsock::VsockListener::bind(
-            tokio_vsock::VsockAddr::new(cid, port),
-        )?))
+        let listener = tokio_vsock::VsockListener::bind(tokio_vsock::VsockAddr::new(cid, port))?;
+        info!(cid, port, "vsock listener bound");
+        Ok(Self(listener))
     }
 }
 

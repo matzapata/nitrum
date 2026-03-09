@@ -7,7 +7,6 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
@@ -88,22 +87,18 @@ export class NitrumStack extends cdk.Stack {
     );
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.tcp(443), 'Intra-SG HTTPS');
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.icmpPing(), 'Intra-SG ping');
-    enclaveSg.addIngressRule(
-      ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(443),
-      'Allow HTTPS inbound from NLB',
-    );
+    enclaveSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS inbound from NLB');
 
     // ── KMS key ───────────────────────────────────────────────────────────────
     // RSA-2048 for attestation-based decrypt: KMS releases plaintext only when
     // the enclave's PCR measurements match the key policy.
-    const kmsKey = new kms.Key(this, 'EnclaveKey', {
-      keySpec: kms.KeySpec.RSA_2048,
-      keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
-      description: 'Nitrum enclave key - attestation-based decrypt',
-      removalPolicy:
-        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
-    });
+    // const kmsKey = new kms.Key(this, 'EnclaveKey', {
+    //   keySpec: kms.KeySpec.RSA_2048,
+    //   keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
+    //   description: 'Nitrum enclave key - attestation-based decrypt',
+    //   removalPolicy:
+    //     deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    // });
 
     // ── CloudWatch log group ──────────────────────────────────────────────────
     const logGroup = new logs.LogGroup(this, 'EnclaveLogGroup', {
@@ -131,7 +126,7 @@ export class NitrumStack extends cdk.Stack {
     role.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
     );
-    kmsKey.grant(role, 'kms:Decrypt', 'kms:GetPublicKey');
+    // kmsKey.grant(role, 'kms:Decrypt', 'kms:GetPublicKey');
     enclaveImage.repository.grantPull(role);
     logGroup.grantWrite(role);
 
@@ -208,10 +203,10 @@ export class NitrumStack extends cdk.Stack {
       value: nlb.loadBalancerDnsName,
       description: 'NLB DNS name - point your domain CNAME here',
     });
-    new cdk.CfnOutput(this, 'KmsKeyId', {
-      value: kmsKey.keyId,
-      description: 'KMS key used for attestation-based decrypt',
-    });
+    // new cdk.CfnOutput(this, 'KmsKeyId', {
+    //   value: kmsKey.keyId,
+    //   description: 'KMS key used for attestation-based decrypt',
+    // });
     new cdk.CfnOutput(this, 'EC2InstanceRoleARN', {
       value: role.roleArn,
       description: 'EC2 Instance Role ARN',
