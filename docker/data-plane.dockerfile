@@ -25,14 +25,16 @@ RUN find crates/data-plane/src crates/shared/src -name "*.rs" | xargs touch \
     && cargo build --release -p data-plane ${FEATURES:+--features $FEATURES}
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 debian:bookworm-slim
+FROM --platform=linux/amd64 public.ecr.aws/amazonlinux/amazonlinux:2
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN yum install -y \
+    iproute \
     iptables \
     curl \
     ca-certificates \
-    libcap2-bin \
-    && rm -rf /var/lib/apt/lists/*
+    libcap \
+    shadow-utils \
+    && yum clean all
 
 # Create a non-root user for the data-plane proxy so iptables can exempt its traffic
 RUN useradd -u 1500 -M -s /bin/sh dataplane

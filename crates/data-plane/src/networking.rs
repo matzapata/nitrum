@@ -1,13 +1,22 @@
 use std::process::Command;
+use std::sync::OnceLock;
 
 use tracing::info;
 
 use crate::constants::{DATAPLANE_UID, TCP_PROXY_PORT};
 
+const TUN_DEVICE_NAME: &str = "nitrum0";
+const TUN_DEVICE_CIDR: &str = "10.0.0.1/24";
+const TUN_DEVICE_GATEWAY: &str = "10.0.0.1";
+static TUN_FD: OnceLock<libc::c_int> = OnceLock::new();
+const IFF_TUN: libc::c_int = 0x0001;
+const IFF_NO_PI: libc::c_int = 0x1000;
+const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
+
 pub fn setup() {
     cleanup_legacy_nat_rules();
     setup_dns_proxy();
-    setup_tcp_proxy();
+    setup_tcp_redirect_via_tun();
 }
 
 fn cleanup_legacy_nat_rules() {
@@ -21,6 +30,27 @@ fn cleanup_legacy_nat_rules() {
         "ENCLAVE_PROXY".to_string(),
     ];
     remove_nat_output_rule(&legacy_output_jump);
+
+    // Remove older direct HTTPS redirect rules now replaced by TUN interception.
+    let legacy_tcp_rule = vec![
+        "-p".to_string(),
+        "tcp".to_string(),
+        "--dport".to_string(),
+        "443".to_string(),
+        "-m".to_string(),
+        "owner".to_string(),
+        "!".to_string(),
+        "--uid-owner".to_string(),
+        DATAPLANE_UID.to_string(),
+        "!".to_string(),
+        "-d".to_string(),
+        "127.0.0.1/32".to_string(),
+        "-j".to_string(),
+        "DNAT".to_string(),
+        "--to-destination".to_string(),
+        format!("127.0.0.1:{TCP_PROXY_PORT}"),
+    ];
+    remove_nat_output_rule(&legacy_tcp_rule);
 
     // Best-effort cleanup of the old chain. Ignore failures if chain does not exist.
     let _ = Command::new("iptables")
@@ -72,33 +102,84 @@ fn setup_dns_proxy() {
     }
 }
 
-fn setup_tcp_proxy() {
-    // Intercept HTTPS egress and route it to the local TCP proxy.
-    let tcp_rule = vec![
-        "-p".to_string(),
-        "tcp".to_string(),
-        "--dport".to_string(),
-        "443".to_string(),
-        "-m".to_string(),
-        "owner".to_string(),
-        "!".to_string(),
-        "--uid-owner".to_string(),
-        DATAPLANE_UID.to_string(),
-        "!".to_string(),
-        "-d".to_string(),
-        "127.0.0.1/32".to_string(),
-        "-j".to_string(),
-        "DNAT".to_string(),
-        "--to-destination".to_string(),
-        format!("127.0.0.1:{TCP_PROXY_PORT}"),
-    ];
+fn setup_tcp_redirect_via_tun() {
+        let _ = TUN_FD.get_or_init(|| create_tun(TUN_DEVICE_NAME));
+        run_ip(["addr", "replace", TUN_DEVICE_CIDR, "dev", TUN_DEVICE_NAME]);
+        run_ip(["link", "set", "dev", TUN_DEVICE_NAME, "up"]);
+        run_ip([
+            "route",
+            "replace",
+            "default",
+            "via",
+            TUN_DEVICE_GATEWAY,
+            "dev",
+            TUN_DEVICE_NAME,
+        ]);
+        info!(
+            device = TUN_DEVICE_NAME,
+            cidr = TUN_DEVICE_CIDR,
+            "installed tcp redirect via TUN"
+        );
+}
 
-    ensure_nat_output_rule(&tcp_rule);
-    info!(rule = ?tcp_rule, "installed tcp iptables redirect");
+fn run_ip<const N: usize>(args: [&str; N]) {
+    let status = Command::new("ip")
+        .args(args)
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run ip {:?}: {e}", args));
+    assert!(
+        status.success(),
+        "ip command failed for args {:?}, exit {:?}",
+        args,
+        status.code()
+    );
+}
+
+fn create_tun(name: &str) -> libc::c_int {
+    assert!(!name.is_empty(), "TUN device name cannot be empty");
+    assert!(
+        name.len() < libc::IFNAMSIZ,
+        "TUN device name '{}' exceeds IFNAMSIZ ({})",
+        name,
+        libc::IFNAMSIZ
+    );
+
+    let fd = unsafe { libc::open(c"/dev/net/tun".as_ptr(), libc::O_RDWR) };
+    assert!(
+        fd >= 0,
+        "open(/dev/net/tun) failed: {}",
+        std::io::Error::last_os_error()
+    );
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr() as *const libc::c_char,
+            ifr.ifr_name.as_mut_ptr() as *mut libc::c_char,
+            name.len(),
+        );
+        ifr.ifr_ifru.ifru_flags = (IFF_TUN | IFF_NO_PI) as i16;
+    }
+
+    let rc = unsafe { libc::ioctl(fd, TUNSETIFF as _, &ifr) };
+    assert_eq!(
+        rc,
+        0,
+        "ioctl(TUNSETIFF) failed for {}: {}",
+        name,
+        std::io::Error::last_os_error()
+    );
+
+    fd
 }
 
 fn ensure_nat_output_rule(rule_spec: &[String]) {
-    let mut check_args = vec!["-t".to_string(), "nat".to_string(), "-C".to_string(), "OUTPUT".to_string()];
+    let mut check_args = vec![
+        "-t".to_string(),
+        "nat".to_string(),
+        "-C".to_string(),
+        "OUTPUT".to_string(),
+    ];
     check_args.extend(rule_spec.iter().cloned());
 
     let check_status = Command::new("iptables")
@@ -117,7 +198,12 @@ fn ensure_nat_output_rule(rule_spec: &[String]) {
         check_args
     );
 
-    let mut add_args = vec!["-t".to_string(), "nat".to_string(), "-A".to_string(), "OUTPUT".to_string()];
+    let mut add_args = vec![
+        "-t".to_string(),
+        "nat".to_string(),
+        "-A".to_string(),
+        "OUTPUT".to_string(),
+    ];
     add_args.extend(rule_spec.iter().cloned());
     let add_status = Command::new("iptables")
         .args(&add_args)

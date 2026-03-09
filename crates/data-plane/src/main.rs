@@ -27,10 +27,9 @@ struct Args {
     app_cmd: Vec<String>,
 }
 
-/// Drop the process to `DATAPLANE_UID` so the data-plane's own egress
-/// connections are exempted by the iptables `--uid-owner` rule set up in
-/// `networking::setup()`. Must be called AFTER spawning the customer app so
-/// the app process inherits root uid and its traffic IS subject to the redirect.
+/// Drop the process to `DATAPLANE_UID` so policy rules that match app traffic
+/// (running as root before privilege drop) do not accidentally capture the
+/// data-plane's own egress. Must be called AFTER spawning the customer app.
 fn drop_privileges() {
     use crate::constants::DATAPLANE_UID;
     let ret = unsafe { libc::setuid(DATAPLANE_UID) };
@@ -64,8 +63,7 @@ async fn main() {
     networking::setup();
 
     // ── Spawn the customer app BEFORE dropping privileges ─────────────────────
-    // Child inherits root uid so its egress traffic IS subject to the iptables
-    // redirect; the data-plane (uid 1500 after drop_privileges) is exempted.
+    // Child inherits root uid so its traffic is subject to network interception.
     let child_handle = if args.app_cmd.is_empty() {
         info!("no customer app specified, running data-plane only");
         None
@@ -123,7 +121,10 @@ async fn main() {
 
         let status = child.wait().await.expect("error waiting for customer app");
         let code = status.code().unwrap_or(1);
-        info!(exit_code = code, "customer app exited, shutting down data-plane");
+        info!(
+            exit_code = code,
+            "customer app exited, shutting down data-plane"
+        );
         std::process::exit(code);
     };
 

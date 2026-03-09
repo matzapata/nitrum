@@ -25,11 +25,9 @@ RUN find crates/control-plane/src crates/shared/src -name "*.rs" | xargs touch \
     && cargo build --release -p control-plane ${FEATURES:+--features $FEATURES}
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 debian:bookworm-slim
+FROM --platform=linux/amd64 public.ecr.aws/amazonlinux/amazonlinux:2
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN yum install -y ca-certificates && yum clean all
 
 COPY --from=builder /build/target/release/control-plane /app/control-plane
 RUN chmod +x /app/control-plane
