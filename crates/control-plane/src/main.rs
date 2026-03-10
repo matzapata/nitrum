@@ -1,8 +1,20 @@
-use tracing::info;
+mod enclave;
+mod networking;
 
-mod constants;
-mod egress;
-mod ingress;
+use std::path::PathBuf;
+use clap::Parser;
+use tracing::info;
+use shared::config;
+use networking::Networking;
+use enclave::Enclave;
+
+#[derive(clap::Parser)]
+#[command(name = "control-plane")]
+struct Args {
+    /// Path to nitrum.toml.
+    #[arg(long, default_value = "./nitrum.toml")]
+    config: PathBuf,
+}
 
 #[tokio::main]
 async fn main() {
@@ -13,16 +25,9 @@ async fn main() {
         )
         .init();
 
-    let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or(constants::DNS_UPSTREAM.to_string());
+    let args = Args::parse();
+    let cfg = config::load(&args.config);
 
-    let ingress_port = std::env::var("INGRESS_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(constants::INGRESS_PORT);
-
-    tokio::join!(
-        egress::tcp::run(),
-        egress::dns::run(upstream_dns),
-        ingress::tcp::run(ingress_port),
-    );
+    Networking::start().unwrap();
+    Enclave::new().start();
 }

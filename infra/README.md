@@ -38,7 +38,7 @@ docker build --platform linux/amd64 --build-arg FEATURES=enclave -f samples/hell
 docker push matzapata/nitrum-hello:latest
 ```
 
-The sample Dockerfile now builds `data-plane` from source in the same build, so you no longer need to build `docker/data-plane.dockerfile` separately.
+The sample Dockerfile builds `data-plane` from source in the same build. The control-plane binary starts gvproxy on launch (terminating any existing instance first) and stops it on exit.
 
 ### 2) Deploy infra
 
@@ -490,6 +490,7 @@ export CDK_DEPLOY_REGION=sa-east-1
 export CDK_DEPLOY_ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
 export APP_DIRECTORY=/Users/matzapata/git/enclaves-poc/nitrum/samples/hello
 aws ssm start-session --target $(./scripts/get_asg_instances.sh "$(jq -r '.NitrumStack.ASGGroupName' out.json)") --region "$CDK_DEPLOY_REGION"
+
 
 sudo docker pull matzapata/control-plane:latest && sudo docker pull matzapata/data-plane:latest
 

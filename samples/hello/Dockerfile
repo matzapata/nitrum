@@ -1,4 +1,4 @@
-ARG DATA_PLANE_IMAGE=nitrum/data-plane:dev
+ARG DATA_PLANE_IMAGE=nitrum/data-plane:latest
 FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
 
 # Node 16 from NodeSource (last LTS that works on AL2 glibc 2.26; Node 18+ needs glibc 2.28)

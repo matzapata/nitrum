@@ -1,20 +1,8 @@
 DOCKERHUB_USER := "matzapata"
 
-# ── Dev (TCP transport) ───────────────────────────────────────────────────────
-
-build-dev:
-    docker build --platform linux/amd64 -f samples/hello/Dockerfile -t nitrum/hello:dev ../..
-
-rebuild-dev:
-    docker build --platform linux/amd64 --no-cache -f samples/hello/Dockerfile -t nitrum/hello:dev ../..
-
-push-dev: rebuild-dev
-    docker tag nitrum/hello:dev {{DOCKERHUB_USER}}/nitrum-hello:dev
-    docker push {{DOCKERHUB_USER}}/nitrum-hello:dev
-
-
 # ── Enclave (VSock transport) ─────────────────────────────────────────────────
 
+# TODO: build docker image then enclave.eif then control-plane
 build:
     docker build --platform linux/amd64 --build-arg FEATURES=enclave -f samples/hello/Dockerfile -t nitrum/hello:latest ../..
 

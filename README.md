@@ -7,6 +7,15 @@
 <!-- TODO: data-plane kickoff app -->
 <!-- TODO: data-plane terminate tls -->
 <!-- TODO: data-plane  -->
+<!-- TODO: dev mode -->
+
+TODO: use this to add the enclave file to the control-plane, then it's simply running that
+```
+docker build -t my-new-image -f- . <<'EOF'
+FROM my-base-image
+COPY extra_script.py /app/
+EOF
+```
 
 Ingress
 Egress

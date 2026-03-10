@@ -1,7 +1,7 @@
 {
   "NitrumStack": {
-    "EC2InstanceRoleARN": "arn:aws:iam::447655722442:role/NitrumStack-InstanceRole3CCE2F1D-Fqk2AxGlGkFH",
-    "NLBDnsName": "Nitrum-Nitro-cecpO5urAgyZ-db4aba0f2b44a444.elb.sa-east-1.amazonaws.com",
-    "ASGGroupName": "NitrumStack-NitroASGC027A699-YOFOLaeCUBr4"
+    "EC2InstanceRoleARN": "arn:aws:iam::447655722442:role/NitrumStack-InstanceRole3CCE2F1D-gzIQN99mEh6C",
+    "NLBDnsName": "Nitrum-Nitro-dg7fwDVFwuPo-b14aafb6b4ddbcc6.elb.sa-east-1.amazonaws.com",
+    "ASGGroupName": "NitrumStack-NitroASGC027A699-u99WbFwGwwf5"
   }
 }
