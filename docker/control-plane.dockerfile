@@ -1,38 +1,29 @@
-FROM rust:1.88-slim AS builder
+################################################################################
+# gvproxy builder
+################################################################################
 
-ARG FEATURES=""
+FROM golang:1.25 AS gvproxy-builder
 
-WORKDIR /build
+WORKDIR /
 
-# Cache deps by copying manifests first
-COPY Cargo.toml Cargo.toml
-COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
-COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
-COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+RUN git clone --depth 1 --branch v0.7.4 https://github.com/containers/gvisor-tap-vsock.git
+RUN cd gvisor-tap-vsock && CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags '-extldflags "-static"' -o bin/gvproxy-linux-amd64 ./cmd/gvproxy
 
-# Stub sources so cargo can resolve the workspace and pre-fetch dependencies
-RUN mkdir -p crates/data-plane/src crates/control-plane/src crates/shared/src \
-    && echo 'fn main(){}' > crates/data-plane/src/main.rs \
-    && echo 'fn main(){}' > crates/control-plane/src/main.rs \
-    && echo '' > crates/shared/src/lib.rs
+################################################################################
+# Runtime
+################################################################################
 
-RUN cargo build --release -p control-plane ${FEATURES:+--features $FEATURES}
+FROM alpine:3.20 AS runtime
 
-# Copy real sources and touch every file cargo tracks to bust its mtime cache
-COPY crates/control-plane/src crates/control-plane/src
-COPY crates/shared/src crates/shared/src
-RUN find crates/control-plane/src crates/shared/src -name "*.rs" | xargs touch \
-    && cargo build --release -p control-plane ${FEATURES:+--features $FEATURES}
+RUN apk update && apk upgrade
+RUN apk --no-cache add curl ca-certificates
 
-# ── Runtime image ──────────────────────────────────────────────────────────────
-FROM --platform=linux/amd64 public.ecr.aws/amazonlinux/amazonlinux:2
+COPY --from=gvproxy-builder /gvisor-tap-vsock/bin/gvproxy-linux-amd64 /app/gvproxy
+COPY docker/control-plane-entrypoint.sh /app/entrypoint.sh
 
-RUN yum install -y ca-certificates && yum clean all
+RUN chmod +x /app/gvproxy /app/entrypoint.sh
 
-COPY --from=builder /build/target/release/control-plane /app/control-plane
-RUN chmod +x /app/control-plane
+EXPOSE 443
+EXPOSE 9090
 
-EXPOSE 8181
-EXPOSE 3031
-
-CMD ["/app/control-plane"]
+CMD ["/app/entrypoint.sh"]

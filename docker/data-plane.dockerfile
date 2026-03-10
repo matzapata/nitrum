@@ -4,6 +4,9 @@ ARG FEATURES=""
 
 WORKDIR /build
 
+RUN apt-get update && apt-get install -y musl-tools \
+    && rustup target add x86_64-unknown-linux-musl
+
 # Cache deps by copying manifests first
 COPY Cargo.toml Cargo.toml
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
@@ -16,32 +19,19 @@ RUN mkdir -p crates/data-plane/src crates/control-plane/src crates/shared/src \
     && echo 'fn main(){}' > crates/control-plane/src/main.rs \
     && echo '' > crates/shared/src/lib.rs
 
-RUN cargo build --release -p data-plane ${FEATURES:+--features $FEATURES}
+RUN cargo build --release -p data-plane --target x86_64-unknown-linux-musl ${FEATURES:+--features $FEATURES}
 
 # Copy real sources and touch every file cargo tracks to bust its mtime cache
 COPY crates/data-plane/src crates/data-plane/src
 COPY crates/shared/src crates/shared/src
 RUN find crates/data-plane/src crates/shared/src -name "*.rs" | xargs touch \
-    && cargo build --release -p data-plane ${FEATURES:+--features $FEATURES}
+    && cargo build --release -p data-plane --target x86_64-unknown-linux-musl ${FEATURES:+--features $FEATURES}
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
 FROM --platform=linux/amd64 public.ecr.aws/amazonlinux/amazonlinux:2
 
-RUN yum install -y \
-    iproute \
-    iptables \
-    curl \
-    ca-certificates \
-    libcap \
-    shadow-utils \
-    && yum clean all
+RUN yum install -y iproute && yum clean all
 
-# Create a non-root user for the data-plane proxy so iptables can exempt its traffic
-RUN useradd -u 1500 -M -s /bin/sh dataplane
-
-COPY --from=builder /build/target/release/data-plane /app/data-plane
-RUN chmod +x /app/data-plane \
-    # Allow binding to privileged ports (e.g. DNS on 53) without full root.
-    && setcap 'cap_net_bind_service=+ep' /app/data-plane
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
 
 ENTRYPOINT ["/app/data-plane"]

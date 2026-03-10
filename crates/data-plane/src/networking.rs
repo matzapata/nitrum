@@ -1,258 +1,302 @@
-use std::process::Command;
-use std::sync::OnceLock;
-
+use tracing::warn;
+#[cfg(target_os = "linux")]
 use tracing::info;
 
-use crate::constants::{DATAPLANE_UID, TCP_PROXY_PORT};
+/// Set up enclave networking via TAP device + VSOCK to gvproxy on the host.
+///
+/// Creates a TAP device, connects to gvproxy over VSOCK, sends the POST /connect
+/// handshake, configures the interface (IP, MAC, MTU, gateway, resolv.conf), and
+/// spawns two threads that forward L2 frames between the TAP and the VSOCK stream
+/// using the 2-byte little-endian length-prefixed protocol.
+#[cfg(target_os = "linux")]
+pub fn setup(host_proxy_port: u32) {
+    use linux::*;
 
-const TUN_DEVICE_NAME: &str = "nitrum0";
-const TUN_DEVICE_CIDR: &str = "10.0.0.1/24";
-const TUN_DEVICE_GATEWAY: &str = "10.0.0.1";
-static TUN_FD: OnceLock<libc::c_int> = OnceLock::new();
-const IFF_TUN: libc::c_int = 0x0001;
-const IFF_NO_PI: libc::c_int = 0x1000;
-const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
+    info!(
+        port = host_proxy_port,
+        "setting up enclave networking (TAP + VSOCK → gvproxy)"
+    );
 
-pub fn setup() {
-    cleanup_legacy_nat_rules();
-    setup_dns_proxy();
-    setup_tcp_redirect_via_tun();
+    let vsock_fd = connect_vsock_with_retry(host_proxy_port);
+    info!(port = host_proxy_port, "connected to gvproxy via VSOCK");
+
+    send_handshake(vsock_fd).expect("failed to send POST /connect handshake");
+    info!("handshake sent");
+
+    let tap_fd = create_tap(TAP_DEVICE_NAME).expect("failed to create TAP device");
+    info!(device = TAP_DEVICE_NAME, "TAP device created");
+
+    configure_tap();
+    info!("TAP interface configured");
+
+    write_resolv_conf();
+    info!("resolv.conf written");
+
+    start_forwarding(tap_fd, vsock_fd);
+    info!("frame forwarding started (TAP ↔ VSOCK)");
 }
 
-fn cleanup_legacy_nat_rules() {
-    // Older builds installed a catch-all TCP redirect through this custom chain.
-    // Remove it to avoid recursive interception (proxy traffic to 172.20.0.10:8181
-    // being captured back into itself).
-    let legacy_output_jump = vec![
-        "-p".to_string(),
-        "tcp".to_string(),
-        "-j".to_string(),
-        "ENCLAVE_PROXY".to_string(),
-    ];
-    remove_nat_output_rule(&legacy_output_jump);
-
-    // Remove older direct HTTPS redirect rules now replaced by TUN interception.
-    let legacy_tcp_rule = vec![
-        "-p".to_string(),
-        "tcp".to_string(),
-        "--dport".to_string(),
-        "443".to_string(),
-        "-m".to_string(),
-        "owner".to_string(),
-        "!".to_string(),
-        "--uid-owner".to_string(),
-        DATAPLANE_UID.to_string(),
-        "!".to_string(),
-        "-d".to_string(),
-        "127.0.0.1/32".to_string(),
-        "-j".to_string(),
-        "DNAT".to_string(),
-        "--to-destination".to_string(),
-        format!("127.0.0.1:{TCP_PROXY_PORT}"),
-    ];
-    remove_nat_output_rule(&legacy_tcp_rule);
-
-    // Best-effort cleanup of the old chain. Ignore failures if chain does not exist.
-    let _ = Command::new("iptables")
-        .args(["-t", "nat", "-F", "ENCLAVE_PROXY"])
-        .status();
-    let _ = Command::new("iptables")
-        .args(["-t", "nat", "-X", "ENCLAVE_PROXY"])
-        .status();
+#[cfg(not(target_os = "linux"))]
+pub fn setup(_host_proxy_port: u32) {
+    warn!("enclave networking (TAP + VSOCK) requires Linux; skipping");
 }
 
-fn setup_dns_proxy() {
-    // Redirect outbound DNS from the app into the local DNS proxy.
-    let dns_rules = [
-        vec![
-            "-p".to_string(),
-            "udp".to_string(),
-            "--dport".to_string(),
-            "53".to_string(),
-            "-m".to_string(),
-            "owner".to_string(),
-            "!".to_string(),
-            "--uid-owner".to_string(),
-            DATAPLANE_UID.to_string(),
-            "-j".to_string(),
-            "DNAT".to_string(),
-            "--to-destination".to_string(),
-            "127.0.0.1:53".to_string(),
-        ],
-        vec![
-            "-p".to_string(),
-            "tcp".to_string(),
-            "--dport".to_string(),
-            "53".to_string(),
-            "-m".to_string(),
-            "owner".to_string(),
-            "!".to_string(),
-            "--uid-owner".to_string(),
-            DATAPLANE_UID.to_string(),
-            "-j".to_string(),
-            "DNAT".to_string(),
-            "--to-destination".to_string(),
-            "127.0.0.1:53".to_string(),
-        ],
-    ];
+// ---------------------------------------------------------------------------
 
-    for rule in &dns_rules {
-        ensure_nat_output_rule(rule);
-        info!(rule = ?rule, "installed dns iptables redirect");
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tracing::{error, info};
+
+    pub const TAP_DEVICE_NAME: &str = "tap0";
+    const TAP_IP_CIDR: &str = "192.168.127.2/24";
+    const TAP_GATEWAY: &str = "192.168.127.1";
+    const TAP_MAC: &str = "ba:aa:ad:c0:ff:ee";
+    const TAP_MTU: &str = "1500";
+
+    const PARENT_CID: u32 = 3;
+    const MAX_FRAME_SIZE: usize = 65535;
+    const FRAME_LEN_SIZE: usize = 2;
+
+    const IFF_TAP: libc::c_short = 0x0002;
+    const IFF_NO_PI: libc::c_short = 0x1000;
+    const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
+
+    const AF_VSOCK: libc::c_int = 40;
+
+    #[repr(C)]
+    struct SockAddrVm {
+        svm_family: u16,
+        svm_reserved1: u16,
+        svm_port: u32,
+        svm_cid: u32,
+        svm_zero: [u8; 4],
     }
-}
 
-fn setup_tcp_redirect_via_tun() {
-        let _ = TUN_FD.get_or_init(|| create_tun(TUN_DEVICE_NAME));
-        run_ip(["addr", "replace", TUN_DEVICE_CIDR, "dev", TUN_DEVICE_NAME]);
-        run_ip(["link", "set", "dev", TUN_DEVICE_NAME, "up"]);
-        run_ip([
-            "route",
-            "replace",
-            "default",
-            "via",
-            TUN_DEVICE_GATEWAY,
-            "dev",
-            TUN_DEVICE_NAME,
-        ]);
-        info!(
-            device = TUN_DEVICE_NAME,
-            cidr = TUN_DEVICE_CIDR,
-            "installed tcp redirect via TUN"
+    // ── TAP device ──────────────────────────────────────────────────────────
+
+    pub fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
+        assert!(
+            !name.is_empty() && name.len() < libc::IFNAMSIZ,
+            "TAP device name invalid"
         );
-}
 
-fn run_ip<const N: usize>(args: [&str; N]) {
-    let status = Command::new("ip")
-        .args(args)
-        .status()
-        .unwrap_or_else(|e| panic!("failed to run ip {:?}: {e}", args));
-    assert!(
-        status.success(),
-        "ip command failed for args {:?}, exit {:?}",
-        args,
-        status.code()
-    );
-}
-
-fn create_tun(name: &str) -> libc::c_int {
-    assert!(!name.is_empty(), "TUN device name cannot be empty");
-    assert!(
-        name.len() < libc::IFNAMSIZ,
-        "TUN device name '{}' exceeds IFNAMSIZ ({})",
-        name,
-        libc::IFNAMSIZ
-    );
-
-    let fd = unsafe { libc::open(c"/dev/net/tun".as_ptr(), libc::O_RDWR) };
-    assert!(
-        fd >= 0,
-        "open(/dev/net/tun) failed: {}",
-        std::io::Error::last_os_error()
-    );
-
-    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            name.as_ptr() as *const libc::c_char,
-            ifr.ifr_name.as_mut_ptr() as *mut libc::c_char,
-            name.len(),
-        );
-        ifr.ifr_ifru.ifru_flags = (IFF_TUN | IFF_NO_PI) as i16;
-    }
-
-    let rc = unsafe { libc::ioctl(fd, TUNSETIFF as _, &ifr) };
-    assert_eq!(
-        rc,
-        0,
-        "ioctl(TUNSETIFF) failed for {}: {}",
-        name,
-        std::io::Error::last_os_error()
-    );
-
-    fd
-}
-
-fn ensure_nat_output_rule(rule_spec: &[String]) {
-    let mut check_args = vec![
-        "-t".to_string(),
-        "nat".to_string(),
-        "-C".to_string(),
-        "OUTPUT".to_string(),
-    ];
-    check_args.extend(rule_spec.iter().cloned());
-
-    let check_status = Command::new("iptables")
-        .args(&check_args)
-        .status()
-        .unwrap_or_else(|e| panic!("failed to run iptables -C with args {check_args:?}: {e}"));
-
-    if check_status.success() {
-        return;
-    }
-    assert_eq!(
-        check_status.code(),
-        Some(1),
-        "iptables -C failed with unexpected status {:?} for args {:?}",
-        check_status.code(),
-        check_args
-    );
-
-    let mut add_args = vec![
-        "-t".to_string(),
-        "nat".to_string(),
-        "-A".to_string(),
-        "OUTPUT".to_string(),
-    ];
-    add_args.extend(rule_spec.iter().cloned());
-    let add_status = Command::new("iptables")
-        .args(&add_args)
-        .status()
-        .unwrap_or_else(|e| panic!("failed to run iptables -A with args {add_args:?}: {e}"));
-    assert!(
-        add_status.success(),
-        "failed to install iptables rule {:?}, status {:?}",
-        add_args,
-        add_status.code()
-    );
-}
-
-fn remove_nat_output_rule(rule_spec: &[String]) {
-    let mut check_args = vec![
-        "-t".to_string(),
-        "nat".to_string(),
-        "-C".to_string(),
-        "OUTPUT".to_string(),
-    ];
-    check_args.extend(rule_spec.iter().cloned());
-
-    loop {
-        let check_status = Command::new("iptables")
-            .args(&check_args)
-            .status()
-            .unwrap_or_else(|e| panic!("failed to run iptables -C with args {check_args:?}: {e}"));
-
-        if !check_status.success() {
-            // Rule is absent (status 1) or check failed unexpectedly; stop cleanup.
-            break;
+        let fd = unsafe { libc::open(c"/dev/net/tun".as_ptr(), libc::O_RDWR) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
         }
 
-        let mut del_args = vec![
-            "-t".to_string(),
-            "nat".to_string(),
-            "-D".to_string(),
-            "OUTPUT".to_string(),
-        ];
-        del_args.extend(rule_spec.iter().cloned());
-        let del_status = Command::new("iptables")
-            .args(&del_args)
+        let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                name.as_ptr(),
+                ifr.ifr_name.as_mut_ptr() as *mut u8,
+                name.len(),
+            );
+            ifr.ifr_ifru.ifru_flags = IFF_TAP | IFF_NO_PI;
+        }
+
+        let rc = unsafe { libc::ioctl(fd, TUNSETIFF as _, &ifr) };
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            unsafe { libc::close(fd); }
+            return Err(err);
+        }
+
+        Ok(fd)
+    }
+
+    pub fn configure_tap() {
+        run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC]);
+        run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME]);
+        run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU]);
+        run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"]);
+        run_ip(&[
+            "route", "add", "default", "via", TAP_GATEWAY, "dev", TAP_DEVICE_NAME,
+        ]);
+    }
+
+    fn run_ip(args: &[&str]) {
+        let status = Command::new("ip")
+            .args(args)
             .status()
-            .unwrap_or_else(|e| panic!("failed to run iptables -D with args {del_args:?}: {e}"));
+            .unwrap_or_else(|e| panic!("failed to run ip {args:?}: {e}"));
         assert!(
-            del_status.success(),
-            "failed to delete iptables rule {:?}, status {:?}",
-            del_args,
-            del_status.code()
+            status.success(),
+            "ip command failed: {args:?}, exit {:?}",
+            status.code()
         );
+    }
+
+    // ── resolv.conf ─────────────────────────────────────────────────────────
+
+    pub fn write_resolv_conf() {
+        std::fs::create_dir_all("/run/resolvconf")
+        .expect("failed to create /run/resolvconf");
+        std::fs::write("/run/resolvconf/resolv.conf", "nameserver 192.168.127.1\n")
+            .expect("failed to write /run/resolvconf/resolv.conf");
+    }
+
+    // ── VSOCK connection ────────────────────────────────────────────────────
+
+    fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
+        let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let addr = SockAddrVm {
+            svm_family: AF_VSOCK as u16,
+            svm_reserved1: 0,
+            svm_port: port,
+            svm_cid: PARENT_CID,
+            svm_zero: [0; 4],
+        };
+
+        let rc = unsafe {
+            libc::connect(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
+            )
+        };
+
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            unsafe { libc::close(fd); }
+            return Err(err);
+        }
+
+        Ok(fd)
+    }
+
+    pub fn connect_vsock_with_retry(port: u32) -> libc::c_int {
+        loop {
+            match connect_vsock(port) {
+                Ok(fd) => return fd,
+                Err(e) => {
+                    info!(error = %e, "VSOCK connect failed, retrying in 1 s …");
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        }
+    }
+
+    // ── Handshake ───────────────────────────────────────────────────────────
+
+    pub fn send_handshake(fd: libc::c_int) -> std::io::Result<()> {
+        write_all_raw(fd, b"POST /connect HTTP/1.1\r\nHost: \r\n\r\n")
+    }
+
+    // ── Raw fd I/O helpers ──────────────────────────────────────────────────
+
+    fn read_exact_raw(fd: libc::c_int, buf: &mut [u8]) -> std::io::Result<()> {
+        let mut pos = 0;
+        while pos < buf.len() {
+            let n = unsafe {
+                libc::read(
+                    fd,
+                    buf[pos..].as_mut_ptr() as *mut libc::c_void,
+                    buf.len() - pos,
+                )
+            };
+            if n < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "connection closed",
+                ));
+            }
+            pos += n as usize;
+        }
+        Ok(())
+    }
+
+    fn write_all_raw(fd: libc::c_int, buf: &[u8]) -> std::io::Result<()> {
+        let mut pos = 0;
+        while pos < buf.len() {
+            let n = unsafe {
+                libc::write(
+                    fd,
+                    buf[pos..].as_ptr() as *const libc::c_void,
+                    buf.len() - pos,
+                )
+            };
+            if n < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            pos += n as usize;
+        }
+        Ok(())
+    }
+
+    // ── Frame forwarding ────────────────────────────────────────────────────
+
+    /// TAP → VSOCK: read raw Ethernet frames from the TAP device, prepend a
+    /// 2-byte LE length header, and write to the VSOCK stream.
+    fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: Arc<AtomicBool>) {
+        let mut buf = vec![0u8; MAX_FRAME_SIZE];
+        while running.load(Ordering::Relaxed) {
+            let n = unsafe {
+                libc::read(tap_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+            };
+            if n <= 0 {
+                error!("TAP read error or EOF (n={n})");
+                break;
+            }
+            let len = (n as u16).to_le_bytes();
+            if write_all_raw(vsock_fd, &len).is_err()
+                || write_all_raw(vsock_fd, &buf[..n as usize]).is_err()
+            {
+                error!("VSOCK write error");
+                break;
+            }
+        }
+        running.store(false, Ordering::Relaxed);
+    }
+
+    /// VSOCK → TAP: read a 2-byte LE length header from the VSOCK stream,
+    /// then the frame payload, and write the raw frame to the TAP device.
+    fn tx_loop(vsock_fd: libc::c_int, tap_fd: libc::c_int, running: Arc<AtomicBool>) {
+        let mut len_buf = [0u8; FRAME_LEN_SIZE];
+        let mut frame_buf = vec![0u8; MAX_FRAME_SIZE];
+
+        while running.load(Ordering::Relaxed) {
+            if read_exact_raw(vsock_fd, &mut len_buf).is_err() {
+                error!("VSOCK read (length header) error or EOF");
+                break;
+            }
+
+            let frame_len = u16::from_le_bytes(len_buf) as usize;
+            if frame_len == 0 || frame_len > MAX_FRAME_SIZE {
+                error!(frame_len, "invalid frame length");
+                break;
+            }
+
+            if read_exact_raw(vsock_fd, &mut frame_buf[..frame_len]).is_err() {
+                error!("VSOCK read (frame payload) error or EOF");
+                break;
+            }
+
+            if write_all_raw(tap_fd, &frame_buf[..frame_len]).is_err() {
+                error!("TAP write error");
+                break;
+            }
+        }
+        running.store(false, Ordering::Relaxed);
+    }
+
+    pub fn start_forwarding(tap_fd: libc::c_int, vsock_fd: libc::c_int) {
+        let running = Arc::new(AtomicBool::new(true));
+
+        let r1 = Arc::clone(&running);
+        std::thread::spawn(move || rx_loop(tap_fd, vsock_fd, r1));
+
+        let r2 = Arc::clone(&running);
+        std::thread::spawn(move || tx_loop(vsock_fd, tap_fd, r2));
     }
 }

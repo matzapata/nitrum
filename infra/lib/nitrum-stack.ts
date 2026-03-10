@@ -4,7 +4,6 @@ import * as cdk from 'aws-cdk-lib';
 import { Fn } from 'aws-cdk-lib';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -21,7 +20,7 @@ export class NitrumStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: NitrumStackProps) {
     super(scope, id, props);
 
-    const { deployment, region, appDirectory } = props;
+    const { deployment, region } = props;
 
     // ── VPC ───────────────────────────────────────────────────────────────────
     const vpc = new ec2.Vpc(this, 'VPC', {
@@ -49,18 +48,6 @@ export class NitrumStack extends cdk.Stack {
       vpc,
       subnets: privateSubnets,
       service: ec2.InterfaceVpcEndpointAwsService.SSM,
-      privateDnsEnabled: true,
-    });
-    new ec2.InterfaceVpcEndpoint(this, 'ECREndpoint', {
-      vpc,
-      subnets: privateSubnets,
-      service: ec2.InterfaceVpcEndpointAwsService.ECR,
-      privateDnsEnabled: true,
-    });
-    new ec2.InterfaceVpcEndpoint(this, 'ECRDockerEndpoint', {
-      vpc,
-      subnets: privateSubnets,
-      service: ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
       privateDnsEnabled: true,
     });
     new ec2.InterfaceVpcEndpoint(this, 'CloudWatchLogsEndpoint', {
@@ -108,17 +95,6 @@ export class NitrumStack extends cdk.Stack {
         deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
     });
 
-    // ── Docker image assets ───────────────────────────────────────────────────
-    // Enclave image: customer app + nitrum data-plane.
-    const enclaveImage = new ecrAssets.DockerImageAsset(this, 'EnclaveImage', {
-      directory: appDirectory,
-      platform: ecrAssets.Platform.LINUX_AMD64,
-      assetName: 'nitrum-enclave',
-      buildArgs: {
-        DATA_PLANE_IMAGE: 'matzapata/nitrum-data-plane:latest',
-      },
-    });
-
     // ── IAM instance role ─────────────────────────────────────────────────────
     const role = new iam.Role(this, 'InstanceRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
@@ -127,7 +103,6 @@ export class NitrumStack extends cdk.Stack {
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
     );
     // kmsKey.grant(role, 'kms:Decrypt', 'kms:GetPublicKey');
-    enclaveImage.repository.grantPull(role);
     logGroup.grantWrite(role);
 
     // ── User data ─────────────────────────────────────────────────────────────
@@ -138,7 +113,7 @@ export class NitrumStack extends cdk.Stack {
       fs.readFileSync(path.join(__dirname, '../user_data.sh'), 'utf8'),
       {
         __REGION__: region,
-        __ENCLAVE_IMAGE_URI__: enclaveImage.imageUri,
+        // __ENCLAVE_IMAGE_URI__: enclaveImageUri,
       },
     );
 
@@ -165,7 +140,7 @@ export class NitrumStack extends cdk.Stack {
 
     // ── Auto Scaling Group ────────────────────────────────────────────────────
     const asg = new autoscaling.AutoScalingGroup(this, 'NitroASG', {
-      maxCapacity: 2,
+      maxCapacity: 1,
       minCapacity: 1,
       desiredCapacity: 1,
       launchTemplate,

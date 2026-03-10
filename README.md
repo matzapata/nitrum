@@ -1,4 +1,13 @@
 
+<!-- host -> gvproxy -->
+
+<!-- cli to work with it all -->
+<!-- control plane kick it all off -->
+<!-- TODO: data-plane networking setup -->
+<!-- TODO: data-plane kickoff app -->
+<!-- TODO: data-plane terminate tls -->
+<!-- TODO: data-plane  -->
+
 Ingress
 Egress
 Egress whitelist
@@ -6,6 +15,9 @@ Reproducible builds
 TLS certificate
 TLS certificate with acme
 TODO: TLS certificate sync
+TODO: properly wait for system to be up
+TODO: 
+
 
 KMS to encrypt decript data (use public key to wrap a sync key and store the sync key in db)
 
@@ -31,3 +43,15 @@ Test in aws
 - vsock
 
 curl -k https://Nitrum-Nitro-JFeawD8Jimon-8a5ef6f56c779882.elb.sa-east-1.amazonaws.com/health
+
+
+Build enclave with docker
+
+```
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd):/output \
+  aws-nitro-enclaves-cli:latest \
+  build-enclave \
+  --docker-uri matzapata/data-plane:latest \
+  --output-file /output/enclave.eif
+```
