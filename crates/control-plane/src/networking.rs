@@ -6,13 +6,12 @@ use std::time::Duration;
 
 use tracing::{error, info, warn};
 
+/// TODO: make this configurable
 const SOCKET_PATH: &str = "/tmp/network.sock";
 const VSOCK_LISTEN: &str = ":1024";
 const ENCLAVE_IP: &str = "192.168.127.2";
 const SOCKET_WAIT_TIMEOUT_SECS: u64 = 15;
 const SOCKET_POLL_INTERVAL_MS: u64 = 200;
-
-/// TODO: make this configurable
 /// Port forwards: (host_port, enclave_port).
 const FORWARDS: &[(u16, u16)] = &[(443, 443), (9090, 9090)];
 
@@ -23,7 +22,7 @@ pub struct Networking {
 
 impl Networking {
     /// Terminate existing gvproxy, start a new one, wait for socket, set up forwards.
-    pub fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::terminate_existing();
 
         info!(vsock = VSOCK_LISTEN, socket = SOCKET_PATH, "starting gvproxy");
@@ -37,10 +36,13 @@ impl Networking {
             .stderr(Stdio::inherit())
             .spawn()?;
 
-        Self::wait_for_socket()?;
+        tokio::time::sleep(Duration::from_secs(SOCKET_WAIT_TIMEOUT_SECS)).await;
+        if !Path::new(SOCKET_PATH).exists() {
+            return Err("gvproxy did not create socket in time".into());
+        }
 
         for (local, remote) in FORWARDS {
-            setup_forward(*local, *remote)?;
+            setup_forward(*local, *remote).await?;
         }
 
         Ok(Self {
@@ -48,27 +50,14 @@ impl Networking {
         })
     }
 
-    fn wait_for_socket() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let deadline =
-            std::time::Instant::now() + Duration::from_secs(SOCKET_WAIT_TIMEOUT_SECS);
-        while std::time::Instant::now() < deadline {
-            if Path::new(SOCKET_PATH).exists() {
-                std::thread::sleep(Duration::from_millis(SOCKET_POLL_INTERVAL_MS));
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(SOCKET_POLL_INTERVAL_MS));
-        }
-        Err("gvproxy did not create socket in time".into())
-    }
-
     /// Terminate any running gvproxy, then remove stale socket.
-    fn terminate_existing() {
+    async fn terminate_existing() {
         info!("terminating any existing gvproxy");
-        let _ = Command::new("pkill").arg("gvproxy").status();
-        std::thread::sleep(Duration::from_millis(500));
+        let _ = Command::new("pkill").arg("gvproxy").status().await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         if Path::new(SOCKET_PATH).exists() {
             info!(path = SOCKET_PATH, "removing stale socket");
-            let _ = std::fs::remove_file(SOCKET_PATH);
+            let _ = tokio::fs::remove_file(SOCKET_PATH).await;
         }
     }
 }

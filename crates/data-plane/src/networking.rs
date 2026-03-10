@@ -11,9 +11,11 @@ use tracing::info;
 /// spawns two threads that forward L2 frames between the TAP and the VSOCK stream
 /// using the 2-byte little-endian length-prefixed protocol.
 #[cfg(target_os = "linux")]
-pub fn setup(host_proxy_port: u32) {
+pub fn setup() {
     use linux::*;
 
+    // TODO: make this configurable
+    let host_proxy_port = crate::constants::HOST_PROXY_PORT;
     info!(
         port = host_proxy_port,
         "setting up enclave networking (TAP + VSOCK → gvproxy)"
@@ -39,7 +41,7 @@ pub fn setup(host_proxy_port: u32) {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn setup(_host_proxy_port: u32) {
+pub fn setup() {
     warn!("enclave networking (TAP + VSOCK) requires Linux; skipping");
 }
 

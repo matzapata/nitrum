@@ -28,6 +28,6 @@ async fn main() {
     let args = Args::parse();
     let cfg = config::load(&args.config);
 
-    Networking::start().unwrap();
-    Enclave::new().start();
+    Networking::start();
+    Enclave::start();
 }

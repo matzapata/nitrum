@@ -1,23 +1,24 @@
 use clap::Parser;
-use std::process::Command;
 use tracing::info;
 
+mod api;
+mod app;
+mod attestation;
+mod constants;
+mod ingress;
 mod networking;
+mod tls;
 
 use shared::config;
 
 #[derive(Parser)]
 #[command(name = "data-plane")]
 struct Args {
-    /// VSOCK port where gvproxy listens on the host (CID 3).
-    #[arg(long, default_value_t = 1024)]
-    host_proxy_port: u32,
-
-    /// Path to nitrum.toml. When present with a command after `--`, the app is run with networking up (ingress + egress).
+    /// Path to nitrum.toml.
     #[arg(long)]
     config: Option<std::path::PathBuf>,
 
-    /// Command to run after networking is up (e.g. `node /app/src/main.js`). Enables testing ingress and egress.
+    /// Command to run after networking and API are up (e.g. `node /app/src/main.js`).
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
 }
@@ -38,50 +39,33 @@ async fn main() {
         info!(path = %path.display(), "nitrum config loaded");
     }
 
-    networking::setup(args.host_proxy_port);
+    networking::setup();
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let api_addr = std::env::var("NITRUM_API_ADDR")
+        .unwrap_or_else(|_| constants::API_LISTEN_ADDR.to_string());
+    tokio::spawn(api::run(api_addr));
 
-    if !args.command.is_empty() {
-        info!(command = ?args.command, "running app for ingress/egress");
-        run_app(&args.command);
-        return;
+    let app_port = std::env::var("APP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(constants::APP_PORT);
+    let ingress_listen = std::env::var("INGRESS_LISTEN_ADDR")
+        .unwrap_or_else(|_| constants::INGRESS_LISTEN_ADDR.to_string());
+    let app_addr = format!("127.0.0.1:{app_port}");
+    let acceptor = tls::self_signed(vec!["localhost".to_string()]);
+    info!("generated self-signed TLS certificate");
+    tokio::spawn(ingress::run(ingress_listen, app_addr, acceptor));
+
+    if args.command.is_empty() {
+        info!("no user command; data-plane running (API only). Press Ctrl+C to exit.");
+        tokio::signal::ctrl_c().await.expect("failed to listen for ctrl_c");
+    } else {
+        let code = app::run(&args.command)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "failed to run user process");
+                1
+            });
+        std::process::exit(code);
     }
-
-    info!("testing connectivity via gvproxy …");
-    match test_connectivity().await {
-        Ok(body) => info!("httpbin.org/ip response:\n{body}"),
-        Err(e) => tracing::error!("connectivity test failed: {e}"),
-    }
-
-    info!("networking is up — keeping process alive");
-    std::future::pending::<()>().await;
-}
-
-fn run_app(argv: &[String]) {
-    let (program, rest) = argv
-        .split_first()
-        .expect("command non-empty");
-    let status = Command::new(program)
-        .args(rest)
-        .status()
-        .unwrap_or_else(|e| panic!("failed to run {program:?}: {e}"));
-    std::process::exit(
-        status.code().unwrap_or_else(|| libc::EXIT_FAILURE as i32),
-    );
-}
-
-async fn test_connectivity() -> Result<String, Box<dyn std::error::Error>> {
-    let client = reqwest::Client::builder()
-        .user_agent("nitrum-data-plane/0.1")
-        .build()?;
-
-    let response = client
-        .get("http://httpbin.org/ip")
-        .send()
-        .await?
-        .error_for_status()?;
-
-    let body = response.text().await?;
-    Ok(body)
 }
