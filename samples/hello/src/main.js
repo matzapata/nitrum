@@ -3,7 +3,7 @@
 const express = require("express");
 const axios = require("axios");
 
-const PORT = parseInt(process.env.PORT || "8008", 10);
+const PORT = parseInt(process.env.PORT || "8080", 10);
 const app = express();
 
 app.get("/health", (req, res) => {

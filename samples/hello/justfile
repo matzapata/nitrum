@@ -1,19 +1,27 @@
-DOCKERHUB_USER := "matzapata"
+dockerhub_user := "matzapata"
 
-# ── Enclave (VSock transport) ─────────────────────────────────────────────────
+# ── Build / run (tag = "dev" or "latest") ────────────────────────────────────
+# From repo root build base first: `just build-data-plane dev` or `just build-data-plane latest`.
 
-# TODO: build docker image then enclave.eif then control-plane
-build:
-    docker build --platform linux/amd64 --build-arg FEATURES=enclave -f samples/hello/Dockerfile -t nitrum/hello:latest ../..
+# Build hello image. tag="dev" uses data-plane:dev (no enclave); tag="latest" uses data-plane:latest (enclave).
+build tag="latest" no_cache="":
+    docker build --platform linux/amd64 \
+        --build-arg DATA_PLANE_IMAGE={{dockerhub_user}}/nitrum-data-plane:{{tag}} \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -f Dockerfile \
+        -t {{dockerhub_user}}/nitrum-hello:{{tag}} \
+        .
 
-rebuild:
-    docker build --platform linux/amd64 --no-cache --build-arg FEATURES=enclave -f samples/hello/Dockerfile -t nitrum/hello:latest ../..
+# Build with --no-cache.
+rebuild tag="latest":
+    just build {{tag}} true
 
-push: 
-    docker tag nitrum/hello:latest {{DOCKERHUB_USER}}/nitrum-hello:latest
-    docker push {{DOCKERHUB_USER}}/nitrum-hello:latest
+# Build then run with docker run --rm. Exposes 443 (ingress), 3000 (API).
+run tag="latest":
+    just build {{tag}}
+    docker run --rm -p 443:443 -p 3000:3000 {{dockerhub_user}}/nitrum-hello:{{tag}}
 
-# ── Compose ───────────────────────────────────────────────────────────────────
+# ── Compose ─────────────────────────────────────────────────────────────────
 
 up:
     docker compose up
@@ -27,7 +35,12 @@ logs:
 restart:
     docker compose down && docker compose up
 
-# ── E2E ───────────────────────────────────────────────────────────────────────
+# ── Push ─────────────────────────────────────────────────────────────────────
+
+push tag="latest":
+    docker push {{dockerhub_user}}/nitrum-hello:{{tag}}
+
+# ── E2E ─────────────────────────────────────────────────────────────────────
 
 # Hit all app endpoints via ingress (HTTPS on port 443).
 e2e:

@@ -1,3 +1,4 @@
+
 ################################################################################
 # gvproxy builder
 ################################################################################
@@ -10,10 +11,10 @@ RUN git clone --depth 1 --branch v0.7.4 https://github.com/containers/gvisor-tap
 RUN cd gvisor-tap-vsock && CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags '-extldflags "-static"' -o bin/gvproxy-linux-amd64 ./cmd/gvproxy
 
 ################################################################################
-# control plane builder
+# control-plane builder
 ################################################################################
 
-FROM rust:1.88-slim AS builder
+FROM rust:1.88-slim AS control-plane-builder
 
 WORKDIR /build
 
@@ -22,25 +23,36 @@ RUN apt-get update && apt-get install -y musl-tools \
 
 COPY Cargo.toml Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
+COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
+COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
+
+# Stub sources so workspace members parse (control-plane depends on shared; cli/data-plane are workspace members).
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src \
+&& echo 'fn main() {}' > crates/cli/src/main.rs \
+&& echo 'fn main() {}' > crates/data-plane/src/main.rs \
+&& echo 'fn main() {}' > crates/control-plane/src/main.rs
+
+COPY crates/shared/src crates/shared/src
+COPY crates/control-plane/src crates/control-plane/src
 
 RUN cargo build --release -p control-plane --target x86_64-unknown-linux-musl
 
-COPY crates/control-plane/src crates/control-plane/src
-RUN find crates/control-plane/src -name "*.rs" | xargs touch \
-    && cargo build --release -p control-plane --target x86_64-unknown-linux-musl
-
 ################################################################################
-# runtime
+# runtime 
 ################################################################################
 
-FROM alpine:3.20 AS runtime
+FROM amazonlinux:2 AS runtime
 
-RUN apk update && apk upgrade
-RUN apk --no-cache add curl ca-certificates
+RUN amazon-linux-extras install aws-nitro-enclaves-cli -y \
+    && yum install -y curl ca-certificates \
+    && yum clean all
 
+COPY --from=control-plane-builder /build/target/x86_64-unknown-linux-musl/release/control-plane /app/control-plane
 COPY --from=gvproxy-builder /gvisor-tap-vsock/bin/gvproxy-linux-amd64 /app/gvproxy
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/control-plane /app/control-plane
-RUN chmod +x /app/gvproxy /app/control-plane
+RUN chmod +x /app/control-plane /app/gvproxy
+
+ENV GVPROXY_BIN=/app/gvproxy
 
 EXPOSE 443
 EXPOSE 9090

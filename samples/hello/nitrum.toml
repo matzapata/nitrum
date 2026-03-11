@@ -1,3 +1,33 @@
+[service]
+# Port the app listens on (ingress forwards TLS traffic here as plain HTTP).
+port = 8080
+
+[health_check]
+# Path to the health check endpoint.
+path = "/health"
+
+# Port to use for the health check.
+port = 8080
+
+# Interval in seconds to wait between health checks.
+interval = 10
+
+[scaling]
+# Desired number of replicas for the enclave.
+desired_replicas = 1
+
+# Maximum number of replicas for the enclave.
+max_replicas = 1
+
+# Minimum number of replicas for the enclave.
+min_replicas = 1
+
+# Number of CPUs for the enclave.
+num_cpus = 2
+
+# RAM size in MB for the enclave.
+ram_size_mib = 4320
+
 [tls_termination]
 # When true, the data-plane terminates TLS on ingress and forwards plain HTTP to the app.
 # When false, ingress connections are forwarded as raw TCP (no TLS handling).
@@ -18,6 +48,6 @@ enabled = true
 # Regex patterns matched against outbound hostnames at DNS query time.
 # A hostname must match at least one pattern to be resolved. Blocked queries receive
 # NXDOMAIN. Connections to hard-coded IPs (bypassing DNS) are not filtered.
-whitelist = [
+destinations = [
     "httpbin\\.org$",
 ]

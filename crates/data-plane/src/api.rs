@@ -1,9 +1,11 @@
+//! Internal API endpoints available for the enclave.
+
+use crate::attestation::get_attestation_doc;
 use axum::{Json, Router, routing::post};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::info;
-use crate::attestation::get_attestation_doc;
 
 // ── /attestation ─────────────────────────────────────────────────────────────
 
@@ -32,17 +34,15 @@ async fn attestation(Json(req): Json<AttestationRequest>) -> Json<AttestationRes
     let public_key = req.public_key.as_deref().and_then(|s| B64.decode(s).ok());
     let user_data = req.user_data.as_deref().and_then(|s| B64.decode(s).ok());
 
-    let raw = get_attestation_doc(nonce, public_key, user_data)
-        .unwrap_or_else(|e| {
-            tracing::error!(error = %e, "attestation failed");
-            b"placeholder-attestation-document".to_vec()
-        });
+    let raw = get_attestation_doc(nonce, public_key, user_data).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "attestation failed");
+        b"placeholder-attestation-document".to_vec()
+    });
 
     Json(AttestationResponse {
         document: B64.encode(&raw),
     })
 }
-
 
 // ── /encrypt ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +67,8 @@ pub fn router() -> Router {
         .route("/decrypt", post(decrypt))
 }
 
-pub async fn run(addr: String) {
+pub async fn run() {
+    let addr = crate::constants::API_LISTEN_ADDR;
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("failed to bind API server on {addr}: {e}"));

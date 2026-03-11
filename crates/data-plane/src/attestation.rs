@@ -1,3 +1,4 @@
+//! Attestation document generation.
 
 /// Calls the Nitro Security Module to produce a signed attestation document.
 ///

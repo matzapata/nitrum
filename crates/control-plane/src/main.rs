@@ -1,23 +1,23 @@
 mod enclave;
 mod networking;
 
-use std::path::PathBuf;
 use clap::Parser;
-use tracing::info;
-use shared::config;
-use networking::Networking;
 use enclave::Enclave;
+use networking::Networking;
+use tracing::info;
 
 #[derive(clap::Parser)]
 #[command(name = "control-plane")]
 struct Args {
-    /// Path to nitrum.toml.
-    #[arg(long, default_value = "./nitrum.toml")]
-    config: PathBuf,
+    /// Enable debug mode.
+    #[arg(long, default_value = "false")]
+    debug_mode: bool,
 }
 
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -25,9 +25,22 @@ async fn main() {
         )
         .init();
 
-    let args = Args::parse();
-    let cfg = config::load(&args.config);
+    let _networking = Networking::run().await.unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to start networking");
+        // TODO: graceful shutdown
+        std::process::exit(1);
+    });
+    info!("networking up, waiting for shutdown signal");
 
-    Networking::start();
-    Enclave::start();
+    let _enclave = Enclave::run(args.debug_mode).await.unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to start enclave");
+        // TODO: graceful shutdown
+        std::process::exit(1);
+    });
+    info!("enclave started, waiting for shutdown signal");
+
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for ctrl_c");
+    info!("received SIGINT, shutting down");
 }

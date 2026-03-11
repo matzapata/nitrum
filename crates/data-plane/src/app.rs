@@ -34,7 +34,7 @@ pub async fn run(command: &[String]) -> std::io::Result<i32> {
     // Allow a moment for final lines to be read
     let _ = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        tokio::join!(stdout_handle, stderr_handle),
+        async move { tokio::join!(stdout_handle, stderr_handle) },
     )
     .await;
 

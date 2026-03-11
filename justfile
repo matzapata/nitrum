@@ -1,51 +1,59 @@
-DOCKERHUB_USER := "matzapata"
-CONTROL_PLANE_TAG := "matzapata/control-plane:latest"
-CONTROL_PLANE_DEV_TAG := "matzapata/control-plane:dev"
-DATA_PLANE_TAG := "matzapata/data-plane:latest"
-DATA_PLANE_DEV_TAG := "matzapata/data-plane:dev"
+dockerhub_user := "matzapata"
 
-# ── Dev builds (TCP transport, no enclave feature) ───────────────────────────
+# ── dev tools ─────────────────────────────────────────
 
-build-control-plane-dev:
-    docker build --platform linux/amd64 -f docker/control-plane.dockerfile -t {{CONTROL_PLANE_DEV_TAG}} .
+check:
+    cargo check --all-targets
 
-rebuild-control-plane-dev:
-    docker build --platform linux/amd64 -f docker/control-plane.dockerfile --no-cache -t {{CONTROL_PLANE_DEV_TAG}} .
+lint:
+    cargo clippy --all-targets --all-features
 
-build-data-plane-dev:
-    docker build --platform linux/amd64 -f docker/data-plane.dockerfile -t {{DATA_PLANE_DEV_TAG}} .
+format:
+    cargo fmt --all
 
-rebuild-data-plane-dev:
-    docker build --platform linux/amd64 -f docker/data-plane.dockerfile --no-cache -t {{DATA_PLANE_DEV_TAG}} .
+# ── Docker builds ───────────────────────────────────
 
-build-dev: build-control-plane-dev build-data-plane-dev
+build-nitro-cli tag="latest" no_cache="":
+    docker build \
+        --platform linux/amd64 \
+        -f docker/nitro-cli.dockerfile \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -t {{ dockerhub_user }}/nitrum-nitro-cli:{{tag}} \
+        .
 
-rebuild-dev: rebuild-control-plane-dev rebuild-data-plane-dev
+push-nitro-cli tag="latest":
+    docker push {{dockerhub_user}}/nitrum-nitro-cli:{{tag}}
 
-# ── Enclave builds (VSock transport, enclave feature enabled, AMD64) ──────────
+build-control-plane tag="latest" no_cache="":
+    docker build \
+        --platform linux/amd64 \
+        {{ if tag == "dev" { "-f docker/control-plane.dockerfile" } else { "-f docker/control-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -t {{ dockerhub_user }}/nitrum-control-plane:{{tag}} \
+        .
 
-build-control-plane:
-    docker build --platform linux/amd64 -f docker/control-plane.dockerfile --build-arg FEATURES=enclave -t {{CONTROL_PLANE_TAG}} .
+push-control-plane tag="latest":
+    docker push {{dockerhub_user}}/nitrum-control-plane:{{tag}}
 
-rebuild-control-plane:
-    docker build --platform linux/amd64 -f docker/control-plane.dockerfile --no-cache --build-arg FEATURES=enclave -t {{CONTROL_PLANE_TAG}} .
+build-data-plane tag="latest" no_cache="":
+    docker build \
+        --platform linux/amd64 \
+        {{ if tag == "dev" { "-f docker/data-plane.dockerfile" } else { "-f docker/data-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}} \
+        .
 
-build-data-plane:
+push-data-plane tag="latest":
+    docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}
 
-rebuild-data-plane:
-    docker build --platform linux/amd64 -f docker/data-plane.dockerfile --no-cache --build-arg FEATURES=enclave -t {{DATA_PLANE_TAG}} .
+build tag="latest" no_cache="":
+    just build-control-plane {{tag}} {{no_cache}}
+    just build-data-plane {{tag}} {{no_cache}}
 
-build: build-control-plane build-data-plane
+# ── Push ──────────────────────────────────────────────
 
-rebuild: rebuild-control-plane rebuild-data-plane
-
-# ── Docker Hub publish ────────────────────────────────────────────────────────
-
-push-control-plane: rebuild-control-plane
-    docker push {{CONTROL_PLANE_TAG}}
-
-push-data-plane: rebuild-data-plane
-    docker push {{DATA_PLANE_TAG}}
-
-push: push-control-plane push-data-plane
-
+push-all tag="latest":
+    just push-control-plane {{tag}}
+    just push-data-plane {{tag}}
+    just push-nitro-cli {{tag}} 
+    

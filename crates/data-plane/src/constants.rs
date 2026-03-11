@@ -6,6 +6,3 @@ pub const API_LISTEN_ADDR: &str = "0.0.0.0:3000";
 
 /// Ingress proxy: listens here and forwards to the user app.
 pub const INGRESS_LISTEN_ADDR: &str = "0.0.0.0:443";
-
-/// Port the user app listens on inside the enclave.
-pub const APP_PORT: u16 = 8080;

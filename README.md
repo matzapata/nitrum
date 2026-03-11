@@ -3,11 +3,16 @@
 
 <!-- cli to work with it all -->
 <!-- control plane kick it all off -->
-<!-- TODO: data-plane networking setup -->
-<!-- TODO: data-plane kickoff app -->
-<!-- TODO: data-plane terminate tls -->
-<!-- TODO: data-plane  -->
+<!-- TODO: pull   -->
 <!-- TODO: dev mode -->
+<!-- TODO: add prometheus -->
+
+Test in aws:
+- cli deployment management
+- letsencrypt cert with renewal
+- kms
+- dynamo state with locks
+
 
 TODO: use this to add the enclave file to the control-plane, then it's simply running that
 ```
@@ -63,4 +68,19 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
   build-enclave \
   --docker-uri matzapata/data-plane:latest \
   --output-file /output/enclave.eif
+```
+
+
+
+```bash
+# build for prod
+just build-data-plane
+just build-control-plane
+
+# build for local running
+just build-data-plane dev
+just build-control-plane dev
+
+# To rebuild without cache
+just build-data-plane dev true
 ```

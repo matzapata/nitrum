@@ -417,6 +417,8 @@ If the output is `[]`, no enclave is running.
    ```
 3. Watch console output for errors (certificate fetch, nitriding, app startup). Fix any misconfiguration (e.g. domain, Auth0, RDS, KMS) 
 
+curl -k https://Nitrum-Nitro-x2FdsBl5rVBA-9de4f60889c4b629.elb.sa-east-1.amazonaws.com/health
+
 ---
 
 
@@ -492,9 +494,21 @@ export APP_DIRECTORY=/Users/matzapata/git/enclaves-poc/nitrum/samples/hello
 aws ssm start-session --target $(./scripts/get_asg_instances.sh "$(jq -r '.NitrumStack.ASGGroupName' out.json)") --region "$CDK_DEPLOY_REGION"
 
 
-sudo docker pull matzapata/control-plane:latest && sudo docker pull matzapata/data-plane:latest
+sudo docker pull matzapata/nitrum-control-plane:latest && sudo docker pull matzapata/nitrum-hello:latest
 
-sudo mkdir -p /home/ec2-user/app/server && sudo chown ec2-user:ec2-user /home/ec2-user/app/server && sudo nitro-cli build-enclave --docker-uri matzapata/data-plane:latest --output-file /home/ec2-user/app/server/enclave.eif
+sudo nitro-cli build-enclave --docker-uri matzapata/nitrum-hello:latest --output-file /usr/bin/enclave.eif
+
+
+sudo docker run -d --name control-plane \
+  --privileged \
+  --security-opt seccomp=unconfined \
+  -p 443:443 \
+  -p 9090:9090 \
+  -v /usr/bin/enclave.eif:/app/enclave.eif \
+  matzapata/nitrum-control-plane:latest /app/control-plane --debug-mode
+
+
+curl -k https://localhost/health
 
 sudo docker run -d --name gvproxy \
   --privileged \
@@ -503,10 +517,18 @@ sudo docker run -d --name gvproxy \
   -p 9090:9090 \
   matzapata/gvproxy:latest 
 
+
+sudo docker run \
+  -v $(pwd):/app \
+  --privileged \
+  --security-opt seccomp=unconfined \
+  matzapata/nitrum-control-plane:latest \
+  sh
+
 sudo nitro-cli run-enclave \
   --cpu-count 2 \
   --memory 4320 \
-  --eif-path "/home/ec2-user/app/server/enclave.eif" \
+  --eif-path "enclave.eif" \
   --enclave-cid 16 \
   --enclave-name app \
   --attach-console 

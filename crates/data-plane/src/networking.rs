@@ -1,8 +1,7 @@
 // TODO: cleanup this
 
-use tracing::warn;
-#[cfg(target_os = "linux")]
 use tracing::info;
+use tracing::warn;
 
 /// Set up enclave networking via TAP device + VSOCK to gvproxy on the host.
 ///
@@ -10,18 +9,25 @@ use tracing::info;
 /// handshake, configures the interface (IP, MAC, MTU, gateway, resolv.conf), and
 /// spawns two threads that forward L2 frames between the TAP and the VSOCK stream
 /// using the 2-byte little-endian length-prefixed protocol.
-#[cfg(target_os = "linux")]
-pub fn setup() {
-    use linux::*;
+#[cfg(feature = "enclave")]
+pub async fn run() {
+    use enclave::*;
 
-    // TODO: make this configurable
     let host_proxy_port = crate::constants::HOST_PROXY_PORT;
     info!(
         port = host_proxy_port,
         "setting up enclave networking (TAP + VSOCK → gvproxy)"
     );
 
-    let vsock_fd = connect_vsock_with_retry(host_proxy_port);
+    let vsock_fd = loop {
+        match connect_vsock(host_proxy_port) {
+            Ok(fd) => break fd,
+            Err(e) => {
+                info!(error = %e, "VSOCK connect failed, retrying in 1 s …");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    };
     info!(port = host_proxy_port, "connected to gvproxy via VSOCK");
 
     send_handshake(vsock_fd).expect("failed to send POST /connect handshake");
@@ -38,20 +44,22 @@ pub fn setup() {
 
     start_forwarding(tap_fd, vsock_fd);
     info!("frame forwarding started (TAP ↔ VSOCK)");
+
+    std::future::pending::<()>().await
 }
 
-#[cfg(not(target_os = "linux"))]
-pub fn setup() {
+#[cfg(not(feature = "enclave"))]
+pub async fn run() {
     warn!("enclave networking (TAP + VSOCK) requires Linux; skipping");
 }
 
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "linux")]
-mod linux {
+#[cfg(feature = "enclave")]
+mod enclave {
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tracing::{error, info};
 
     pub const TAP_DEVICE_NAME: &str = "tap0";
@@ -105,7 +113,9 @@ mod linux {
         let rc = unsafe { libc::ioctl(fd, TUNSETIFF as _, &ifr) };
         if rc < 0 {
             let err = std::io::Error::last_os_error();
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
             return Err(err);
         }
 
@@ -113,12 +123,19 @@ mod linux {
     }
 
     pub fn configure_tap() {
+        run_ip(&["link", "set", "dev", "lo", "up"]);
         run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC]);
         run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME]);
         run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU]);
         run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"]);
         run_ip(&[
-            "route", "add", "default", "via", TAP_GATEWAY, "dev", TAP_DEVICE_NAME,
+            "route",
+            "add",
+            "default",
+            "via",
+            TAP_GATEWAY,
+            "dev",
+            TAP_DEVICE_NAME,
         ]);
     }
 
@@ -137,15 +154,14 @@ mod linux {
     // ── resolv.conf ─────────────────────────────────────────────────────────
 
     pub fn write_resolv_conf() {
-        std::fs::create_dir_all("/run/resolvconf")
-        .expect("failed to create /run/resolvconf");
+        std::fs::create_dir_all("/run/resolvconf").expect("failed to create /run/resolvconf");
         std::fs::write("/run/resolvconf/resolv.conf", "nameserver 192.168.127.1\n")
             .expect("failed to write /run/resolvconf/resolv.conf");
     }
 
     // ── VSOCK connection ────────────────────────────────────────────────────
 
-    fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
+    pub fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
         let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
@@ -169,23 +185,13 @@ mod linux {
 
         if rc < 0 {
             let err = std::io::Error::last_os_error();
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
             return Err(err);
         }
 
         Ok(fd)
-    }
-
-    pub fn connect_vsock_with_retry(port: u32) -> libc::c_int {
-        loop {
-            match connect_vsock(port) {
-                Ok(fd) => return fd,
-                Err(e) => {
-                    info!(error = %e, "VSOCK connect failed, retrying in 1 s …");
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                }
-            }
-        }
     }
 
     // ── Handshake ───────────────────────────────────────────────────────────
@@ -245,9 +251,7 @@ mod linux {
     fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: Arc<AtomicBool>) {
         let mut buf = vec![0u8; MAX_FRAME_SIZE];
         while running.load(Ordering::Relaxed) {
-            let n = unsafe {
-                libc::read(tap_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-            };
+            let n = unsafe { libc::read(tap_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if n <= 0 {
                 error!("TAP read error or EOF (n={n})");
                 break;
