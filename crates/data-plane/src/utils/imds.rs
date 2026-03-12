@@ -21,6 +21,7 @@ async fn get_token(client: &reqwest::Client) -> Result<String> {
         .context("failed to read IMDSv2 token body")
 }
 
+// TODO: get dynamo table and etc, etc
 /// Returns the AWS region this instance is running in.
 pub async fn get_region() -> Result<String> {
     // Prefer the environment variable so local dev works without a real IMDS.
@@ -46,4 +47,31 @@ pub async fn get_region() -> Result<String> {
         .context("failed to read IMDS region body")?;
 
     Ok(region)
+}
+
+/// Returns a unique instance ID for this process (leader lock owner).
+/// Tries IMDS instance-id first, then NITRUM_INSTANCE_ID env, then a local fallback.
+pub async fn instance_id() -> Result<String> {
+    if let Ok(id) = std::env::var("NITRUM_INSTANCE_ID") {
+        return Ok(id);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .context("failed to build HTTP client for IMDS")?;
+
+    let token = get_token(&client).await?;
+
+    let id = client
+        .get(format!("{IMDS_BASE}/meta-data/instance-id"))
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await
+        .context("IMDS instance-id request failed")?
+        .text()
+        .await
+        .context("failed to read IMDS instance-id body")?;
+
+    Ok(id)
 }

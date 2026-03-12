@@ -1,17 +1,18 @@
-use clap::Parser;
-use tracing::info;
+use std::path::Path;
+use std::sync::Arc;
 
-mod api;
-mod app;
-mod attestation;
+use clap::Parser;
+use tracing::{error, info};
+
+mod config;
 mod constants;
 mod crypto;
-mod infra;
-mod ingress;
 mod networking;
-mod tls;
+mod server;
+mod state;
+mod storage;
+mod utils;
 
-use shared::config;
 
 #[derive(Parser)]
 #[command(name = "data-plane")]
@@ -42,43 +43,54 @@ async fn main() {
     let args = Args::parse();
 
     if args.command.is_empty() {
-        tracing::error!("no user command provided");
+        error!("no user command provided");
         std::process::exit(1);
     }
 
-    let path = args
+    let config_path = args
         .config
         .as_deref()
-        .unwrap_or(std::path::Path::new("nitrum.toml"));
-    let cfg = config::load(path);
+        .unwrap_or_else(|| Path::new("nitrum.toml"));
+    let nitrum = shared::config::load(config_path);
 
-    let crypto = std::sync::Arc::new(crypto::setup().await.unwrap_or_else(|e| {
-        tracing::error!(error = %e, "crypto setup failed");
+    let app_config = config::AppConfig::load(nitrum).await.unwrap_or_else(|e| {
+        error!(error = %e, "failed to load app config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
         std::process::exit(1);
-    }));
-
-    tokio::spawn(async {
-        info!("networking task starting");
-        networking::run().await;
-        tracing::warn!("networking task exited");
     });
 
-    let api_crypto = crypto.clone();
+    let infra = Arc::new(storage::InfraClients::from_config(app_config.clone()).await);
+    let state = Arc::new(state::DataPlaneState::new(app_config, infra.clone()));
+
+    networking::run().await;
+
+    let crypto_api = crypto::CryptoApi::setup(infra.as_ref()).await.unwrap_or_else(|e| {
+        error!(error = %e, "crypto setup failed");
+        std::process::exit(1);
+    });
+
+    let acceptor = server::tls::acceptor(infra.as_ref(), &state.config.nitrum.tls_termination.domain)
+        .await
+        .unwrap_or_else(|e| {
+            error!(error = %e, "TLS acceptor failed");
+            std::process::exit(1);
+        });
+
+    let api_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");
-        api::run(api_crypto).await;
+        crypto_api.run(api_state).await;
         tracing::warn!("API task exited");
     });
 
-    let acceptor = tls::self_signed(vec![cfg.tls_termination.domain]);
+    let service_port = state.config.nitrum.service.port;
     tokio::spawn(async move {
-        info!(app_port = cfg.service.port, "ingress task starting");
-        ingress::run(cfg.service.port, acceptor).await;
+        info!(app_port = service_port, "ingress task starting");
+        server::ingress::run(service_port, acceptor).await;
         tracing::warn!("ingress task exited");
     });
 
     let exit_code = tokio::select! {
-        result = app::run(&args.command) => {
+        result = server::runner::run(&args.command) => {
             result.unwrap_or_else(|e| {
                 tracing::error!(error = %e, "failed to run user process");
                 1

@@ -1,4 +1,4 @@
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct HealthCheck {
     /// Path to the health check endpoint.
     pub path: String,
@@ -20,7 +20,7 @@ impl Default for HealthCheck {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Scaling {
     /// Desired number of replicas.
     pub desired_replicas: u32,
@@ -50,7 +50,7 @@ impl Default for Scaling {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct TlsTermination {
     /// Whether to terminate TLS at the data-plane and forward plain HTTP to the app.
     pub enabled: bool,
@@ -73,7 +73,7 @@ impl Default for TlsTermination {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Egress {
     /// When false, all outbound traffic is allowed regardless of whitelist.
     pub enabled: bool,
@@ -92,7 +92,7 @@ impl Default for Egress {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Service {
     /// Port to use for the service.
     pub port: u16,
@@ -104,7 +104,7 @@ impl Default for Service {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct Config {
     pub service: Service,
     pub health_check: HealthCheck,

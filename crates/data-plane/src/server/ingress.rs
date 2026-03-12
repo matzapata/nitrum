@@ -19,6 +19,7 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const PATH_STATUS: &str = "/.well-known/enclave/status";
 const PATH_ATTESTATION: &str = "/.well-known/enclave/attestation";
 
+// TODO: these are hardcoded, they should not.
 const RESP_STATUS: &[u8] = b"\
 HTTP/1.1 200 OK\r\n\
 Content-Type: application/json\r\n\
