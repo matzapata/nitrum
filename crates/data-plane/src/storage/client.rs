@@ -14,17 +14,41 @@ use aws_sdk_dynamodb::{
     types::AttributeValue,
 };
 
+use crate::config::RuntimeConfig;
+
 // ── StorageClient ────────────────────────────────────────────────────────────
 
 /// Client for the shared object storage table. Holds table name and DynamoDB client.
-pub struct DynamoDBClient {
+pub struct StorageClient {
     client: Client,
     table: String,
 }
 
-impl DynamoDBClient {
-    pub fn new(client: Client, table: String) -> Self {
-        Self { client, table }
+impl StorageClient {
+    /// Build from runtime config and shared SDK config (DynamoDB encapsulated in storage).
+    pub async fn new(config: &RuntimeConfig) -> Self {
+        let sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .load()
+            .await;
+        let mut builder = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+        if let Some(ref endpoint) = config.dynamodb_endpoint {
+            builder = builder.endpoint_url(endpoint);
+        }   
+        let client = Client::from_conf(builder.build()).await;
+        Self {
+            client,
+            table: config.dynamodb_table.clone(),
+        }
+    }
+
+    /// For use by Leader only: access the underlying DynamoDB client and table name.
+    pub(crate) fn dynamo_client(&self) -> &Client {
+        &self.client
+    }
+
+    /// For use by Leader only: table name.
+    pub(crate) fn table_name(&self) -> &str {
+        &self.table
     }
 
     /// Fetch an object by key. Returns `None` if the key does not exist.

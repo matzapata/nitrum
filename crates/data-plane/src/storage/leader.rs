@@ -1,7 +1,9 @@
 //! Distributed leader lock for critical sections (e.g. DEK or cert creation).
 //!
-//! [`Leader`] holds client, table, and owner: use [`Leader::try_acquire_leader`] without
-//! passing them each time. Dropping [`LeaderGuard`] releases the lock (best-effort via a spawned task).
+//! [`Leader`] takes storage as a dependency and uses its DynamoDB client/table for the lock.
+//! Dropping [`LeaderGuard`] releases the lock (best-effort via a spawned task).
+
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use aws_sdk_dynamodb::{
@@ -12,34 +14,31 @@ use aws_sdk_dynamodb::{
 };
 
 use crate::constants::{LOCK_OBJECT_KEY, LOCK_TTL_SECS};
-use crate::utils::{dynamodb, time};
+use crate::utils::time;
+
+use super::client::StorageClient;
 
 // ── Leader ───────────────────────────────────────────────────────────────────
 
-/// Leader election client bound to a table and owner. Try to become leader without passing client/table/owner each time.
+/// Leader election using the same storage table. Try to become leader without passing client/table each time.
 pub struct Leader {
-    client: Client,
-    table: String,
+    storage: Arc<StorageClient>,
     owner: String,
 }
 
 impl Leader {
-    pub fn new(client: Client, table: String, owner: String) -> Self {
-        Self {
-            client,
-            table,
-            owner,
-        }
+    pub fn new(storage: Arc<StorageClient>, owner: String) -> Self {
+        Self { storage, owner }
     }
 
     /// Try to become leader for a critical section. Returns a guard if this instance got the lock.
     pub async fn try_acquire_leader(&self) -> Result<Option<LeaderGuard>> {
-        let acquired =
-            try_acquire_lock(&self.client, &self.table, &self.owner).await?;
+        let client = self.storage.dynamo_client();
+        let table = self.storage.table_name();
+        let acquired = try_acquire_lock(client, table, &self.owner).await?;
         Ok(if acquired {
             Some(LeaderGuard {
-                client: self.client.clone(),
-                table: self.table.clone(),
+                storage: self.storage.clone(),
                 owner: self.owner.clone(),
             })
         } else {
@@ -73,7 +72,7 @@ pub async fn try_acquire_lock(client: &Client, table: &str, owner: &str) -> Resu
 
     match result {
         Ok(_) => Ok(true),
-        Err(e) if dynamodb::is_condition_failed(&e) => Ok(false),
+        Err(e) if is_condition_failed(&e) => Ok(false),
         Err(e) => Err(e).context("DynamoDB try_acquire_lock failed"),
     }
 }
@@ -95,25 +94,33 @@ pub async fn release_lock(client: &Client, table: &str, owner: &str) -> Result<(
 
 /// Guard that holds the leader lock. Dropping it releases the lock (best-effort, via a spawned task).
 pub struct LeaderGuard {
-    client: Client,
-    table: String,
+    storage: Arc<StorageClient>,
     owner: String,
 }
 
 impl LeaderGuard {
     /// Release the lock immediately so another instance can become leader.
     pub async fn release(self) -> Result<()> {
-        release_lock(&self.client, &self.table, &self.owner).await
+        release_lock(
+            self.storage.dynamo_client(),
+            self.storage.table_name(),
+            &self.owner,
+        )
+        .await
     }
 }
 
 impl Drop for LeaderGuard {
     fn drop(&mut self) {
-        let client = self.client.clone();
-        let table = self.table.clone();
+        let storage = self.storage.clone();
         let owner = self.owner.clone();
         tokio::spawn(async move {
-            let _ = release_lock(&client, &table, &owner).await;
+            let _ = release_lock(
+                storage.dynamo_client(),
+                storage.table_name(),
+                &owner,
+            )
+            .await;
         });
     }
 }

@@ -1,20 +1,33 @@
-//! Shared state for the data-plane: config and infra clients.
+//! Shared state for the data-plane: config and clients.
 
 use std::sync::Arc;
 
-use crate::config::AppConfig;
-use crate::storage::InfraClients;
+use crate::config::RuntimeConfig;
+use crate::crypto::CryptoClient;
+use crate::storage::{Leader, StorageClient};
 
-/// Shared state for the data-plane: config and infra clients.
+/// Shared state for the data-plane: config and clients.
 /// Passed to API, ingress, crypto, tls, etc. (e.g. `Arc<DataPlaneState>` or `State<DataPlaneState>` in Axum).
 #[derive(Clone)]
 pub struct DataPlaneState {
-    pub config: AppConfig,
-    pub infra: Arc<InfraClients>,
+    pub config: RuntimeConfig,
+    pub storage: Arc<StorageClient>,
+    pub leader: Arc<Leader>,
+    pub crypto: Arc<CryptoClient>,
 }
 
 impl DataPlaneState {
-    pub fn new(config: AppConfig, infra: Arc<InfraClients>) -> Self {
-        Self { config, infra }
+    pub fn new(
+        config: RuntimeConfig,
+        storage: Arc<StorageClient>,
+        leader: Arc<Leader>,
+        crypto: Arc<CryptoClient>,
+    ) -> Self {
+        Self {
+            config,
+            storage,
+            leader,
+            crypto,
+        }
     }
 }

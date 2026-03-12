@@ -1,13 +1,13 @@
 //! Data-plane runtime config: nitrum.toml plus env-derived infra settings.
 
 use anyhow::{Context, Result};
-
+use std::path::Path;
 use shared::config::Config as NitrumConfig;
 
 // TODO: rename as data plane config or enclave config
 /// Data-plane runtime config: nitrum.toml plus env-derived infra settings.
 #[derive(Clone)]
-pub struct AppConfig {
+pub struct RuntimeConfig {
     /// From nitrum.toml (service, tls_termination, etc.).
     pub nitrum: NitrumConfig,
     /// DynamoDB table name (env: NITRUM_DYNAMODB_TABLE).
@@ -20,10 +20,12 @@ pub struct AppConfig {
     pub instance_id: String,
 }
 
-impl AppConfig {
+impl RuntimeConfig {
     /// Load infra settings from environment and IMDS. Requires NITRUM_DYNAMODB_TABLE and
     /// NITRUM_KMS_KEY_ID to be set (unless using dev fallbacks).
-    pub async fn load(nitrum: NitrumConfig) -> Result<Self> {
+    pub async fn load(config_path: &Path) -> Result<Self> {
+        let nitrum = shared::config::load(config_path);
+
         let dynamodb_table = std::env::var("NITRUM_DYNAMODB_TABLE")
             .context("NITRUM_DYNAMODB_TABLE not set")?;
         let kms_key_id = std::env::var("NITRUM_KMS_KEY_ID").context("NITRUM_KMS_KEY_ID not set")?;
@@ -46,7 +48,9 @@ impl AppConfig {
 
     // TODO: load dev with feature flag
     /// Load with dev defaults when env vars are absent (e.g. local testing without AWS).
-    pub async fn load_dev(nitrum: NitrumConfig) -> Self {
+    pub async fn load_dev(config_path: &Path) -> Self {
+        let nitrum = shared::config::load(config_path);
+        
         let dynamodb_table = std::env::var("NITRUM_DYNAMODB_TABLE")
             .unwrap_or_else(|_| "nitrum-dev".to_string());
         let kms_key_id =

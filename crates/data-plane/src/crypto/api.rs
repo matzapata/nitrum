@@ -5,116 +5,25 @@
 
 use std::sync::Arc;
 
-use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    Aes256Gcm, Key, Nonce,
-};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::attest::get_attestation_doc;
-use crate::storage::{keys, InfraClients};
 use crate::state::DataPlaneState;
 
-use super::rand;
-
-// ── Crypto (inner) ───────────────────────────────────────────────────────────
-
-/// Symmetric encryption using a Data Encryption Key (DEK).
-/// Output format: `nonce (12 B) || ciphertext+tag`.
-pub struct Crypto {
-    dek: Vec<u8>,
-}
-
-impl Crypto {
-    /// Encrypt `data` with AES-256-GCM. Returns `nonce (12 bytes) || ciphertext+tag`.
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let key = Key::<Aes256Gcm>::from_slice(&self.dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher
-            .encrypt(&nonce, data)
-            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
-        let mut out = nonce.to_vec();
-        out.extend_from_slice(&ciphertext);
-        Ok(out)
-    }
-
-    /// Decrypt a blob produced by [`Crypto::encrypt`].
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        const NONCE_LEN: usize = 12;
-        anyhow::ensure!(data.len() > NONCE_LEN, "ciphertext too short");
-        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-        let key = Key::<Aes256Gcm>::from_slice(&self.dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow::anyhow!("AES-GCM decrypt error: {e}"))
-    }
-}
+use super::client::CryptoClient;
 
 // ── CryptoApi ─────────────────────────────────────────────────────────────────
 
 /// Crypto API: DEK-backed crypto + HTTP server. Use [`CryptoApi::setup`] then [`CryptoApi::run`].
 pub struct CryptoApi {
-    pub crypto: Arc<Crypto>,
+    pub crypto: Arc<CryptoClient>,
 }
 
 impl CryptoApi {
-    /// Bootstrap DEK from infra (fetch from storage or create as leader), then return a [`CryptoApi`].
-    pub async fn setup(infra: &InfraClients) -> Result<Self> {
-        loop {
-            if let Some(encrypted_dek) = infra
-                .storage
-                .get_object(keys::DEK_OBJECT_KEY)
-                .await
-                .context("failed to retrieve DEK from DynamoDB")?
-            {
-                tracing::info!("DEK found in DynamoDB, decrypting with KMS");
-                let dek = infra
-                    .kms
-                    .decrypt_with_attestation(&encrypted_dek)
-                    .await
-                    .context("failed to decrypt DEK with KMS")?;
-                return Ok(Self {
-                    crypto: Arc::new(Crypto { dek }),
-                });
-            }
-
-            if let Some(_guard) = infra.leader.try_acquire_leader().await? {
-                tracing::info!("no DEK in DynamoDB, generating a new one (leader)");
-                let dek = rand::random_key_32().context("failed to generate DEK")?;
-
-                let encrypted_dek = infra
-                    .kms
-                    .encrypt(&dek)
-                    .await
-                    .context("failed to encrypt DEK with KMS")?;
-
-                let stored = infra
-                    .storage
-                    .put_object(keys::DEK_OBJECT_KEY, &encrypted_dek)
-                    .await
-                    .context("failed to store DEK in DynamoDB")?;
-
-                if stored {
-                    tracing::info!("DEK stored successfully");
-                    return Ok(Self {
-                        crypto: Arc::new(Crypto { dek }),
-                    });
-                }
-            } else {
-                tracing::debug!("no DEK yet and not leader, retrying read");
-            }
-
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-    }
-
     /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
     pub async fn run(self, state: Arc<DataPlaneState>) {
         let addr = crate::constants::API_LISTEN_ADDR;
@@ -127,7 +36,6 @@ impl CryptoApi {
         axum::serve(
             listener,
             router(AppState {
-                state,
                 crypto: self.crypto,
             }),
         )
@@ -140,8 +48,7 @@ impl CryptoApi {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub state: Arc<DataPlaneState>,
-    pub crypto: Arc<Crypto>,
+    pub crypto: Arc<CryptoClient>,
 }
 
 #[derive(Deserialize)]

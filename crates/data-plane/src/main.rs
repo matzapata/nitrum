@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -13,13 +13,12 @@ mod state;
 mod storage;
 mod utils;
 
-
 #[derive(Parser)]
 #[command(name = "data-plane")]
 struct Args {
     /// Path to nitrum.toml.
-    #[arg(long)]
-    config: Option<std::path::PathBuf>,
+    #[arg(long, default_value = "nitrum.toml")]
+    config: PathBuf,
 
     /// Command to run after networking and API are up (e.g. `node /app/src/main.js`).
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -47,34 +46,56 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let config_path = args
-        .config
-        .as_deref()
-        .unwrap_or_else(|| Path::new("nitrum.toml"));
-    let nitrum = shared::config::load(config_path);
-
-    let app_config = config::AppConfig::load(nitrum).await.unwrap_or_else(|e| {
-        error!(error = %e, "failed to load app config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
+    let runtime_config = config::RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
+        error!(error = %e, "failed to load runtime config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
         std::process::exit(1);
     });
 
-    let infra = Arc::new(storage::InfraClients::from_config(app_config.clone()).await);
-    let state = Arc::new(state::DataPlaneState::new(app_config, infra.clone()));
-
+    // Kick off networking first, most services depend on it
     networking::run().await;
 
-    let crypto_api = crypto::CryptoApi::setup(infra.as_ref()).await.unwrap_or_else(|e| {
-        error!(error = %e, "crypto setup failed");
-        std::process::exit(1);
-    });
+    // Create storage client
+    let storage = Arc::new(storage::StorageClient::new(&runtime_config));
 
-    let acceptor = server::tls::acceptor(infra.as_ref(), &state.config.nitrum.tls_termination.domain)
+    // Create leader client, used to acquire leader lock for critical sections
+    let leader = Arc::new(storage::Leader::new(
+        storage.clone(),
+        runtime_config.instance_id.clone(),
+    ));
+
+    // Create crypto client, used to encrypt and decrypt data
+    let crypto = Arc::new(
+        crypto::CryptoClient::new(
+            runtime_config.clone(),
+            storage.clone(),
+            leader.clone(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            error!(error = %e, "crypto setup failed");
+            std::process::exit(1);
+        }),
+    );
+
+    // Create state
+    let state = Arc::new(state::DataPlaneState::new(
+        runtime_config.clone(),
+        storage,
+        leader,
+        crypto.clone(),
+    ));
+
+    // Create tls acceptor
+    let acceptor = server::tls::acceptor(state.as_ref(), &state.config.nitrum.tls_termination.domain)
         .await
         .unwrap_or_else(|e| {
             error!(error = %e, "TLS acceptor failed");
             std::process::exit(1);
         });
 
+    let crypto_api = crypto::CryptoApi {
+        crypto: crypto.clone(),
+    };
     let api_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");

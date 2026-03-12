@@ -91,7 +91,7 @@ impl Kms {
             .context("failed to DER-encode ephemeral public key")?
             .to_vec();
 
-        let attestation_doc = crate::attestation::get_attestation_doc(None, Some(public_key_der), None)
+        let attestation_doc = crate::crypto::attest::get_attestation_doc(None, Some(public_key_der), None)
             .map_err(|e| anyhow::anyhow!("attestation failed: {e}"))?;
 
         let recipient = RecipientInfo::builder()

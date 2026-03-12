@@ -1,8 +1,6 @@
-mod clients;
-mod dynamodb;
+mod client;
 pub mod keys;
 pub mod leader;
 
-pub use clients::InfraClients;
-pub use dynamodb::DynamoDBClient as StorageClient;
+pub use client::StorageClient;
 pub use leader::Leader;
