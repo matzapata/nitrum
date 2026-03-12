@@ -47,6 +47,10 @@ e2e:
     #!/usr/bin/env bash
     set -e
     base="https://localhost"
+    echo "→ GET $base/.well-known/enclave/status"
+    curl -sfk "$base/.well-known/enclave/status" && echo ""
+    echo "→ GET $base/.well-known/enclave/attestation"
+    curl -sfk "$base/.well-known/enclave/attestation" && echo ""
     echo "→ GET $base/health"
     curl -sfk "$base/health" && echo ""
     echo "→ GET $base/egress"

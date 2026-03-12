@@ -1,0 +1,77 @@
+# Local development compose for the hello sample.
+#
+# Prerequisites (from the repo root):
+#   just build-data-plane dev    # builds matzapata/nitrum-data-plane:dev
+#
+# Usage:
+#   docker compose up            # start (from this directory)
+#   docker compose down          # stop
+#
+# One-time: create the DynamoDB table for DEK storage (see README):
+#   aws dynamodb create-table --endpoint-url http://localhost:8000 ...
+#
+# Test the enclave well-known endpoints:
+#   curl -sk https://localhost/.well-known/enclave/status
+#   curl -sk https://localhost/.well-known/enclave/attestation
+#
+# Test the user app through TLS ingress:
+#   curl -sk https://localhost/health
+#
+# Access the internal data-plane API directly (no TLS):
+#   curl http://localhost:3000/attestation -d '{}'
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.6.0
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  hello:
+    build:
+      context: .
+      args:
+        DATA_PLANE_IMAGE: matzapata/nitrum-data-plane:dev
+    ports:
+      - "443:443"   # HTTPS ingress (self-signed TLS, pass -k to curl)
+      - "3000:3000" # internal API (attestation, encrypt, decrypt)
+    depends_on:
+      - dynamodb
+    environment:
+      RUST_LOG: info
+
+      # ── DynamoDB Local ─────────────────────────────────────────────────────
+      NITRUM_DYNAMODB_TABLE: nitrum-dev
+      NITRUM_DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      AWS_REGION: us-east-1
+      # DynamoDB Local accepts any credentials
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+
+      # ── crypto: local RSA key (required when using DynamoDB without KMS) ────
+      # Generate once: openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out kms_private.pem
+      # Then mount the key or pass via env (see README).
+      # If unset, the data-plane uses an ephemeral DEK (no DynamoDB).
+      # NITRUM_DEV_RSA_PRIVATE_KEY: |
+
+      # ── pebble (ACME) — uncomment when pebble service is enabled ───────────
+      # PEBBLE_MINICA_CERT: /certs/pebble.minica.pem
+      # PEBBLE_DIRECTORY:   https://pebble:14000/dir
+
+  # ── optional: pebble ACME test server ──────────────────────────────────────
+  # Uncomment to test ACME certificate issuance locally without Let's Encrypt.
+  # Also uncomment the PEBBLE_* env vars above and switch the data-plane to use
+  # tls::acme() instead of tls::self_signed() in main.rs.
+  #
+  # pebble:
+  #   image: letsencrypt/pebble:latest
+  #   ports:
+  #     - "14000:14000"   # ACME directory  (https://localhost:14000/dir)
+  #     - "15000:15000"   # management API
+  #   environment:
+  #     PEBBLE_VA_NOSLEEP: "1"
+  #   volumes:
+  #     - pebble-certs:/certs
+
+# volumes:
+#   pebble-certs:

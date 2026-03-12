@@ -8,11 +8,13 @@
 <!-- TODO: add prometheus -->
 
 Test in aws:
-- cli deployment management
-- letsencrypt cert with renewal
+- cli deployment management, scaling update
+- pebble docker compose for sample
 - kms
 - dynamo state with locks
 
+TODO: later, for now let's assume one instance and do it all
+- only one instance will be running the renewal flow
 
 TODO: use this to add the enclave file to the control-plane, then it's simply running that
 ```
@@ -84,3 +86,83 @@ just build-control-plane dev
 # To rebuild without cache
 just build-data-plane dev true
 ```
+
+---
+
+## Running locally with Docker Compose
+
+The **hello** sample runs the data-plane plus a small Node app behind TLS, with optional **DynamoDB Local** for persistent DEK storage and optional **Pebble** for ACME testing.
+
+### 1. Build the data-plane dev image
+
+From the repo root:
+
+```bash
+just build-data-plane dev
+```
+
+This produces `matzapata/nitrum-data-plane:dev` (no enclave feature; suitable for local runs).
+
+### 2. Start the stack
+
+From the hello sample directory:
+
+```bash
+cd samples/hello
+docker compose up
+```
+
+This starts:
+
+- **dynamodb** – DynamoDB Local on port **8000** (in-memory).
+- **hello** – Data-plane + user app; HTTPS ingress on **443**, internal API on **3000**.
+
+The data-plane uses **self-signed TLS** by default. All `curl` examples below use `-k` to skip certificate verification.
+
+### 3. Create the DynamoDB table (one-time, for DEK storage)
+
+If you want the data-plane to store the DEK in DynamoDB Local (so it survives restarts), create the table after DynamoDB is up:
+
+```bash
+aws dynamodb create-table \
+  --endpoint-url http://localhost:8000 \
+  --region us-east-1 \
+  --table-name nitrum-dev \
+  --attribute-definitions AttributeName=pk,AttributeType=S \
+  --key-schema AttributeName=pk,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --no-cli-pager
+```
+
+Then provide a **local RSA key** so the data-plane can encrypt/decrypt the DEK without AWS KMS. Generate a key and pass it when starting the stack:
+
+```bash
+# Generate key (one-time)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out kms_private.pem
+
+# Run with key (from samples/hello)
+NITRUM_DEV_RSA_PRIVATE_KEY="$(cat kms_private.pem)" docker compose up
+```
+
+Alternatively, mount the key file and set the env var in `docker-compose.yml` (see the `NITRUM_DEV_RSA_PRIVATE_KEY` comment in the file).
+
+If you **do not** create the table or set `NITRUM_DEV_RSA_PRIVATE_KEY`, the data-plane still runs but uses an **ephemeral DEK** (lost on restart).
+
+### 4. Test endpoints
+
+| What | Command |
+|------|--------|
+| Enclave well-known (no user app) | `curl -sk https://localhost/.well-known/enclave/status` |
+| Enclave attestation | `curl -sk https://localhost/.well-known/enclave/attestation` |
+| User app (via TLS) | `curl -sk https://localhost/health` |
+| Internal API (no TLS) | `curl http://localhost:3000/attestation -X POST -H "Content-Type: application/json" -d '{}'` |
+
+Or run the sample’s e2e script (from `samples/hello`):
+
+```bash
+just e2e
+```
+
+### Optional: Pebble (ACME)
+
+To test ACME certificate issuance locally, uncomment the **pebble** service and the `PEBBLE_*` env vars in `samples/hello/docker-compose.yml`, then switch the data-plane to use `tls::acme()` instead of `tls::self_signed()` in `main.rs`. Mount the Pebble minica cert (e.g. from `tests/certs/pebble.minica.pem`) so the data-plane trusts Pebble’s CA.

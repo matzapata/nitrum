@@ -417,7 +417,7 @@ If the output is `[]`, no enclave is running.
    ```
 3. Watch console output for errors (certificate fetch, nitriding, app startup). Fix any misconfiguration (e.g. domain, Auth0, RDS, KMS) 
 
-curl -k https://Nitrum-Nitro-x2FdsBl5rVBA-9de4f60889c4b629.elb.sa-east-1.amazonaws.com/health
+
 
 ---
 
@@ -507,6 +507,9 @@ sudo docker run -d --name control-plane \
   -v /usr/bin/enclave.eif:/app/enclave.eif \
   matzapata/nitrum-control-plane:latest /app/control-plane --debug-mode
 
+sudo docker logs control-plane
+
+curl -k https://Nitrum-Nitro-x2FdsBl5rVBA-9de4f60889c4b629.elb.sa-east-1.amazonaws.com/health
 
 curl -k https://localhost/health
 

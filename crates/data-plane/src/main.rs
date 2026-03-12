@@ -5,6 +5,8 @@ mod api;
 mod app;
 mod attestation;
 mod constants;
+mod crypto;
+mod infra;
 mod ingress;
 mod networking;
 mod tls;
@@ -50,15 +52,21 @@ async fn main() {
         .unwrap_or(std::path::Path::new("nitrum.toml"));
     let cfg = config::load(path);
 
+    let crypto = std::sync::Arc::new(crypto::setup().await.unwrap_or_else(|e| {
+        tracing::error!(error = %e, "crypto setup failed");
+        std::process::exit(1);
+    }));
+
     tokio::spawn(async {
         info!("networking task starting");
         networking::run().await;
         tracing::warn!("networking task exited");
     });
 
-    tokio::spawn(async {
+    let api_crypto = crypto.clone();
+    tokio::spawn(async move {
         info!("API task starting");
-        api::run().await;
+        api::run(api_crypto).await;
         tracing::warn!("API task exited");
     });
 
@@ -69,7 +77,7 @@ async fn main() {
         tracing::warn!("ingress task exited");
     });
 
-    let code = tokio::select! {
+    let exit_code = tokio::select! {
         result = app::run(&args.command) => {
             result.unwrap_or_else(|e| {
                 tracing::error!(error = %e, "failed to run user process");
@@ -82,5 +90,5 @@ async fn main() {
         }
     };
 
-    std::process::exit(code);
+    std::process::exit(exit_code);
 }

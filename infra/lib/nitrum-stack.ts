@@ -3,9 +3,11 @@ import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import { Fn } from 'aws-cdk-lib';
 import * as autoscaling from 'aws-cdk-lib/aws-autoscaling';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
@@ -60,6 +62,10 @@ export class NitrumStack extends cdk.Stack {
       vpc,
       service: ec2.GatewayVpcEndpointAwsService.S3,
     });
+    new ec2.GatewayVpcEndpoint(this, 'DynamoDBEndpoint', {
+      vpc,
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+    });
 
     // ── Security group ────────────────────────────────────────────────────────
     const enclaveSg = new ec2.SecurityGroup(this, 'NitroInstanceSG', {
@@ -70,22 +76,38 @@ export class NitrumStack extends cdk.Stack {
     enclaveSg.addIngressRule(
       ec2.Peer.ipv4(vpc.vpcCidrBlock),
       ec2.Port.tcp(443),
-      'Allow HTTPS from within VPC (NLB health check)',
+      'Allow HTTPS from within VPC',
     );
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.tcp(443), 'Intra-SG HTTPS');
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.icmpPing(), 'Intra-SG ping');
     enclaveSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS inbound from NLB');
 
     // ── KMS key ───────────────────────────────────────────────────────────────
-    // RSA-2048 for attestation-based decrypt: KMS releases plaintext only when
-    // the enclave's PCR measurements match the key policy.
-    // const kmsKey = new kms.Key(this, 'EnclaveKey', {
-    //   keySpec: kms.KeySpec.RSA_2048,
-    //   keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
-    //   description: 'Nitrum enclave key - attestation-based decrypt',
-    //   removalPolicy:
-    //     deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
-    // });
+    // RSA-2048 asymmetric key.  The data-plane encrypts the DEK with the public
+    // key (kms:Encrypt) and decrypts it inside the enclave using a Nitro
+    // attestation document as the Recipient (kms:Decrypt + RecipientInfo).
+    // Key rotation is not available for asymmetric keys.
+    const enclaveKey = new kms.Key(this, 'EnclaveKey', {
+      keySpec: kms.KeySpec.RSA_2048,
+      keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
+      description: `Nitrum ${deployment} enclave key – attestation-based decrypt`,
+      enableKeyRotation: false,
+      removalPolicy:
+        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    });
+
+    // ── DynamoDB table ────────────────────────────────────────────────────────
+    // Single-table design; pk values: "dek" | "cert" | "lock".
+    // TTL is enabled on the `ttl` attribute (used by the distributed lock).
+    const enclaveTable = new dynamodb.Table(this, 'EnclaveTable', {
+      tableName: `nitrum-${deployment}`,
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ttl',
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy:
+        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    });
 
     // ── CloudWatch log group ──────────────────────────────────────────────────
     const logGroup = new logs.LogGroup(this, 'EnclaveLogGroup', {
@@ -102,7 +124,8 @@ export class NitrumStack extends cdk.Stack {
     role.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
     );
-    // kmsKey.grant(role, 'kms:Decrypt', 'kms:GetPublicKey');
+    enclaveKey.grant(role, 'kms:Encrypt', 'kms:Decrypt', 'kms:GetPublicKey');
+    enclaveTable.grantReadWriteData(role);
     logGroup.grantWrite(role);
 
     // ── User data ─────────────────────────────────────────────────────────────
@@ -147,6 +170,7 @@ export class NitrumStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       updatePolicy: autoscaling.UpdatePolicy.rollingUpdate(),
+      // TODO: here review
       healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
         additionalTypes: [autoscaling.AdditionalHealthCheckType.ELB],
         gracePeriod: cdk.Duration.minutes(5),
@@ -160,17 +184,17 @@ export class NitrumStack extends cdk.Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
     });
 
+    const targetGroup = new elbv2.NetworkTargetGroup(this, 'NitroTargetGroup', {
+      targets: [asg],
+      protocol: elbv2.Protocol.TCP,
+      port: 443,
+      vpc
+    });
+
     nlb.addListener('HTTPSListener', {
       port: 443,
       protocol: elbv2.Protocol.TCP,
-      defaultTargetGroups: [
-        new elbv2.NetworkTargetGroup(this, 'NitroTargetGroup', {
-          targets: [asg],
-          protocol: elbv2.Protocol.TCP,
-          port: 443,
-          vpc,
-        }),
-      ],
+      defaultTargetGroups: [targetGroup],
     });
 
     // ── Outputs ───────────────────────────────────────────────────────────────
@@ -178,10 +202,14 @@ export class NitrumStack extends cdk.Stack {
       value: nlb.loadBalancerDnsName,
       description: 'NLB DNS name - point your domain CNAME here',
     });
-    // new cdk.CfnOutput(this, 'KmsKeyId', {
-    //   value: kmsKey.keyId,
-    //   description: 'KMS key used for attestation-based decrypt',
-    // });
+    new cdk.CfnOutput(this, 'KmsKeyId', {
+      value: enclaveKey.keyId,
+      description: 'KMS key ID – set as NITRUM_KMS_KEY_ID in the enclave environment',
+    });
+    new cdk.CfnOutput(this, 'DynamoTableName', {
+      value: enclaveTable.tableName,
+      description: 'DynamoDB table name – set as NITRUM_DYNAMODB_TABLE in the enclave environment',
+    });
     new cdk.CfnOutput(this, 'EC2InstanceRoleARN', {
       value: role.roleArn,
       description: 'EC2 Instance Role ARN',

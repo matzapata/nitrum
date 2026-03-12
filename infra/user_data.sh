@@ -45,4 +45,45 @@ systemctl enable --now docker
 systemctl enable --now nitro-enclaves-allocator.service
 systemctl enable --now nitro-enclaves-vsock-proxy.service
 
+# ── Wait for services before pulling and building ─────────────────────────────
+sleep 5
+
+# ── Pull images and build enclave EIF ────────────────────────────────────────
+CONTROL_PLANE_IMAGE="matzapata/nitrum-control-plane:latest"
+ENCLAVE_IMAGE="matzapata/nitrum-hello:latest"
+
+docker pull "$CONTROL_PLANE_IMAGE"
+docker pull "$ENCLAVE_IMAGE"
+
+nitro-cli build-enclave --docker-uri "$ENCLAVE_IMAGE" --output-file /usr/bin/enclave.eif
+
+# ── Systemd unit for control-plane (gvproxy + enclave) ───────────────────────
+cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'
+[Unit]
+Description=Nitrum control-plane (gvproxy + enclave)
+After=docker.service nitro-enclaves-allocator.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStartPre=-/usr/bin/docker rm -f control-plane
+ExecStart=/usr/bin/docker run --rm --name control-plane \
+  --privileged \
+  --security-opt seccomp=unconfined \
+  -p 443:443 \
+  -p 9090:9090 \
+  -v /usr/bin/enclave.eif:/app/enclave.eif \
+  matzapata/nitrum-control-plane:latest /app/control-plane --debug-mode
+ExecStop=/usr/bin/docker stop -t 10 control-plane
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+systemctl daemon-reload
+systemctl enable --now control-plane.service
+
 --//--
