@@ -32,10 +32,9 @@ pub async fn run(command: &[String]) -> std::io::Result<i32> {
     let code = status.code().unwrap_or(-1);
 
     // Allow a moment for final lines to be read
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        async move { tokio::join!(stdout_handle, stderr_handle) },
-    )
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), async move {
+        tokio::join!(stdout_handle, stderr_handle)
+    })
     .await;
 
     info!(target: "app", exit_code = code, "user process exited");

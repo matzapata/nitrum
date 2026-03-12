@@ -59,9 +59,7 @@ impl Networking {
             setup_forward(*local, *remote)?;
         }
 
-        Ok(Self {
-            child: Some(child),
-        })
+        Ok(Self { child: Some(child) })
     }
 
     /// Kill any running gvproxy, then remove stale socket.
