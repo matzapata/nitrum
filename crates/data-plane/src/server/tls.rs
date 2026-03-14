@@ -4,32 +4,28 @@
 //! `pebble` feature, use Pebble CA). Otherwise use self-signed (leader writes to storage, others load).
 //! Cert and key are stored in PEM in the shared storage; both providers use the same keys.
 
-use std::io::BufReader;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, NewOrder,
     OrderStatus, RetryPolicy,
 };
-use rcgen::{CertificateParams, DistinguishedName, generate_simple_self_signed, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair, generate_simple_self_signed};
+use std::io::BufReader;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio_rustls::rustls::pki_types::CertificateDer;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
+use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::{debug, info, warn};
 use x509_parser::parse_x509_certificate;
 
 use crate::state::DataPlaneState;
-use crate::storage::keys;
 use crate::storage::StorageClient;
+use crate::storage::keys;
 use crate::utils::leader::Leader;
 
-const RENEWAL_FRACTION: f64 = 2.0 / 3.0;
-const LETS_ENCRYPT_STAGING_DIRECTORY: &str =
-    "https://acme-staging-v02.api.letsencrypt.org/directory";
-const LETS_ENCRYPT_PROD_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.org/directory";
+use crate::constants::{CERTIFICATE_RENEWAL_FRACTION, LETS_ENCRYPT_STAGING_DIRECTORY};
 
 /// In-memory cert store (chain PEM, key PEM). Used by ACME renewal loop.
 pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
@@ -41,9 +37,7 @@ pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
 /// Acceptor handle for ingress: either a static cert or ACME with a shared acceptor (renewal loop spawned separately).
 pub enum IngressAcceptor {
     Static(TlsAcceptor),
-    Acme {
-        acceptor: Arc<RwLock<TlsAcceptor>>,
-    },
+    Acme { acceptor: Arc<RwLock<TlsAcceptor>> },
 }
 
 /// Future that runs the ACME renewal loop. Spawn this when using [`IngressAcceptor::Acme`].
@@ -57,7 +51,10 @@ pub async fn acceptor(
     state: &DataPlaneState,
     acme_leader: Arc<Leader>,
 ) -> Result<(IngressAcceptor, Option<AcmeRenewalLoop>)> {
-    info!(acme = state.config.nitrum.tls_termination.acme, "building TLS acceptor");
+    info!(
+        acme = state.config.nitrum.tls_termination.acme,
+        "building TLS acceptor"
+    );
     if state.config.nitrum.tls_termination.acme {
         info!("TLS: using ACME provider");
         provision_acme(state, acme_leader).await
@@ -127,10 +124,9 @@ async fn provision_acme(
         client_tls_config,
     );
 
-    let (chain, key) = acme_state
-        .get_or_provision()
-        .await
-        .with_context(|| format!("ACME provision (directory_url={directory_url}, domain={domain})"))?;
+    let (chain, key) = acme_state.get_or_provision().await.with_context(|| {
+        format!("ACME provision (directory_url={directory_url}, domain={domain})")
+    })?;
     acme_state.current_chain = Some(chain.clone());
     *acme_state.cert_store.write().await = Some((chain.clone(), key.clone()));
 
@@ -178,9 +174,10 @@ async fn run_acme_renewal_loop(mut acme_state: AcmeState, acceptor: Arc<RwLock<T
 
 /// Build a `TlsAcceptor` from PEM-encoded chain and key (used by both self-signed and ACME).
 fn build_acceptor_from_pem(chain_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
-        .collect::<Result<Vec<_>, _>>()
-        .context("parse PEM chain")?;
+    let certs: Vec<CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .context("parse PEM chain")?;
     let key = rustls_pemfile::private_key(&mut BufReader::new(key_pem.as_bytes()))
         .context("parse PEM key")?
         .context("no private key in PEM")?;
@@ -210,11 +207,7 @@ async fn read_cert_from_storage(storage: &StorageClient) -> Result<Option<(Strin
     }
 }
 
-async fn write_cert_to_storage(
-    storage: &StorageClient,
-    chain: &str,
-    key: &str,
-) -> Result<()> {
+async fn write_cert_to_storage(storage: &StorageClient, chain: &str, key: &str) -> Result<()> {
     storage
         .set_object(keys::CERTIFICATE_OBJECT_KEY, chain.as_bytes())
         .await
@@ -249,9 +242,7 @@ impl AcmeClient {
         }
     }
 
-    async fn load_or_create_account(
-        &self,
-    ) -> Result<(Account, Option<AccountCredentials>)> {
+    async fn load_or_create_account(&self) -> Result<(Account, Option<AccountCredentials>)> {
         use instant_acme::NewAccount;
 
         let new_account = NewAccount {
@@ -279,10 +270,13 @@ impl AcmeClient {
                 return Ok((account, None));
             }
             info!(directory_url = %self.directory_url, "ACME: creating new account");
-            let (account, creds) = Account::builder_with_http(https_client::build(tls_config.clone())?)
-                .create(&new_account, self.directory_url.clone(), None)
-                .await
-                .with_context(|| format!("create acme account (directory_url={})", self.directory_url))?;
+            let (account, creds) =
+                Account::builder_with_http(https_client::build(tls_config.clone())?)
+                    .create(&new_account, self.directory_url.clone(), None)
+                    .await
+                    .with_context(|| {
+                        format!("create acme account (directory_url={})", self.directory_url)
+                    })?;
             return Ok((account, Some(creds)));
         }
 
@@ -302,7 +296,9 @@ impl AcmeClient {
             .context("create account builder")?
             .create(&new_account, self.directory_url.clone(), None)
             .await
-            .with_context(|| format!("create acme account (directory_url={})", self.directory_url))?;
+            .with_context(|| {
+                format!("create acme account (directory_url={})", self.directory_url)
+            })?;
         Ok((account, Some(creds)))
     }
 
@@ -370,7 +366,10 @@ impl AcmeClient {
         let private_key = KeyPair::generate()?;
         let csr = params.serialize_request(&private_key)?;
 
-        order.finalize_csr(csr.der()).await.context("finalize csr")?;
+        order
+            .finalize_csr(csr.der())
+            .await
+            .context("finalize csr")?;
 
         let chain = order
             .poll_certificate(&RetryPolicy::default())
@@ -389,7 +388,7 @@ impl AcmeClient {
         let not_before = validity.not_before.timestamp();
         let not_after = validity.not_after.timestamp();
         let renew_at =
-            not_before + ((not_after - not_before) as f64 * RENEWAL_FRACTION) as i64;
+            not_before + ((not_after - not_before) as f64 * CERTIFICATE_RENEWAL_FRACTION) as i64;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64;
@@ -493,7 +492,7 @@ impl AcmeState {
         tracing::info!(
             "next cert refresh in {} (at {:.0}% of cert life)",
             humantime::format_duration(sleep_dur),
-            RENEWAL_FRACTION * 100.0
+            CERTIFICATE_RENEWAL_FRACTION * 100.0
         );
         tokio::time::sleep(sleep_dur).await;
 
@@ -510,8 +509,8 @@ impl AcmeState {
 
 #[cfg(feature = "pebble")]
 pub fn pebble_client_config() -> Result<Arc<rustls::ClientConfig>> {
-    use std::io::Cursor;
     use rustls::RootCertStore;
+    use std::io::Cursor;
 
     let value = std::env::var("PEBBLE_MINICA_CERT")
         .context("PEBBLE_MINICA_CERT not set (required when using pebble feature)")?;
@@ -530,13 +529,12 @@ pub fn pebble_client_config() -> Result<Arc<rustls::ClientConfig>> {
     ))
 }
 
-
 // HTTPS client (for ACME with custom TLS e.g. Pebble)
 mod https_client {
     use super::*;
     use bytes::Bytes;
     use hyper_rustls::HttpsConnectorBuilder;
-    use hyper_util::client::legacy::{connect::HttpConnector, Client};
+    use hyper_util::client::legacy::{Client, connect::HttpConnector};
     use hyper_util::rt::TokioExecutor;
     use instant_acme::BodyWrapper;
 
@@ -553,6 +551,3 @@ mod https_client {
         Ok(Box::new(client))
     }
 }
-
-
-

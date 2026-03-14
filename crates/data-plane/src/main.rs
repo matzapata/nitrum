@@ -1,9 +1,3 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use clap::Parser;
-use tracing::{error, info};
-
 mod config;
 mod constants;
 mod crypto;
@@ -12,6 +6,15 @@ mod server;
 mod state;
 mod storage;
 mod utils;
+
+use crate::config::RuntimeConfig;
+use crate::crypto::CryptoClient;
+use crate::state::DataPlaneState;
+use crate::storage::StorageClient;
+use clap::Parser;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::{error, info};
 
 #[derive(Parser)]
 #[command(name = "data-plane")]
@@ -41,7 +44,7 @@ async fn main() {
 
     // Parse args and load runtime config
     let args = Args::parse();
-    let runtime_config = config::RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
+    let runtime_config = RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
         error!(error = %e, "failed to load runtime config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
         std::process::exit(1);
     });
@@ -52,11 +55,11 @@ async fn main() {
     networking::run().await;
 
     // Create storage client
-    let storage = Arc::new(storage::StorageClient::new(&runtime_config).await);
+    let storage = Arc::new(StorageClient::new(&runtime_config).await);
 
-    // Create crypto client 
+    // Create crypto client
     let crypto = Arc::new(
-        crypto::CryptoClient::new(runtime_config.clone(), storage.clone())
+        CryptoClient::new(runtime_config.clone(), storage.clone())
             .await
             .unwrap_or_else(|e| {
                 error!(error = %e, "crypto setup failed");
@@ -65,7 +68,7 @@ async fn main() {
     );
 
     // Create shared data plane state
-    let state = Arc::new(state::DataPlaneState::new(
+    let state = Arc::new(DataPlaneState::new(
         runtime_config.clone(),
         storage,
         crypto.clone(),

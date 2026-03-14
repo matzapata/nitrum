@@ -36,7 +36,7 @@ impl StorageClient {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);
-        }   
+        }
         let client = Client::from_conf(builder.build());
         Self {
             client,
@@ -53,7 +53,8 @@ impl StorageClient {
         let expiry = (now + LOCK_TTL_SECS).to_string();
         let now_str = now.to_string();
 
-        let result = self.client
+        let result = self
+            .client
             .put_item()
             .table_name(&self.table)
             .item("pk", AttributeValue::S(key.to_string()))
@@ -112,11 +113,7 @@ impl StorageClient {
 
 // ── internal implementations (used by StorageClient) ───────────────────────────
 
-async fn get_object_impl(
-    client: &Client,
-    table: &str,
-    key: &str,
-) -> Result<Option<Vec<u8>>> {
+async fn get_object_impl(client: &Client, table: &str, key: &str) -> Result<Option<Vec<u8>>> {
     let resp = client
         .get_item()
         .table_name(table)
@@ -139,12 +136,7 @@ async fn get_object_impl(
     }
 }
 
-async fn set_object_impl(
-    client: &Client,
-    table: &str,
-    key: &str,
-    value: &[u8],
-) -> Result<()> {
+async fn set_object_impl(client: &Client, table: &str, key: &str, value: &[u8]) -> Result<()> {
     client
         .put_item()
         .table_name(table)
@@ -156,12 +148,7 @@ async fn set_object_impl(
     Ok(())
 }
 
-async fn put_object_impl(
-    client: &Client,
-    table: &str,
-    key: &str,
-    value: &[u8],
-) -> Result<bool> {
+async fn put_object_impl(client: &Client, table: &str, key: &str, value: &[u8]) -> Result<bool> {
     let result = client
         .put_item()
         .table_name(table)

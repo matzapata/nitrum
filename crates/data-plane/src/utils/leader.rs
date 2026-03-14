@@ -21,12 +21,19 @@ pub struct Leader {
 
 impl Leader {
     pub fn new(storage: Arc<StorageClient>, owner: String, key: String) -> Self {
-        Self { storage, owner, key }
+        Self {
+            storage,
+            owner,
+            key,
+        }
     }
 
     /// Try to become leader for this lock. Returns a guard if this instance got the lock.
     pub async fn try_acquire_leader(&self) -> Result<Option<LeaderGuard>> {
-        let acquired = self.storage.try_acquire_lock(&self.key, &self.owner).await?;
+        let acquired = self
+            .storage
+            .try_acquire_lock(&self.key, &self.owner)
+            .await?;
         Ok(if acquired {
             Some(LeaderGuard {
                 storage: self.storage.clone(),

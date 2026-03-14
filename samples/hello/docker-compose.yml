@@ -80,7 +80,7 @@ services:
     hostname: nitrum.local
     ports:
       - "443:443"     # HTTPS ingress
-      - "5002:5002"   # ACME HTTP-01 (Pebble validates nitrum.local:5002)
+      - "5002:5002"   # ACME HTTP-01 (Pebble validates nitrum.local:5002; use 5002 when container runs non-root)
     networks:
       default:
         aliases:
@@ -92,6 +92,7 @@ services:
         condition: service_started
     environment:
       RUST_LOG: info
+      NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"
 
       # ── DynamoDB Local ─────────────────────────────────────────────────────
       AWS_REGION: us-east-1

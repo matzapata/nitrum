@@ -1,4 +1,3 @@
-
 use aws_nitro_enclaves_nsm_api as nitro;
 use thiserror::Error;
 

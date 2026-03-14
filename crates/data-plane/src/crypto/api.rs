@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -15,17 +15,23 @@ use crate::state::DataPlaneState;
 
 /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
 pub async fn run(state: Arc<DataPlaneState>) {
-        let addr = crate::constants::API_LISTEN_ADDR;
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .unwrap_or_else(|e| panic!("failed to bind API server on {addr}: {e}"));
+    let addr = crate::constants::API_LISTEN_ADDR;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .unwrap_or_else(|e| panic!("failed to bind API server on {addr}: {e}"));
 
-        info!(addr = %addr, "API server listening");
+    info!(addr = %addr, "API server listening");
 
-        axum::serve(listener, router(state))
+    let router = Router::new()
+        .route("/attestation", post(attestation))
+        .route("/encrypt", post(encrypt))
+        .route("/decrypt", post(decrypt))
+        .with_state(state);
+
+    axum::serve(listener, router)
         .await
         .expect("API server error");
-    }
+}
 
 // ── Axum state & handlers ────────────────────────────────────────────────────
 
@@ -73,7 +79,10 @@ async fn encrypt(
     info!("encrypt requested");
     let plaintext = req.plaintext.as_bytes();
     let ciphertext = state.crypto.encrypt(plaintext).map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("encrypt error: {e}"))
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("encrypt error: {e}"),
+        )
     })?;
     Ok(Json(EncryptResponse {
         ciphertext: B64.encode(&ciphertext),
@@ -96,10 +105,16 @@ async fn decrypt(
 ) -> Result<Json<DecryptResponse>, (StatusCode, String)> {
     info!("decrypt requested");
     let ciphertext = B64.decode(&req.ciphertext).map_err(|e| {
-        (StatusCode::BAD_REQUEST, format!("invalid base64 ciphertext: {e}"))
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid base64 ciphertext: {e}"),
+        )
     })?;
     let plaintext_bytes = state.crypto.decrypt(&ciphertext).map_err(|e| {
-        (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypt error: {e}"))
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("decrypt error: {e}"),
+        )
     })?;
     let plaintext = String::from_utf8(plaintext_bytes).map_err(|e| {
         (
@@ -108,12 +123,4 @@ async fn decrypt(
         )
     })?;
     Ok(Json(DecryptResponse { plaintext }))
-}
-
-fn router(state: Arc<DataPlaneState>) -> Router {
-    Router::new()
-        .route("/attestation", post(attestation))
-        .route("/encrypt", post(encrypt))
-        .route("/decrypt", post(decrypt))
-        .with_state(state)
 }

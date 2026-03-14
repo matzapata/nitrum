@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
 };
+use anyhow::{Context, Result};
 
-use crate::config::RuntimeConfig;
-use crate::storage::{keys, StorageClient};
-use crate::utils::leader::Leader;
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
 use super::rng::rand_bytes;
+use crate::config::RuntimeConfig;
+use crate::storage::{StorageClient, keys};
+use crate::utils::leader::Leader;
 
 /// Symmetric encryption using a Data Encryption Key (DEK).
 /// Output format: `nonce (12 B) || ciphertext+tag`.

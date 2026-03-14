@@ -1,9 +1,9 @@
 //! Shared state for the data-plane: config and clients.
 
-use std::sync::Arc;
 use crate::config::RuntimeConfig;
 use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
+use std::sync::Arc;
 
 /// Shared state for the data-plane: config and clients.
 #[derive(Clone)]

@@ -45,7 +45,7 @@ impl Kms {
     #[cfg(not(feature = "enclave"))]
     pub async fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         use rsa::{
-            pkcs1::DecodeRsaPrivateKey as _, pkcs8::DecodePrivateKey as _, Oaep, RsaPublicKey,
+            Oaep, RsaPublicKey, pkcs1::DecodeRsaPrivateKey as _, pkcs8::DecodePrivateKey as _,
         };
         use sha2::Sha256;
 
@@ -80,7 +80,7 @@ impl Kms {
     #[cfg(feature = "enclave")]
     pub async fn decrypt_with_attestation(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         use aws_sdk_kms::types::{KeyEncryptionMechanism, RecipientInfo};
-        use rsa::{pkcs8::EncodePublicKey as _, Oaep, RsaPrivateKey};
+        use rsa::{Oaep, RsaPrivateKey, pkcs8::EncodePublicKey as _};
         use sha2::Sha256;
 
         let mut rng = rand::thread_rng();
@@ -91,8 +91,9 @@ impl Kms {
             .context("failed to DER-encode ephemeral public key")?
             .to_vec();
 
-        let attestation_doc = crate::crypto::attest::get_attestation_doc(None, Some(public_key_der), None)
-            .map_err(|e| anyhow::anyhow!("attestation failed: {e}"))?;
+        let attestation_doc =
+            crate::crypto::attest::get_attestation_doc(None, Some(public_key_der), None)
+                .map_err(|e| anyhow::anyhow!("attestation failed: {e}"))?;
 
         let recipient = RecipientInfo::builder()
             .key_encryption_algorithm(KeyEncryptionMechanism::RsaesOaepSha256)
@@ -125,7 +126,7 @@ impl Kms {
     /// Dev / non-enclave: decrypt locally with NITRUM_DEV_RSA_PRIVATE_KEY.
     #[cfg(not(feature = "enclave"))]
     pub async fn decrypt_with_attestation(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        use rsa::{pkcs1::DecodeRsaPrivateKey as _, pkcs8::DecodePrivateKey as _, Oaep};
+        use rsa::{Oaep, pkcs1::DecodeRsaPrivateKey as _, pkcs8::DecodePrivateKey as _};
         use sha2::Sha256;
 
         let pem = std::env::var("NITRUM_DEV_RSA_PRIVATE_KEY")

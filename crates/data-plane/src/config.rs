@@ -1,8 +1,8 @@
 //! Data-plane runtime config: nitrum.toml plus env-derived infra settings.
 
 use anyhow::{Context, Result};
-use std::path::Path;
 use shared::config::Config as NitrumConfig;
+use std::path::Path;
 
 /// Data-plane runtime config: nitrum.toml plus env-derived infra settings.
 #[derive(Clone)]
@@ -17,6 +17,10 @@ pub struct RuntimeConfig {
     pub kms_key_id: String,
     /// Unique ID for this instance (leader lock owner). From IMDS or env fallback.
     pub instance_id: String,
+    /// Ingress TLS listen address (env: NITRUM_INGRESS_LISTEN_ADDR).
+    pub ingress_listen_addr: String,
+    /// ACME HTTP-01 challenge listen address (env: NITRUM_ACME_HTTP01_LISTEN_ADDR).
+    pub acme_http01_listen_addr: String,
 }
 
 impl RuntimeConfig {
@@ -26,15 +30,18 @@ impl RuntimeConfig {
         let nitrum = shared::config::load(config_path);
 
         let dynamodb_endpoint = std::env::var("NITRUM_DYNAMODB_ENDPOINT_URL").ok();
-        let dynamodb_table = std::env::var("NITRUM_DYNAMODB_TABLE")
-            .context("NITRUM_DYNAMODB_TABLE not set")?; // TODO: should come from imds as well
+        let dynamodb_table =
+            std::env::var("NITRUM_DYNAMODB_TABLE").context("NITRUM_DYNAMODB_TABLE not set")?; // TODO: should come from imds as well
         let kms_key_id = std::env::var("NITRUM_KMS_KEY_ID").context("NITRUM_KMS_KEY_ID not set")?;
-        let instance_id = crate::utils::imds::instance_id()
-            .await
-            .unwrap_or_else(|_| {
-                std::env::var("NITRUM_INSTANCE_ID")
-                    .unwrap_or_else(|_| format!("local-{}", std::process::id()))
-            });
+        let instance_id = crate::utils::imds::instance_id().await.unwrap_or_else(|_| {
+            std::env::var("NITRUM_INSTANCE_ID")
+                .unwrap_or_else(|_| format!("local-{}", std::process::id()))
+        });
+
+        let ingress_listen_addr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
+            .unwrap_or_else(|_| crate::constants::INGRESS_LISTEN_ADDR.to_string());
+        let acme_http01_listen_addr = std::env::var("NITRUM_ACME_HTTP01_LISTEN_ADDR")
+            .unwrap_or_else(|_| crate::constants::INGRESS_ACME_HTTP01_LISTEN_ADDR.to_string());
 
         Ok(Self {
             nitrum,
@@ -42,6 +49,8 @@ impl RuntimeConfig {
             kms_key_id,
             dynamodb_endpoint,
             instance_id,
+            ingress_listen_addr,
+            acme_http01_listen_addr,
         })
     }
 }

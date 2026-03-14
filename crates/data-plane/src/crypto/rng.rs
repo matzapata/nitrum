@@ -6,12 +6,9 @@ use anyhow::Result;
 pub fn rand_bytes(size: usize) -> Result<Vec<u8>> {
     use crate::utils::nsm::NsmConnection;
     use aws_nitro_enclaves_nsm_api as nitro;
-    let nsm_conn = NsmConnection::try_new()
-        .map_err(|e| anyhow::anyhow!("NsmConnection: {e:?}"))?;
+    let nsm_conn = NsmConnection::try_new().map_err(|e| anyhow::anyhow!("NsmConnection: {e:?}"))?;
     match nitro::driver::nsm_process_request(nsm_conn.fd(), nitro::api::Request::GetRandom) {
-        nitro::api::Response::GetRandom { random } => {
-            Ok(random.to_vec())
-        }
+        nitro::api::Response::GetRandom { random } => Ok(random.to_vec()),
         nitro::api::Response::Error(e) => Err(anyhow::anyhow!(
             "Could not get entropy from the Nitro Secure Module! {e:?}"
         )),
