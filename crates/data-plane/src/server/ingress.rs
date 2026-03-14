@@ -9,16 +9,16 @@
 use crate::state::DataPlaneState;
 use crate::storage::keys;
 use crate::utils::leader::Leader;
+use axum::Extension;
+use axum::serve::Listener;
 use axum::{
-    body::{to_bytes, Body},
+    Router,
+    body::{Body, to_bytes},
     extract::{Path, State},
     http::{Request, StatusCode},
     response::IntoResponse,
     routing::get,
-    Router,
 };
-use axum::Extension;
-use axum::serve::Listener;
 use bytes::Bytes;
 use std::io;
 use std::net::SocketAddr;
@@ -112,7 +112,9 @@ pub async fn run(state: Arc<DataPlaneState>) {
             error!(error = %e, "ingress: ACME HTTP-01 server error");
         }
     });
-    ready_rx.await.expect("HTTP-01 server task dropped before ready");
+    ready_rx
+        .await
+        .expect("HTTP-01 server task dropped before ready");
 
     let (acceptor, renewal_loop) = super::tls::acceptor(state.as_ref(), acme_leader)
         .await
@@ -215,11 +217,19 @@ async fn serve_tls(
 }
 
 async fn ingress_status() -> impl IntoResponse {
-    (StatusCode::OK, [("content-type", "application/json")], r#"{"status":"ok"}"#)
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        r#"{"status":"ok"}"#,
+    )
 }
 
 async fn ingress_attestation() -> impl IntoResponse {
-    (StatusCode::OK, [("content-type", "application/json")], r#"{"status":"ok"}"#)
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        r#"{"status":"ok"}"#,
+    )
 }
 
 async fn ingress_acme_challenge(
@@ -257,9 +267,7 @@ async fn ingress_proxy(
     let url = format!("http://{}{}", ingress.forward_to, path_and_query);
     info!(url = %url, "ingress: proxying to app");
 
-    let client = match reqwest::Client::builder()
-        .build()
-    {
+    let client = match reqwest::Client::builder().build() {
         Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "ingress: failed to create reqwest client");
