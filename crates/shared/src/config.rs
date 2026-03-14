@@ -56,11 +56,14 @@ pub struct TlsTermination {
     pub enabled: bool,
 
     /// Use ACME (e.g. Let's Encrypt) for certificate issuance instead of self-signed.
-    /// Reserved for future use.
     pub acme: bool,
 
     /// Domain name used for TLS certificate generation (self-signed or ACME).
     pub domain: String,
+
+    /// ACME directory URL (e.g. Let's Encrypt staging, production, or Pebble). When unset, defaults to Let's Encrypt staging.
+    #[serde(default)]
+    pub acme_directory: Option<String>,
 }
 
 impl Default for TlsTermination {
@@ -68,7 +71,8 @@ impl Default for TlsTermination {
         Self {
             enabled: true,
             acme: false,
-            domain: "localhost".to_string(),
+            domain: "nitrum.local".to_string(), // TODO: add instructions to add this to /etc/hosts
+            acme_directory: None,
         }
     }
 }

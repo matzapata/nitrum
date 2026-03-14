@@ -1,7 +1,6 @@
 //! Crypto API: DEK-backed encrypt/decrypt and Axum server (attestation, encrypt, decrypt).
 //!
-//! [`CryptoApi`] holds the DEK-backed [`Crypto`] and exposes [`CryptoApi::setup`] to bootstrap
-//! from infra and [`CryptoApi::run`] to serve the HTTP API.
+//! Use [`run`] to serve the HTTP API; state holds the DEK-backed [`CryptoClient`](crate::crypto::CryptoClient).
 
 use std::sync::Arc;
 
@@ -14,18 +13,8 @@ use tracing::info;
 use super::attest::get_attestation_doc;
 use crate::state::DataPlaneState;
 
-use super::client::CryptoClient;
-
-// ── CryptoApi ─────────────────────────────────────────────────────────────────
-
-/// Crypto API: DEK-backed crypto + HTTP server. Use [`CryptoApi::setup`] then [`CryptoApi::run`].
-pub struct CryptoApi {
-    pub crypto: Arc<CryptoClient>,
-}
-
-impl CryptoApi {
-    /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
-    pub async fn run(self, state: Arc<DataPlaneState>) {
+/// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
+pub async fn run(state: Arc<DataPlaneState>) {
         let addr = crate::constants::API_LISTEN_ADDR;
         let listener = tokio::net::TcpListener::bind(addr)
             .await
@@ -33,23 +22,12 @@ impl CryptoApi {
 
         info!(addr = %addr, "API server listening");
 
-        axum::serve(
-            listener,
-            router(AppState {
-                crypto: self.crypto,
-            }),
-        )
+        axum::serve(listener, router(state))
         .await
         .expect("API server error");
     }
-}
 
 // ── Axum state & handlers ────────────────────────────────────────────────────
-
-#[derive(Clone)]
-pub struct AppState {
-    pub crypto: Arc<CryptoClient>,
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,14 +67,12 @@ pub struct EncryptResponse {
 }
 
 async fn encrypt(
-    State(app): State<AppState>,
+    State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, (StatusCode, String)> {
     info!("encrypt requested");
-    let plaintext = B64.decode(&req.plaintext).map_err(|e| {
-        (StatusCode::BAD_REQUEST, format!("invalid base64 plaintext: {e}"))
-    })?;
-    let ciphertext = app.crypto.encrypt(&plaintext).map_err(|e| {
+    let plaintext = req.plaintext.as_bytes();
+    let ciphertext = state.crypto.encrypt(plaintext).map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("encrypt error: {e}"))
     })?;
     Ok(Json(EncryptResponse {
@@ -115,22 +91,26 @@ pub struct DecryptResponse {
 }
 
 async fn decrypt(
-    State(app): State<AppState>,
+    State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<DecryptRequest>,
 ) -> Result<Json<DecryptResponse>, (StatusCode, String)> {
     info!("decrypt requested");
     let ciphertext = B64.decode(&req.ciphertext).map_err(|e| {
         (StatusCode::BAD_REQUEST, format!("invalid base64 ciphertext: {e}"))
     })?;
-    let plaintext = app.crypto.decrypt(&ciphertext).map_err(|e| {
+    let plaintext_bytes = state.crypto.decrypt(&ciphertext).map_err(|e| {
         (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypt error: {e}"))
     })?;
-    Ok(Json(DecryptResponse {
-        plaintext: B64.encode(&plaintext),
-    }))
+    let plaintext = String::from_utf8(plaintext_bytes).map_err(|e| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("decrypted bytes not valid UTF-8: {e}"),
+        )
+    })?;
+    Ok(Json(DecryptResponse { plaintext }))
 }
 
-fn router(state: AppState) -> Router {
+fn router(state: Arc<DataPlaneState>) -> Router {
     Router::new()
         .route("/attestation", post(attestation))
         .route("/encrypt", post(encrypt))

@@ -35,11 +35,11 @@ enabled = true
 
 # When true (future), use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
 # When false, a self-signed certificate is generated at startup for the configured domain.
-acme = false
+acme = true
 
 # Domain name used for the TLS certificate (subject / SAN).
 # For self-signed certs this is the CN; for ACME this will be the domain to request.
-domain = "localhost"
+domain = "nitrum.local"
 
 [egress]
 # When false, all outbound traffic is allowed regardless of the whitelist below.

@@ -7,7 +7,8 @@ use aes_gcm::{
 };
 
 use crate::config::RuntimeConfig;
-use crate::storage::{keys, StorageClient, Leader};
+use crate::storage::{keys, StorageClient};
+use crate::utils::leader::Leader;
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
 use super::rng::rand_bytes;
@@ -53,13 +54,18 @@ pub struct CryptoClient {
 
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
-    pub async fn new(
-        config: RuntimeConfig,
-        storage: Arc<StorageClient>,
-        leader: Arc<Leader>,
-    ) -> Result<Self> {
-        let kms_client = aws_sdk_kms::Client::new();
+    pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
+        let sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .load()
+            .await;
+        let kms_client = aws_sdk_kms::Client::new(&sdk_config);
         let kms = Kms::new(kms_client, config.kms_key_id.clone());
+
+        let leader = Leader::new(
+            storage.clone(),
+            config.instance_id.clone(),
+            keys::CRYPTO_LEADER_KEY.to_string(),
+        );
 
         loop {
             if let Some(encrypted_dek) = storage

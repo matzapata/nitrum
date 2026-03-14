@@ -17,23 +17,9 @@ rebuild tag="latest":
     just build {{tag}} true
 
 # Build then run with docker run --rm. Exposes 443 (ingress), 3000 (API).
-run tag="latest":
-    just build {{tag}}
-    docker run --rm -p 443:443 -p 3000:3000 {{dockerhub_user}}/nitrum-hello:{{tag}}
-
-# ── Compose ─────────────────────────────────────────────────────────────────
-
-up:
+run tag="latest" no_cache="":
+    just build {{tag}} {{no_cache}}
     docker compose up
-
-down:
-    docker compose down
-
-logs:
-    docker compose logs -f
-
-restart:
-    docker compose down && docker compose up
 
 # ── Push ─────────────────────────────────────────────────────────────────────
 

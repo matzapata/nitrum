@@ -15,6 +15,9 @@ use aws_sdk_dynamodb::{
 };
 
 use crate::config::RuntimeConfig;
+use crate::utils::time;
+
+const LOCK_TTL_SECS: u64 = 60;
 
 // ── StorageClient ────────────────────────────────────────────────────────────
 
@@ -34,21 +37,54 @@ impl StorageClient {
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);
         }   
-        let client = Client::from_conf(builder.build()).await;
+        let client = Client::from_conf(builder.build());
         Self {
             client,
             table: config.dynamodb_table.clone(),
         }
     }
 
-    /// For use by Leader only: access the underlying DynamoDB client and table name.
-    pub(crate) fn dynamo_client(&self) -> &Client {
-        &self.client
+    /// Try to acquire a distributed lock identified by `key`.
+    ///
+    /// Returns `true` if the lock was obtained, `false` if another instance holds it.
+    /// The lock auto-expires after `LOCK_TTL_SECS` seconds via DynamoDB TTL.
+    pub async fn try_acquire_lock(&self, key: &str, owner: &str) -> Result<bool> {
+        let now = time::unix_now();
+        let expiry = (now + LOCK_TTL_SECS).to_string();
+        let now_str = now.to_string();
+
+        let result = self.client
+            .put_item()
+            .table_name(&self.table)
+            .item("pk", AttributeValue::S(key.to_string()))
+            .item("owner", AttributeValue::S(owner.to_string()))
+            .item("ttl", AttributeValue::N(expiry))
+            .condition_expression("attribute_not_exists(pk) OR #t < :now")
+            .expression_attribute_names("#t", "ttl")
+            .expression_attribute_values(":now", AttributeValue::N(now_str))
+            .send()
+            .await;
+
+        match result {
+            Ok(_) => Ok(true),
+            Err(e) if is_condition_failed(&e) => Ok(false),
+            Err(e) => Err(e).context("DynamoDB try_acquire_lock failed"),
+        }
     }
 
-    /// For use by Leader only: table name.
-    pub(crate) fn table_name(&self) -> &str {
-        &self.table
+    /// Release a lock identified by `key` (owner-checked delete).
+    pub async fn release_lock(&self, key: &str, owner: &str) -> Result<()> {
+        self.client
+            .delete_item()
+            .table_name(&self.table)
+            .key("pk", AttributeValue::S(key.to_string()))
+            .condition_expression("#o = :owner")
+            .expression_attribute_names("#o", "owner")
+            .expression_attribute_values(":owner", AttributeValue::S(owner.to_string()))
+            .send()
+            .await
+            .context("DynamoDB release_lock failed")?;
+        Ok(())
     }
 
     /// Fetch an object by key. Returns `None` if the key does not exist.

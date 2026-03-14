@@ -23,7 +23,8 @@ pub fn rand_bytes(size: usize) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "enclave"))]
 pub fn rand_bytes(size: usize) -> Result<Vec<u8>> {
+    use rand::RngCore;
     let mut buf = vec![0u8; size];
-    crate::rand_crate::RngCore::fill_bytes(&mut crate::rand_crate::thread_rng(), &mut buf);
+    rand::thread_rng().fill_bytes(&mut buf);
     Ok(buf)
 }

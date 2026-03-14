@@ -6,6 +6,8 @@ const axios = require("axios");
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const app = express();
 
+app.use(express.json());
+
 app.get("/health", (req, res) => {
   res.send("OK");
 });
@@ -32,8 +34,13 @@ app.post("/attestation", async (req, res) => {
 
 app.post("/crypto", async (req, res) => {
   try {
-  const { data: encrypted } = await axios.post("http://localhost:3000/encrypt", req.body);
-    const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", encrypted);
+    const body = req.body && req.body.plaintext != null ? req.body : { plaintext: "" };
+    const { data: encrypted } = await axios.post("http://localhost:3000/encrypt", body, {
+      headers: { "Content-Type": "application/json" },
+    });
+    const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", encrypted, {
+      headers: { "Content-Type": "application/json" },
+    });
     res.json({ encrypted, decrypted });
   } catch (err) {
     console.error(`[server] crypto error: ${err.message}`);

@@ -1,4 +1,4 @@
-//! Server components: ingress, runner, tls
+//! Server components: ingress, runner, TLS/cert provisioning.
 
 pub mod ingress;
 pub mod runner;

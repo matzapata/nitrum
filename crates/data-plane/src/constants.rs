@@ -7,8 +7,7 @@ pub const API_LISTEN_ADDR: &str = "0.0.0.0:3000";
 /// Ingress proxy: listens here and forwards to the user app.
 pub const INGRESS_LISTEN_ADDR: &str = "0.0.0.0:443";
 
-/// DynamoDB partition key for the leader lock item.
-pub const LOCK_OBJECT_KEY: &str = "lock";
+// TODO: this is for testing only, check if we can make it to 80 or dynamic at least
+/// Plain HTTP listener for ACME HTTP-01 challenge (Pebble validates on this port).
+pub const INGRESS_ACME_HTTP01_LISTEN_ADDR: &str = "0.0.0.0:5002";
 
-/// Leader lock TTL in seconds (DynamoDB TTL attribute).
-pub const LOCK_TTL_SECS: u64 = 60;

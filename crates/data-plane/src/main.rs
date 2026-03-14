@@ -20,7 +20,7 @@ struct Args {
     #[arg(long, default_value = "nitrum.toml")]
     config: PathBuf,
 
-    /// Command to run after networking and API are up (e.g. `node /app/src/main.js`).
+    /// Optional command to run after networking and API are up (e.g. `node /app/src/main.js`). If omitted, the process runs until SIGINT.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
 }
@@ -39,87 +39,71 @@ async fn main() {
         )
         .init();
 
+    // Parse args and load runtime config
     let args = Args::parse();
-
-    if args.command.is_empty() {
-        error!("no user command provided");
-        std::process::exit(1);
-    }
-
     let runtime_config = config::RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
         error!(error = %e, "failed to load runtime config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
         std::process::exit(1);
     });
 
+    info!("runtime config loaded");
+
     // Kick off networking first, most services depend on it
     networking::run().await;
 
     // Create storage client
-    let storage = Arc::new(storage::StorageClient::new(&runtime_config));
+    let storage = Arc::new(storage::StorageClient::new(&runtime_config).await);
 
-    // Create leader client, used to acquire leader lock for critical sections
-    let leader = Arc::new(storage::Leader::new(
-        storage.clone(),
-        runtime_config.instance_id.clone(),
-    ));
-
-    // Create crypto client, used to encrypt and decrypt data
+    // Create crypto client (instantiates its own crypto leader lock internally)
     let crypto = Arc::new(
-        crypto::CryptoClient::new(
-            runtime_config.clone(),
-            storage.clone(),
-            leader.clone(),
-        )
-        .await
-        .unwrap_or_else(|e| {
-            error!(error = %e, "crypto setup failed");
-            std::process::exit(1);
-        }),
+        crypto::CryptoClient::new(runtime_config.clone(), storage.clone())
+            .await
+            .unwrap_or_else(|e| {
+                error!(error = %e, "crypto setup failed");
+                std::process::exit(1);
+            }),
     );
 
     // Create state
     let state = Arc::new(state::DataPlaneState::new(
         runtime_config.clone(),
         storage,
-        leader,
         crypto.clone(),
     ));
 
-    // Create tls acceptor
-    let acceptor = server::tls::acceptor(state.as_ref(), &state.config.nitrum.tls_termination.domain)
-        .await
-        .unwrap_or_else(|e| {
-            error!(error = %e, "TLS acceptor failed");
-            std::process::exit(1);
-        });
-
-    let crypto_api = crypto::CryptoApi {
-        crypto: crypto.clone(),
-    };
-    let api_state = state.clone();
+    // Create crypto API
+    let crypto_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");
-        crypto_api.run(api_state).await;
+        crypto::api::run(crypto_state).await;
         tracing::warn!("API task exited");
     });
 
-    let service_port = state.config.nitrum.service.port;
+    let ingress_state = state.clone();
     tokio::spawn(async move {
-        info!(app_port = service_port, "ingress task starting");
-        server::ingress::run(service_port, acceptor).await;
+        info!("ingress task starting");
+        server::ingress::run(ingress_state).await;
         tracing::warn!("ingress task exited");
     });
 
-    let exit_code = tokio::select! {
-        result = server::runner::run(&args.command) => {
-            result.unwrap_or_else(|e| {
-                tracing::error!(error = %e, "failed to run user process");
-                1
-            })
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("received SIGINT, shutting down");
-            0
+    // Run user process if provided, otherwise run until SIGINT
+    let exit_code = if args.command.is_empty() {
+        info!("no command provided, running until SIGINT");
+        let _ = tokio::signal::ctrl_c().await;
+        info!("received SIGINT, shutting down");
+        0
+    } else {
+        tokio::select! {
+            result = server::runner::run(&args.command) => {
+                result.unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "failed to run user process");
+                    1
+                })
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("received SIGINT, shutting down");
+                0
+            }
         }
     };
 
