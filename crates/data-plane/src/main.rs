@@ -16,11 +16,11 @@ mod utils;
 #[derive(Parser)]
 #[command(name = "data-plane")]
 struct Args {
-    /// Path to nitrum.toml.
+    /// Path to the config file. Default: nitrum.toml.
     #[arg(long, default_value = "nitrum.toml")]
     config: PathBuf,
 
-    /// Optional command to run after networking and API are up (e.g. `node /app/src/main.js`). If omitted, the process runs until SIGINT.
+    /// Optional command to run the user process (e.g. `node /app/src/main.js`). If omitted, the process runs until SIGINT.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
 }
@@ -54,7 +54,7 @@ async fn main() {
     // Create storage client
     let storage = Arc::new(storage::StorageClient::new(&runtime_config).await);
 
-    // Create crypto client (instantiates its own crypto leader lock internally)
+    // Create crypto client 
     let crypto = Arc::new(
         crypto::CryptoClient::new(runtime_config.clone(), storage.clone())
             .await
@@ -64,14 +64,14 @@ async fn main() {
             }),
     );
 
-    // Create state
+    // Create shared data plane state
     let state = Arc::new(state::DataPlaneState::new(
         runtime_config.clone(),
         storage,
         crypto.clone(),
     ));
 
-    // Create crypto API
+    // Kick off crypto api for internal usage
     let crypto_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");
@@ -79,6 +79,7 @@ async fn main() {
         tracing::warn!("API task exited");
     });
 
+    // Kick off ingress for external usage
     let ingress_state = state.clone();
     tokio::spawn(async move {
         info!("ingress task starting");

@@ -89,9 +89,13 @@ pub async fn run(state: Arc<DataPlaneState>) {
     // Give the HTTP-01 listener a moment to bind so Pebble can reach it during provisioning
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let acceptor = super::tls::acceptor(state.as_ref(), acme_leader)
+    let (acceptor, renewal_loop) = super::tls::acceptor(state.as_ref(), acme_leader)
         .await
         .unwrap_or_else(|e| panic!("ingress: TLS acceptor failed: {:#}", e));
+
+    if let Some(loop_task) = renewal_loop {
+        tokio::spawn(loop_task);
+    }
 
     let listener = TcpListener::bind(listen_addr)
         .await
@@ -102,11 +106,14 @@ pub async fn run(state: Arc<DataPlaneState>) {
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
-                let acceptor = acceptor.clone();
+                let acceptor_for_conn = match &acceptor {
+                    super::tls::IngressAcceptor::Static(a) => a.clone(),
+                    super::tls::IngressAcceptor::Acme { acceptor: shared } => shared.read().await.clone(),
+                };
                 let app = app_addr.clone();
                 let state = state.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = serve(stream, peer, &app, acceptor, state).await {
+                    if let Err(e) = serve(stream, peer, &app, acceptor_for_conn, state).await {
                         warn!(peer = %peer, error = %e, "ingress: connection error");
                     }
                 });

@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use x509_parser::parse_x509_certificate;
 
 use crate::state::DataPlaneState;
@@ -38,21 +38,33 @@ pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
 // Public: build acceptor from config (self-signed vs ACME)
 // ---------------------------------------------------------------------------
 
+/// Acceptor handle for ingress: either a static cert or ACME with a shared acceptor (renewal loop spawned separately).
+pub enum IngressAcceptor {
+    Static(TlsAcceptor),
+    Acme {
+        acceptor: Arc<RwLock<TlsAcceptor>>,
+    },
+}
+
+/// Future that runs the ACME renewal loop. Spawn this when using [`IngressAcceptor::Acme`].
+pub type AcmeRenewalLoop = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
 /// Build a TLS acceptor from shared state and ACME leader (used by ingress).
 /// Uses `TlsTermination.acme` to choose provider:
-/// - `acme == true`: ACME (Let's Encrypt; with `pebble` feature, Pebble). Blocks until first cert.
+/// - `acme == true`: ACME (Let's Encrypt; with `pebble` feature, Pebble). Blocks until first cert; returns renewal loop to spawn.
 /// - `acme == false`: self-signed ephemeral.
 pub async fn acceptor(
     state: &DataPlaneState,
     acme_leader: Arc<Leader>,
-) -> Result<TlsAcceptor> {
+) -> Result<(IngressAcceptor, Option<AcmeRenewalLoop>)> {
     info!(acme = state.config.nitrum.tls_termination.acme, "building TLS acceptor");
     if state.config.nitrum.tls_termination.acme {
         info!("TLS: using ACME provider");
         provision_acme(state, acme_leader).await
     } else {
         info!("TLS: using self-signed provider");
-        provision_self_signed(state).await
+        let a = provision_self_signed(state).await?;
+        Ok((IngressAcceptor::Static(a), None))
     }
 }
 
@@ -84,7 +96,7 @@ pub fn ephemeral_self_signed(domains: impl Into<Vec<String>>) -> TlsAcceptor {
 async fn provision_acme(
     state: &DataPlaneState,
     acme_leader: Arc<Leader>,
-) -> Result<TlsAcceptor> {
+) -> Result<(IngressAcceptor, Option<AcmeRenewalLoop>)> {
     let tls = &state.config.nitrum.tls_termination;
     let domain = tls.domain.clone();
     // Env var first (e.g. PEBBLE_DIRECTORY in docker), then config file, then default
@@ -122,7 +134,42 @@ async fn provision_acme(
     acme_state.current_chain = Some(chain.clone());
     *acme_state.cert_store.write().await = Some((chain.clone(), key.clone()));
 
-    build_acceptor_from_pem(&chain, &key)
+    let initial = build_acceptor_from_pem(&chain, &key)?;
+    let shared = Arc::new(RwLock::new(initial));
+    let shared_for_loop = shared.clone();
+    let renewal_loop: AcmeRenewalLoop = Box::pin(async move {
+        run_acme_renewal_loop(acme_state, shared_for_loop).await;
+    });
+    Ok((
+        IngressAcceptor::Acme { acceptor: shared },
+        Some(renewal_loop),
+    ))
+}
+
+/// Runs in a loop: sleep until 2/3 cert lifetime, then renew and update the shared acceptor.
+async fn run_acme_renewal_loop(mut acme_state: AcmeState, acceptor: Arc<RwLock<TlsAcceptor>>) {
+    loop {
+        match acme_state.next().await {
+            Ok(AcmeEvent::CertRenewed) => {
+                let (chain, key) = match acme_state.cert_store.read().await.as_ref() {
+                    Some(pair) => (pair.0.clone(), pair.1.clone()),
+                    None => continue,
+                };
+                match build_acceptor_from_pem(&chain, &key) {
+                    Ok(new_acceptor) => {
+                        *acceptor.write().await = new_acceptor;
+                        info!(domain = %acme_state.domain, "ACME certificate renewed, TLS acceptor updated");
+                    }
+                    Err(e) => warn!(error = %e, "renewal: failed to build acceptor"),
+                }
+            }
+            Ok(AcmeEvent::CertIssued) => {}
+            Err(e) => {
+                warn!(error = %e, "renewal loop error, sleeping 60s");
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
