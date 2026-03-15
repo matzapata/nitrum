@@ -2,6 +2,7 @@
 //!
 //! Inside a Nitro Enclave, IMDS is proxied through vsock-proxy using the
 //! allowlist entry for 169.254.169.254.
+//! TODO: test this all, also get session for dynamodb table, etc
 
 use anyhow::{Context, Result};
 

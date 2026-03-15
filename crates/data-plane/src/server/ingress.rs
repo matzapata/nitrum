@@ -4,13 +4,16 @@
 //! Well-known paths served without touching the user app:
 //!   GET /.well-known/enclave/status      → 200 {"status":"ok"}
 //!   GET /.well-known/enclave/attestation → 200 base64-encoded attestation
-//!   GET /.well-known/acme-challenge/*   → 200 key_authorization (for ACME HTTP-01)
+//!   GET /.well-known/acme-challenge/*    → 200 key_authorization (for ACME HTTP-01)
+//!
+//! Both the plain-HTTP listener (port 80, for ACME HTTP-01 validation) and the
+//! TLS listener (port 443) serve the same router. The TLS listener uses the
+//! `RustlsConfig` built by `tls::build_tls_config`; the cert is hot-reloaded
+//! in the background renewal loop without restarting the server.
 
 use crate::state::DataPlaneState;
 use crate::storage::keys;
 use crate::utils::leader::Leader;
-use axum::Extension;
-use axum::serve::Listener;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -19,202 +22,84 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use axum_server::bind;
+use axum_server::tls_rustls::bind_rustls;
 use bytes::Bytes;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::TlsAcceptor;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
-/// State for the TLS ingress Axum app (well-known + proxy).
+/// Shared app state available to all handlers.
 #[derive(Clone)]
-struct IngressState {
+struct AppState {
     state: Arc<DataPlaneState>,
     forward_to: String,
 }
 
-/// Listener that yields a single (stream, addr) then never completes (for one TLS connection).
-struct OneShotListener<Io> {
-    stream: Option<(Io, SocketAddr)>,
-    local_addr: SocketAddr,
-}
-
-impl<Io> OneShotListener<Io>
-where
-    Io: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    fn new(stream: Io, peer: SocketAddr) -> Self {
-        Self {
-            stream: Some((stream, peer)),
-            local_addr: ([0u8; 4], 0).into(),
-        }
-    }
-}
-
-impl<Io> Listener for OneShotListener<Io>
-where
-    Io: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    type Io = Io;
-    type Addr = SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        match self.stream.take() {
-            Some((io, addr)) => (io, addr),
-            None => std::future::pending().await,
-        }
-    }
-
-    fn local_addr(&self) -> io::Result<Self::Addr> {
-        Ok(self.local_addr)
-    }
-}
-
 // ── public entry point ────────────────────────────────────────────────────────
 
+// TODO: return error instead of panicking?
 pub async fn run(state: Arc<DataPlaneState>) {
-    let acme_leader = Arc::new(Leader::new(
-        state.storage.clone(),
-        state.config.instance_id.clone(),
-        keys::ACME_LEADER_KEY.to_string(),
-    ));
-
-    let listen_addr = state.config.ingress_listen_addr.clone();
-    let acme_http01_addr = state.config.acme_http01_listen_addr.clone();
-    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
-
-    // Bind ACME HTTP-01 first so we fail fast if the port is unavailable (e.g. non-root can't bind 80).
-    // Pebble will GET http://nitrum.local:PORT/.well-known/acme-challenge/TOKEN during provisioning.
-    let http01_listener = TcpListener::bind(&acme_http01_addr)
-        .await
+    let http_addr: SocketAddr = state
+        .config
+        .acme_http01_listen_addr 
+        .parse()
         .unwrap_or_else(|e| {
             panic!(
-                "ingress: failed to bind ACME HTTP-01 listener at {} (Pebble needs this for validation). \
-                 If running in a container without root, set NITRUM_ACME_HTTP01_LISTEN_ADDR=0.0.0.0:5002 and configure Pebble/docker to use port 5002: {e}",
-                acme_http01_addr
-            );
-        });
-    info!(addr = %acme_http01_addr, "ingress ACME HTTP-01 listener");
-    let state_http01 = state.clone();
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(async move {
-        let app = Router::new()
-            .route(
-                "/.well-known/acme-challenge/{token}",
-                get(acme_http01_handler),
+                "ingress: invalid ACME HTTP-01 listen address '{}': {e}",
+                state.config.acme_http01_listen_addr
             )
-            .fallback(acme_http01_not_found)
-            .with_state(state_http01);
-        let _ = ready_tx.send(());
-        if let Err(e) = axum::serve(http01_listener, app).await {
-            error!(error = %e, "ingress: ACME HTTP-01 server error");
-        }
+        });
+        let https_addr: SocketAddr = state
+    .config
+    .ingress_listen_addr
+    .parse()
+    .unwrap_or_else(|e| {
+        panic!(
+            "ingress: invalid TLS listen address '{}': {e}",
+            state.config.ingress_listen_addr
+        )
     });
-    ready_rx
-        .await
-        .expect("HTTP-01 server task dropped before ready");
+    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
 
-    let (acceptor, renewal_loop) = super::tls::acceptor(state.as_ref(), acme_leader)
-        .await
-        .unwrap_or_else(|e| panic!("ingress: TLS acceptor failed: {:#}", e));
+    let tls_state = TlsConfig::new(state.clone()).state();
+    let acceptor = state.acceptor(state.default_rustls_config());
+    let acme_challenge_handler = tls_state.challenge_handler();
 
-    if let Some(loop_task) = renewal_loop {
-        tokio::spawn(loop_task);
-    }
 
-    let forwarder = TcpListener::bind(&listen_addr)
-        .await
-        .unwrap_or_else(|e| panic!("ingress: failed to bind {listen_addr}: {e}"));
+    let http_router = Router::new()
+        .route("/.well-known/acme-challenge/{token}", get(acme_challenge_handler));
 
-    let ingress_state = IngressState {
-        state: state.clone(),
-        forward_to: forward_to.clone(),
-    };
-    let ingress_router = Router::new()
+    let https_router = Router::new()
         .route("/.well-known/enclave/status", get(ingress_status))
         .route("/.well-known/enclave/attestation", get(ingress_attestation))
-        .route(
-            "/.well-known/acme-challenge/{token}",
-            get(ingress_acme_challenge),
-        )
         .fallback(ingress_proxy)
-        .layer(Extension(ingress_state));
+        .with_state(AppState {
+            state: state.clone(),
+            forward_to: forward_to.clone(),
+        });
 
-    info!(listen = %listen_addr, app = %forward_to, "ingress TLS proxy listening");
-
-    loop {
-        match forwarder.accept().await {
-            Ok((stream, peer)) => {
-                let acceptor_for_conn = match &acceptor {
-                    super::tls::IngressAcceptor::Static(a) => a.clone(),
-                    super::tls::IngressAcceptor::Acme { acceptor: shared } => {
-                        shared.read().await.clone()
-                    }
-                };
-                let router = ingress_router.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = serve_tls(stream, peer, acceptor_for_conn, router).await {
-                        warn!(peer = %peer, error = %e, "ingress: connection error");
-                    }
-                });
+        // kick off the tls state machine
+    tokio::spawn(async move {
+        loop {
+            match tls_state.next().await.unwrap() {
+                Ok(ok) => log::info!("event: {ok:?}"),
+                Err(err) => log::error!("error: {err:?}"),
             }
-            Err(e) => error!(error = %e, "ingress: accept failed"),
         }
+    });
+
+    info!(http = %http_addr, https = %https_addr, app = %forward_to, "ingress listening");
+    let http = bind(http_addr).serve(http_router.into_make_service());
+    let https = bind_rustls(https_addr, tls_config).serve(https_router.into_make_service());
+
+    tokio::select! {
+        r = http => panic!("HTTP server stopped: {:?}", r),
+        r = https => panic!("HTTPS server stopped: {:?}", r),
     }
 }
 
-// ── ACME HTTP-01 (Axum) ─────────────────────────────────────────────────────
-
-async fn acme_http01_handler(
-    State(state): State<Arc<DataPlaneState>>,
-    Path(token): Path<String>,
-) -> impl IntoResponse {
-    match state
-        .storage
-        .get_object(&keys::acme_challenge_key(&token))
-        .await
-    {
-        Ok(Some(body)) => {
-            info!(token = %token, "ingress: ACME HTTP-01 challenge (plain HTTP)");
-            (
-                StatusCode::OK,
-                [("content-type", "application/octet-stream")],
-                Bytes::from(body),
-            )
-                .into_response()
-        }
-        _ => (StatusCode::NOT_FOUND, ()).into_response(),
-    }
-}
-
-async fn acme_http01_not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, ())
-}
-
-// ── TLS ingress (Axum on TLS stream) ──────────────────────────────────────────
-
-async fn serve_tls(
-    stream: TcpStream,
-    peer: SocketAddr,
-    acceptor: TlsAcceptor,
-    router: Router,
-) -> io::Result<()> {
-    let tls = match acceptor.accept(stream).await {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(peer = %peer, error = %e, "ingress: TLS handshake failed");
-            return Ok(());
-        }
-    };
-    info!(peer = %peer, "ingress: TLS established");
-    let listener = OneShotListener::new(tls, peer);
-    let _ = axum::serve(listener, router.into_make_service())
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
-    Ok(())
-}
+// ── handlers ─────────────────────────────────────────────────────────────────
 
 async fn ingress_status() -> impl IntoResponse {
     (
@@ -232,39 +117,13 @@ async fn ingress_attestation() -> impl IntoResponse {
     )
 }
 
-async fn ingress_acme_challenge(
-    Extension(ingress): Extension<IngressState>,
-    Path(token): Path<String>,
-) -> impl IntoResponse {
-    match ingress
-        .state
-        .storage
-        .get_object(&keys::acme_challenge_key(&token))
-        .await
-    {
-        Ok(Some(body)) => {
-            info!(token = %token, "ingress: ACME HTTP-01 challenge");
-            (
-                StatusCode::OK,
-                [("content-type", "application/octet-stream")],
-                Bytes::from(body),
-            )
-                .into_response()
-        }
-        _ => (StatusCode::NOT_FOUND, ()).into_response(),
-    }
-}
-
-async fn ingress_proxy(
-    Extension(ingress): Extension<IngressState>,
-    req: Request<Body>,
-) -> impl IntoResponse {
+async fn ingress_proxy(State(app): State<AppState>, req: Request<Body>) -> impl IntoResponse {
     let path_and_query = req
         .uri()
         .path_and_query()
         .map(|p| p.as_str())
         .unwrap_or("/");
-    let url = format!("http://{}{}", ingress.forward_to, path_and_query);
+    let url = format!("http://{}{}", app.forward_to, path_and_query);
     info!(url = %url, "ingress: proxying to app");
 
     let client = match reqwest::Client::builder().build() {
@@ -288,7 +147,6 @@ async fn ingress_proxy(
         .request(parts.method.clone(), &url)
         .body(body_bytes.to_vec());
     for (name, value) in parts.headers.iter() {
-        // Skip hop-by-hop headers
         let name_str = name.as_str();
         if name_str.eq_ignore_ascii_case("connection")
             || name_str.eq_ignore_ascii_case("keep-alive")
@@ -323,5 +181,6 @@ async fn ingress_proxy(
     for (name, value) in headers.iter() {
         resp.headers_mut().insert(name.clone(), value.clone());
     }
+
     resp
 }

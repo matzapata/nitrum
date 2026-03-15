@@ -7,6 +7,7 @@
 <!-- TODO: dev mode -->
 <!-- TODO: add prometheus -->
 <!-- TODO: just run it all locally and  -->
+<!-- TODO: anyhow errors improvements -->
 
 Test in aws:
 - cli deployment management, scaling update

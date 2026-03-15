@@ -1,13 +1,10 @@
-//! Crypto API: DEK-backed encrypt/decrypt and Axum server (attestation, encrypt, decrypt).
-//!
-//! Use [`run`] to serve the HTTP API; state holds the DEK-backed [`CryptoClient`](crate::crypto::CryptoClient).
-
-use std::sync::Arc;
+//! Provide an HTTP API for the user process to use for encryption and decryption.
 
 use anyhow::Result;
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::info;
 
 use super::attest::get_attestation_doc;
@@ -15,13 +12,15 @@ use crate::state::DataPlaneState;
 
 /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
 pub async fn run(state: Arc<DataPlaneState>) {
-    let addr = crate::constants::API_LISTEN_ADDR;
-    let listener = tokio::net::TcpListener::bind(addr)
+    let addr = state.config.crypto_api_listen_addr.clone();
+    let listener = tokio::net::TcpListener::bind(addr.clone())
         .await
         .unwrap_or_else(|e| panic!("failed to bind API server on {addr}: {e}"));
 
     info!(addr = %addr, "API server listening");
 
+    // TODO: add randomness generator endpoint
+    // TODO: add health check endpoint
     let router = Router::new()
         .route("/attestation", post(attestation))
         .route("/encrypt", post(encrypt))
@@ -48,18 +47,24 @@ pub struct AttestationResponse {
     pub document: String,
 }
 
-async fn attestation(Json(req): Json<AttestationRequest>) -> Json<AttestationResponse> {
-    info!("attestation requested");
+async fn attestation(
+    Json(req): Json<AttestationRequest>,
+) -> Result<Json<AttestationResponse>, (StatusCode, String)> {
     let nonce = req.nonce.as_deref().and_then(|s| B64.decode(s).ok());
     let public_key = req.public_key.as_deref().and_then(|s| B64.decode(s).ok());
     let user_data = req.user_data.as_deref().and_then(|s| B64.decode(s).ok());
-    let raw = get_attestation_doc(nonce, public_key, user_data).unwrap_or_else(|e| {
+
+    let raw = get_attestation_doc(nonce, public_key, user_data).map_err(|e| {
         tracing::error!(error = %e, "attestation failed");
-        b"placeholder-attestation-document".to_vec()
-    });
-    Json(AttestationResponse {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("attestation failed: {e}"),
+        )
+    })?;
+
+    Ok(Json(AttestationResponse {
         document: B64.encode(&raw),
-    })
+    }))
 }
 
 #[derive(Deserialize)]
@@ -76,7 +81,6 @@ async fn encrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, (StatusCode, String)> {
-    info!("encrypt requested");
     let plaintext = req.plaintext.as_bytes();
     let ciphertext = state.crypto.encrypt(plaintext).map_err(|e| {
         (
@@ -103,7 +107,6 @@ async fn decrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<DecryptRequest>,
 ) -> Result<Json<DecryptResponse>, (StatusCode, String)> {
-    info!("decrypt requested");
     let ciphertext = B64.decode(&req.ciphertext).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,

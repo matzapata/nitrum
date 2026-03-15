@@ -4,11 +4,9 @@
 //! (crypto, ACME, …) gets its own isolated lock.
 //! Dropping [`LeaderGuard`] releases the lock (best-effort via a spawned task).
 
-use std::sync::Arc;
-
-use anyhow::Result;
-
 use crate::storage::StorageClient;
+use anyhow::Result;
+use std::sync::Arc;
 
 // ── Leader ───────────────────────────────────────────────────────────────────
 

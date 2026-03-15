@@ -1,51 +1,19 @@
-use std::sync::Arc;
-
-use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-};
-use anyhow::{Context, Result};
-
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
 use super::rng::rand_bytes;
 use crate::config::RuntimeConfig;
 use crate::storage::{StorageClient, keys};
 use crate::utils::leader::Leader;
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+};
+use anyhow::{Context, Result};
+use std::sync::Arc;
 
-/// Symmetric encryption using a Data Encryption Key (DEK).
-/// Output format: `nonce (12 B) || ciphertext+tag`.
-pub struct Crypto {
-    dek: Vec<u8>,
-}
+const NONCE_LEN: usize = 12;
 
-impl Crypto {
-    /// Encrypt `data` with AES-256-GCM. Returns `nonce (12 bytes) || ciphertext+tag`.
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let key = Key::<Aes256Gcm>::from_slice(&self.dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher
-            .encrypt(&nonce, data)
-            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
-        let mut out = nonce.to_vec();
-        out.extend_from_slice(&ciphertext);
-        Ok(out)
-    }
-
-    /// Decrypt a blob produced by [`Crypto::encrypt`].
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        const NONCE_LEN: usize = 12;
-        anyhow::ensure!(data.len() > NONCE_LEN, "ciphertext too short");
-        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-        let key = Key::<Aes256Gcm>::from_slice(&self.dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow::anyhow!("AES-GCM decrypt error: {e}"))
-    }
-}
+// ── CryptoClient ────────────────────────────────────────────────────────────────────
 
 /// Client that holds the DEK-backed crypto. Bootstrap with [`CryptoClient::new`], then use encrypt/decrypt.
 pub struct CryptoClient {
@@ -55,11 +23,7 @@ pub struct CryptoClient {
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
     pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
-        let sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .load()
-            .await;
-        let kms_client = aws_sdk_kms::Client::new(&sdk_config);
-        let kms = Kms::new(kms_client, config.kms_key_id.clone());
+        let kms = Kms::new(config.kms_key_id.clone()).await;
 
         let leader = Leader::new(
             storage.clone(),
@@ -79,7 +43,7 @@ impl CryptoClient {
                     .await
                     .context("failed to decrypt DEK with KMS")?;
                 return Ok(Self {
-                    crypto: Arc::new(Crypto { dek }),
+                    crypto: Arc::new(Crypto::new(dek)?),
                 });
             }
 
@@ -100,7 +64,7 @@ impl CryptoClient {
                 if stored {
                     tracing::info!("DEK stored successfully");
                     return Ok(Self {
-                        crypto: Arc::new(Crypto { dek }),
+                        crypto: Arc::new(Crypto::new(dek)?),
                     });
                 }
             } else {
@@ -121,6 +85,7 @@ impl CryptoClient {
         self.crypto.decrypt(data)
     }
 
+    /// Get an attestation document for the current enclave.
     pub fn get_attestation_doc(
         &self,
         nonce: Option<Vec<u8>>,
@@ -128,5 +93,51 @@ impl CryptoClient {
         user_data: Option<Vec<u8>>,
     ) -> Result<Vec<u8>> {
         get_attestation_doc(nonce, public_key, user_data).map_err(|e| anyhow::anyhow!("{}", e))
+    }
+}
+
+// ── Crypto operations ────────────────────────────────────────────────────────────────────
+
+/// Symmetric encryption using a Data Encryption Key (DEK).
+/// Output format: `nonce (12 B) || ciphertext+tag`.
+struct Crypto {
+    cipher: Aes256Gcm,
+}
+
+impl Crypto {
+    /// Create from DEK bytes (must be 32 bytes for AES-256-GCM).
+    pub fn new(dek: Vec<u8>) -> Result<Self> {
+        anyhow::ensure!(
+            dek.len() == 32,
+            "DEK must be 32 bytes for AES-256-GCM, got {}",
+            dek.len()
+        );
+        let cipher =
+            Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+        Ok(Self { cipher })
+    }
+
+    /// Encrypt `data` with AES-256-GCM. Returns `nonce (12 bytes) || ciphertext+tag`.
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let ciphertext = self
+            .cipher
+            .encrypt(&nonce, data)
+            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
+
+        let mut out = nonce.to_vec();
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
+    }
+
+    /// Decrypt a blob produced by [`Crypto::encrypt`].
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        anyhow::ensure!(data.len() > NONCE_LEN, "ciphertext too short");
+        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        self.cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| anyhow::anyhow!("AES-GCM decrypt error: {e}"))
     }
 }

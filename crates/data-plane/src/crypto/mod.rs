@@ -1,7 +1,6 @@
-//! Symmetric encryption using a Data Encryption Key (DEK) and crypto HTTP API.
-//!
-//! Use [`CryptoClient::new`] to bootstrap the DEK from storage, then [`api::run`] to serve
-//! the attestation / encrypt / decrypt endpoints.
+//! Provide a DEK for the user process to use for encryption and decryption.
+//! Provide an HTTP API for the user process to use for encryption and decryption.
+//! Provide an attestation document for the user process to use for attestation.
 
 pub mod api;
 mod attest;

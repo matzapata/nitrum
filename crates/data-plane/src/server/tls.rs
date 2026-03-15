@@ -1,102 +1,99 @@
-//! TLS acceptor: certificate provisioning via self-signed (shared from storage) or ACME.
+//! TLS config: certificate provisioning via self-signed (shared from storage) or ACME.
 //!
 //! Provider is chosen from `TlsTermination.acme`: when true use ACME (Let's Encrypt; with
 //! `pebble` feature, use Pebble CA). Otherwise use self-signed (leader writes to storage, others load).
 //! Cert and key are stored in PEM in the shared storage; both providers use the same keys.
 
 use anyhow::{Context, Result, bail};
+use axum_server::tls_rustls::RustlsConfig;
 use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, NewOrder,
     OrderStatus, RetryPolicy,
 };
-use rcgen::{CertificateParams, DistinguishedName, KeyPair, generate_simple_self_signed};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::{debug, info, warn};
 use x509_parser::parse_x509_certificate;
-
 use crate::state::DataPlaneState;
 use crate::storage::StorageClient;
 use crate::storage::keys;
 use crate::utils::leader::Leader;
-
 use crate::constants::{CERTIFICATE_RENEWAL_FRACTION, LETS_ENCRYPT_STAGING_DIRECTORY};
 
 /// In-memory cert store (chain PEM, key PEM). Used by ACME renewal loop.
 pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
 
-// ---------------------------------------------------------------------------
-// Public: build acceptor from config (self-signed vs ACME)
-// ---------------------------------------------------------------------------
-
-/// Acceptor handle for ingress: either a static cert or ACME with a shared acceptor (renewal loop spawned separately).
-pub enum IngressAcceptor {
-    Static(TlsAcceptor),
-    Acme { acceptor: Arc<RwLock<TlsAcceptor>> },
-}
-
-/// Future that runs the ACME renewal loop. Spawn this when using [`IngressAcceptor::Acme`].
+/// Future that runs the ACME renewal loop. Spawn this when using ACME.
 pub type AcmeRenewalLoop = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
-/// Build a TLS acceptor from shared state and ACME leader (used by ingress).
-/// Uses `TlsTermination.acme` to choose provider:
-/// - `acme == true`: ACME (Let's Encrypt; with `pebble` feature, Pebble). Blocks until first cert; returns renewal loop to spawn.
-/// - `acme == false`: self-signed ephemeral.
-pub async fn acceptor(
-    state: &DataPlaneState,
+// ---------------------------------------------------------------------------
+// Public: build TLS config from state
+// ---------------------------------------------------------------------------
+
+pub struct TlsConfig {
+    pub acme: bool,
+    pub domain: String,
+    pub acme_directory: Option<String>,
     acme_leader: Arc<Leader>,
-) -> Result<(IngressAcceptor, Option<AcmeRenewalLoop>)> {
-    info!(
-        acme = state.config.nitrum.tls_termination.acme,
-        "building TLS acceptor"
-    );
-    if state.config.nitrum.tls_termination.acme {
-        info!("TLS: using ACME provider");
-        provision_acme(state, acme_leader).await
-    } else {
-        info!("TLS: using self-signed provider");
-        let a = provision_self_signed(state).await?;
-        Ok((IngressAcceptor::Static(a), None))
+}
+
+impl TlsConfig {
+    pub fn new(acme: bool, domain: String, acme_directory: Option<String>) -> Self {
+        let acme_leader = Arc::new(Leader::new(
+            state.storage.clone(),
+            state.config.instance_id.clone(),
+            keys::ACME_LEADER_KEY.to_string(),
+        ));
+        Self { acme, domain, acme_directory, acme_leader }
+    }
+
+    pub fn config(&self) -> Result<RustlsConfig> {
+    }
+
+    pub fn state(&self) -> TlsState {
+    }
+
+    async fn challenge_handler(
+        State(app): State<AppState>,
+        Path(token): Path<String>,
+    ) -> impl IntoResponse {
+        match app
+            .state
+            .storage
+            .get_object(&keys::acme_challenge_key(&token))
+            .await
+        {
+            Ok(Some(body)) => {
+                info!(token = %token, "ingress: ACME HTTP-01 challenge");
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/octet-stream")],
+                    Bytes::from(body),
+                )
+                    .into_response()
+            }
+            _ => (StatusCode::NOT_FOUND, ()).into_response(),
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Self-signed provider. Ephemeral, just for single unit testing.
-// ---------------------------------------------------------------------------
-
-/// Provision TLS with a purely ephemeral self-signed cert (not stored).
-async fn provision_self_signed(state: &DataPlaneState) -> Result<TlsAcceptor> {
-    let domain = state.config.nitrum.tls_termination.domain.clone();
-    Ok(ephemeral_self_signed(vec![domain]))
-}
-
-/// Ephemeral self-signed (not stored). Used when no shared cert is available.
-pub fn ephemeral_self_signed(domains: impl Into<Vec<String>>) -> TlsAcceptor {
-    let domains = domains.into();
-    let cert = generate_simple_self_signed(domains.clone())
-        .expect("failed to generate self-signed certificate");
-    let chain_pem = cert.cert.pem();
-    let key_pem = cert.signing_key.serialize_pem();
-    info!("generated ephemeral self-signed TLS certificate");
-    build_acceptor_from_pem(&chain_pem, &key_pem).expect("invalid TLS from generated cert")
-}
-
-// ---------------------------------------------------------------------------
-// ACME provider: initial acceptor (blocks until first cert)
+// ACME provider: initial config (blocks until first cert)
 // ---------------------------------------------------------------------------
 
 async fn provision_acme(
     state: &DataPlaneState,
     acme_leader: Arc<Leader>,
-) -> Result<(IngressAcceptor, Option<AcmeRenewalLoop>)> {
-    let tls = &state.config.nitrum.tls_termination;
+) -> Result<(RustlsConfig, Option<AcmeRenewalLoop>)> {
+    let tls = &state.config.tls_termination;
     let domain = tls.domain.clone();
-    // Env var first (e.g. PEBBLE_DIRECTORY in docker), then config file, then default
+
+    // TODO: no pebble
     let directory_url = std::env::var("PEBBLE_DIRECTORY")
         .ok()
         .or_else(|| tls.acme_directory.clone())
@@ -130,20 +127,18 @@ async fn provision_acme(
     acme_state.current_chain = Some(chain.clone());
     *acme_state.cert_store.write().await = Some((chain.clone(), key.clone()));
 
-    let initial = build_acceptor_from_pem(&chain, &key)?;
-    let shared = Arc::new(RwLock::new(initial));
-    let shared_for_loop = shared.clone();
+    let server_config = build_server_config_from_pem(&chain, &key)?;
+    let tls_config = RustlsConfig::from_config(server_config);
+    let tls_config_for_loop = tls_config.clone();
+
     let renewal_loop: AcmeRenewalLoop = Box::pin(async move {
-        run_acme_renewal_loop(acme_state, shared_for_loop).await;
+        run_acme_renewal_loop(acme_state, tls_config_for_loop).await;
     });
-    Ok((
-        IngressAcceptor::Acme { acceptor: shared },
-        Some(renewal_loop),
-    ))
+    Ok((tls_config, Some(renewal_loop)))
 }
 
-/// Runs in a loop: sleep until 2/3 cert lifetime, then renew and update the shared acceptor.
-async fn run_acme_renewal_loop(mut acme_state: AcmeState, acceptor: Arc<RwLock<TlsAcceptor>>) {
+/// Runs in a loop: sleep until 2/3 cert lifetime, then renew and hot-reload the TLS config.
+async fn run_acme_renewal_loop(mut acme_state: AcmeState, config: RustlsConfig) {
     loop {
         match acme_state.next().await {
             Ok(AcmeEvent::CertRenewed) => {
@@ -151,12 +146,12 @@ async fn run_acme_renewal_loop(mut acme_state: AcmeState, acceptor: Arc<RwLock<T
                     Some(pair) => (pair.0.clone(), pair.1.clone()),
                     None => continue,
                 };
-                match build_acceptor_from_pem(&chain, &key) {
-                    Ok(new_acceptor) => {
-                        *acceptor.write().await = new_acceptor;
-                        info!(domain = %acme_state.domain, "ACME certificate renewed, TLS acceptor updated");
+                match build_server_config_from_pem(&chain, &key) {
+                    Ok(new_config) => {
+                        config.reload_from_config(new_config);
+                        info!(domain = %acme_state.domain, "ACME certificate renewed, TLS config reloaded");
                     }
-                    Err(e) => warn!(error = %e, "renewal: failed to build acceptor"),
+                    Err(e) => warn!(error = %e, "renewal: failed to build server config"),
                 }
             }
             Ok(AcmeEvent::CertIssued) => {}
@@ -169,11 +164,10 @@ async fn run_acme_renewal_loop(mut acme_state: AcmeState, acceptor: Arc<RwLock<T
 }
 
 // ---------------------------------------------------------------------------
-// Shared: build TlsAcceptor from PEM
+// Shared: build ServerConfig from PEM
 // ---------------------------------------------------------------------------
 
-/// Build a `TlsAcceptor` from PEM-encoded chain and key (used by both self-signed and ACME).
-fn build_acceptor_from_pem(chain_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
+fn build_server_config_from_pem(chain_pem: &str, key_pem: &str) -> Result<Arc<ServerConfig>> {
     let certs: Vec<CertificateDer<'static>> =
         rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()
@@ -185,7 +179,7 @@ fn build_acceptor_from_pem(chain_pem: &str, key_pem: &str) -> Result<TlsAcceptor
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .context("build ServerConfig from PEM")?;
-    Ok(TlsAcceptor::from(Arc::new(config)))
+    Ok(Arc::new(config))
 }
 
 async fn read_cert_from_storage(storage: &StorageClient) -> Result<Option<(String, String)>> {
@@ -506,6 +500,7 @@ impl AcmeState {
 // ---------------------------------------------------------------------------
 // Pebble (feature-gated)
 // ---------------------------------------------------------------------------
+// TODO: cleanup
 
 #[cfg(feature = "pebble")]
 pub fn pebble_client_config() -> Result<Arc<rustls::ClientConfig>> {

@@ -13,6 +13,7 @@ enclave = ["dep:aws-nitro-enclaves-nsm-api", "dep:serde_bytes"]
 [dependencies]
 shared = { path = "../shared" }
 axum = "0.8"
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"
 bytes = "1"
 humantime = "2"

@@ -23,7 +23,7 @@ pub fn get_attestation_doc(
     let request = Request::Attestation {
         user_data: user_data.map(ByteBuf::from),
         nonce: nonce.map(ByteBuf::from),
-        public_key: public_key.map(ByteBuf::from),
+        public_key: public_key.map(ByteBuf::from), // TODO: kms public? cert? define this for user
     };
 
     let response = nsm_process_request(fd, request);

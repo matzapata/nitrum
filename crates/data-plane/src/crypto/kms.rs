@@ -1,7 +1,7 @@
 //! KMS helpers for DEK envelope encryption.
 //!
-//! [`Kms`] wraps the AWS client and key ID: use [`Kms::encrypt`] and
-//! [`Kms::decrypt_with_attestation`] without passing client/key each time.
+//! [`Kms`] wraps the AWS client and key ID
+//! [`Kms::decrypt_with_attestation`] to decrypt with attestation.
 //!
 //! In non-enclave (dev) builds the attestation step is skipped and decryption
 //! is performed locally using an RSA private key from `NITRUM_DEV_RSA_PRIVATE_KEY`.
@@ -10,16 +10,19 @@ use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::EncryptionAlgorithmSpec;
 
-// ── Kms ─────────────────────────────────────────────────────────────────────
-
-/// KMS client bound to a specific key ID. Encrypt/decrypt without passing client or key each time.
+/// KMS client bound to a specific key ID.
 pub struct Kms {
     client: aws_sdk_kms::Client,
     key_id: String,
 }
 
 impl Kms {
-    pub fn new(client: aws_sdk_kms::Client, key_id: String) -> Self {
+    pub async fn new(key_id: String) -> Self {
+        let aws_sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .load()
+            .await;
+        let client = aws_sdk_kms::Client::new(&aws_sdk_config);
+
         Self { client, key_id }
     }
 

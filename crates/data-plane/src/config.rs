@@ -2,12 +2,13 @@
 
 use anyhow::{Context, Result};
 use shared::config::Config as NitrumConfig;
+use std::ops::Deref;
 use std::path::Path;
 
 /// Data-plane runtime config: nitrum.toml plus env-derived infra settings.
 #[derive(Clone)]
 pub struct RuntimeConfig {
-    /// From nitrum.toml (service, tls_termination, etc.).
+    /// User provided config.
     pub nitrum: NitrumConfig,
     /// DynamoDB table name (env: NITRUM_DYNAMODB_TABLE).
     pub dynamodb_table: String,
@@ -21,6 +22,16 @@ pub struct RuntimeConfig {
     pub ingress_listen_addr: String,
     /// ACME HTTP-01 challenge listen address (env: NITRUM_ACME_HTTP01_LISTEN_ADDR).
     pub acme_http01_listen_addr: String,
+    /// Crypto API listen address (env: NITRUM_CRYPTO_API_LISTEN_ADDR).
+    pub crypto_api_listen_addr: String,
+}
+
+impl Deref for RuntimeConfig {
+    type Target = NitrumConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.nitrum
+    }
 }
 
 impl RuntimeConfig {
@@ -39,9 +50,11 @@ impl RuntimeConfig {
         });
 
         let ingress_listen_addr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
-            .unwrap_or_else(|_| crate::constants::INGRESS_LISTEN_ADDR.to_string());
+            .unwrap_or_else(|_| "0.0.0.0:443".to_string());
         let acme_http01_listen_addr = std::env::var("NITRUM_ACME_HTTP01_LISTEN_ADDR")
-            .unwrap_or_else(|_| crate::constants::INGRESS_ACME_HTTP01_LISTEN_ADDR.to_string());
+            .unwrap_or_else(|_| "0.0.0.0:80".to_string());
+        let crypto_api_listen_addr = std::env::var("NITRUM_CRYPTO_API_LISTEN_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:3000".to_string());
 
         Ok(Self {
             nitrum,
@@ -51,6 +64,7 @@ impl RuntimeConfig {
             instance_id,
             ingress_listen_addr,
             acme_http01_listen_addr,
+            crypto_api_listen_addr,
         })
     }
 }
