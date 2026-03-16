@@ -49,8 +49,6 @@ async fn main() {
         std::process::exit(1);
     });
 
-    info!("runtime config loaded");
-
     // Kick off networking first, most services depend on it
     networking::run().await;
 
@@ -78,7 +76,9 @@ async fn main() {
     let crypto_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");
-        crypto::api::run(crypto_state).await;
+        if let Err(e) = crypto::api::run(crypto_state).await {
+            error!(error = %e, "API task failed");
+        }
         tracing::warn!("API task exited");
     });
 
@@ -86,7 +86,9 @@ async fn main() {
     let ingress_state = state.clone();
     tokio::spawn(async move {
         info!("ingress task starting");
-        server::ingress::run(ingress_state).await;
+        if let Err(e) = server::ingress::run(ingress_state).await {
+            error!(error = %e, "ingress task failed");
+        }
         tracing::warn!("ingress task exited");
     });
 

@@ -4,8 +4,9 @@
 
 pub mod api;
 mod attest;
-pub mod client;
+mod client;
 mod kms;
-mod rng;
+mod random;
 
+pub use attest::get_attestation_doc;
 pub use client::CryptoClient;

@@ -48,6 +48,13 @@ app.post("/crypto", async (req, res) => {
   }
 });
 
+app.post("/random", async (req, res) => {
+  const { data } = await axios.post("http://localhost:3000/random", req.body, {
+    headers: { "Content-Type": "application/json" },
+  });
+  res.json(data);
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] listening on port ${PORT}`);
 });

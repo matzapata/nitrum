@@ -52,27 +52,18 @@ impl Default for Scaling {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct TlsTermination {
-    /// Whether to terminate TLS at the data-plane and forward plain HTTP to the app.
-    pub enabled: bool,
-
     /// Use ACME (e.g. Let's Encrypt) for certificate issuance instead of self-signed.
     pub acme: bool,
 
     /// Domain name used for TLS certificate generation (self-signed or ACME).
     pub domain: String,
-
-    /// ACME directory URL (e.g. Let's Encrypt staging, production, or Pebble). When unset, defaults to Let's Encrypt staging.
-    #[serde(default)]
-    pub acme_directory: Option<String>,
 }
 
 impl Default for TlsTermination {
     fn default() -> Self {
         Self {
-            enabled: true,
             acme: false,
             domain: "nitrum.local".to_string(), // TODO: add instructions to add this to /etc/hosts
-            acme_directory: None,
         }
     }
 }
@@ -82,6 +73,7 @@ pub struct Egress {
     /// When false, all outbound traffic is allowed regardless of whitelist.
     pub enabled: bool,
 
+    // TODO: implement this
     /// Regex patterns for allowed destination hostnames.
     /// Only evaluated when enabled = true. An empty list allows all DNS-resolved traffic.
     pub destinations: Vec<String>,

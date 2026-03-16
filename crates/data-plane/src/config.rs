@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use shared::config::Config as NitrumConfig;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::Path;
 
@@ -19,11 +20,11 @@ pub struct RuntimeConfig {
     /// Unique ID for this instance (leader lock owner). From IMDS or env fallback.
     pub instance_id: String,
     /// Ingress TLS listen address (env: NITRUM_INGRESS_LISTEN_ADDR).
-    pub ingress_listen_addr: String,
+    pub ingress_listen_addr: SocketAddr,
     /// ACME HTTP-01 challenge listen address (env: NITRUM_ACME_HTTP01_LISTEN_ADDR).
-    pub acme_http01_listen_addr: String,
+    pub acme_http01_listen_addr: SocketAddr,
     /// Crypto API listen address (env: NITRUM_CRYPTO_API_LISTEN_ADDR).
-    pub crypto_api_listen_addr: String,
+    pub crypto_api_listen_addr: SocketAddr,
 }
 
 impl Deref for RuntimeConfig {
@@ -49,12 +50,18 @@ impl RuntimeConfig {
                 .unwrap_or_else(|_| format!("local-{}", std::process::id()))
         });
 
-        let ingress_listen_addr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:443".to_string());
-        let acme_http01_listen_addr = std::env::var("NITRUM_ACME_HTTP01_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:80".to_string());
-        let crypto_api_listen_addr = std::env::var("NITRUM_CRYPTO_API_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+        let ingress_listen_addr: SocketAddr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:443".to_string())
+            .parse()
+            .context("invalid NITRUM_INGRESS_LISTEN_ADDR")?;
+        let acme_http01_listen_addr: SocketAddr = std::env::var("NITRUM_ACME_HTTP01_LISTEN_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:80".to_string())
+            .parse()
+            .context("invalid NITRUM_ACME_HTTP01_LISTEN_ADDR")?;
+        let crypto_api_listen_addr: SocketAddr = std::env::var("NITRUM_CRYPTO_API_LISTEN_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
+            .parse()
+            .context("invalid NITRUM_CRYPTO_API_LISTEN_ADDR")?;
 
         Ok(Self {
             nitrum,

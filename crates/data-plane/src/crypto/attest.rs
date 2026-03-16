@@ -3,8 +3,6 @@
 /// Calls the Nitro Security Module to produce a signed attestation document.
 ///
 /// In enclave builds this talks to `/dev/nsm` via ioctl; in non-enclave builds
-/// (local dev / CI) it returns a static placeholder so the rest of the stack
-/// can be exercised without real hardware.
 #[cfg(feature = "enclave")]
 pub fn get_attestation_doc(
     nonce: Option<Vec<u8>>,
@@ -23,7 +21,7 @@ pub fn get_attestation_doc(
     let request = Request::Attestation {
         user_data: user_data.map(ByteBuf::from),
         nonce: nonce.map(ByteBuf::from),
-        public_key: public_key.map(ByteBuf::from), // TODO: kms public? cert? define this for user
+        public_key: public_key.map(ByteBuf::from), 
     };
 
     let response = nsm_process_request(fd, request);
@@ -35,11 +33,28 @@ pub fn get_attestation_doc(
     }
 }
 
+/// Dev / non-enclave: return a placeholder attestation document.
 #[cfg(not(feature = "enclave"))]
 pub fn get_attestation_doc(
     _nonce: Option<Vec<u8>>,
     _public_key: Option<Vec<u8>>,
     _user_data: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, String> {
-    Ok(b"placeholder-attestation-document".to_vec())
+    let nonce_str = _nonce
+        .as_ref()
+        .map(|v| hex::encode(v))
+        .unwrap_or_else(|| String::from(""));
+    let pubkey_str = _public_key
+        .as_ref()
+        .map(|v| hex::encode(v))
+        .unwrap_or_else(|| String::from(""));
+    let user_data_str = _user_data
+        .as_ref()
+        .map(|v| hex::encode(v))
+        .unwrap_or_else(|| String::from(""));
+    let placeholder = format!(
+        "placeholder-attestation-document,{},{},{}",
+        nonce_str, pubkey_str, user_data_str
+    );
+    Ok(placeholder.into_bytes())
 }

@@ -1,27 +1,26 @@
-//! Provide an HTTP API for the user process to use for encryption and decryption.
+//! Provide internal api for crypto operations.
 
-use anyhow::Result;
-use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
+use anyhow::{Context, Result};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::{get, post}};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
-
 use super::attest::get_attestation_doc;
 use crate::state::DataPlaneState;
 
 /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
-pub async fn run(state: Arc<DataPlaneState>) {
-    let addr = state.config.crypto_api_listen_addr.clone();
-    let listener = tokio::net::TcpListener::bind(addr.clone())
+pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
+    let addr = state.config.crypto_api_listen_addr;
+    let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .unwrap_or_else(|e| panic!("failed to bind API server on {addr}: {e}"));
+        .with_context(|| format!("failed to bind API server on {addr}"))?;
 
     info!(addr = %addr, "API server listening");
 
-    // TODO: add randomness generator endpoint
-    // TODO: add health check endpoint
     let router = Router::new()
+        .route("/health", get(health))
+        .route("/random", post(random))
         .route("/attestation", post(attestation))
         .route("/encrypt", post(encrypt))
         .route("/decrypt", post(decrypt))
@@ -29,10 +28,42 @@ pub async fn run(state: Arc<DataPlaneState>) {
 
     axum::serve(listener, router)
         .await
-        .expect("API server error");
+        .context("API server error")?;
+
+    Ok(())
 }
 
-// ── Axum state & handlers ────────────────────────────────────────────────────
+// ── Health ────────────────────────────────────────────────────
+
+async fn health() -> impl IntoResponse {
+    (StatusCode::OK, [("content-type", "application/json")], r#"{"status":"ok"}"#)
+}
+
+// ── Random ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RandomRequest {
+    /// Number of random bytes to generate (default 32, max 1024).
+    pub byte_length: Option<usize>,
+}
+
+async fn random(
+    req: Option<Json<RandomRequest>>,
+) -> impl IntoResponse {
+    let len = req
+        .and_then(|r| r.byte_length)
+        .unwrap_or(32)
+        .min(1024);
+
+    let bytes = super::random::rand_bytes(len).map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to generate random bytes: {e}"))
+    })?;
+
+    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"random":"{}"}}"#, B64.encode(&bytes)))
+}
+
+// ── Attestation ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,88 +73,62 @@ pub struct AttestationRequest {
     pub user_data: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct AttestationResponse {
-    pub document: String,
-}
 
 async fn attestation(
     Json(req): Json<AttestationRequest>,
-) -> Result<Json<AttestationResponse>, (StatusCode, String)> {
+) -> impl IntoResponse {
     let nonce = req.nonce.as_deref().and_then(|s| B64.decode(s).ok());
     let public_key = req.public_key.as_deref().and_then(|s| B64.decode(s).ok());
     let user_data = req.user_data.as_deref().and_then(|s| B64.decode(s).ok());
 
     let raw = get_attestation_doc(nonce, public_key, user_data).map_err(|e| {
         tracing::error!(error = %e, "attestation failed");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("attestation failed: {e}"),
-        )
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("attestation failed: {e}"))
     })?;
 
-    Ok(Json(AttestationResponse {
-        document: B64.encode(&raw),
-    }))
+    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"document":"{}"}}"#, B64.encode(&raw)))
 }
+
+// ── Encrypt ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct EncryptRequest {
     pub plaintext: String,
 }
 
-#[derive(Serialize)]
-pub struct EncryptResponse {
-    pub ciphertext: String,
-}
 
 async fn encrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<EncryptRequest>,
-) -> Result<Json<EncryptResponse>, (StatusCode, String)> {
+) -> impl IntoResponse {
     let plaintext = req.plaintext.as_bytes();
     let ciphertext = state.crypto.encrypt(plaintext).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("encrypt error: {e}"),
-        )
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("encrypt error: {e}"))
     })?;
-    Ok(Json(EncryptResponse {
-        ciphertext: B64.encode(&ciphertext),
-    }))
+    
+    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"ciphertext":"{}"}}"#, B64.encode(&ciphertext)))
 }
+
+// ── Decrypt ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct DecryptRequest {
     pub ciphertext: String,
 }
 
-#[derive(Serialize)]
-pub struct DecryptResponse {
-    pub plaintext: String,
-}
-
 async fn decrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<DecryptRequest>,
-) -> Result<Json<DecryptResponse>, (StatusCode, String)> {
+) -> impl IntoResponse {
     let ciphertext = B64.decode(&req.ciphertext).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("invalid base64 ciphertext: {e}"),
-        )
+        (StatusCode::BAD_REQUEST, format!("invalid base64 ciphertext: {e}"))
     })?;
     let plaintext_bytes = state.crypto.decrypt(&ciphertext).map_err(|e| {
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("decrypt error: {e}"),
-        )
+        (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypt error: {e}"))
     })?;
     let plaintext = String::from_utf8(plaintext_bytes).map_err(|e| {
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("decrypted bytes not valid UTF-8: {e}"),
-        )
+        (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypted bytes not valid UTF-8: {e}"))
     })?;
-    Ok(Json(DecryptResponse { plaintext }))
+    
+    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"plaintext":"{}"}}"#, plaintext))
 }

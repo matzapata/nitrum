@@ -1,3 +1,5 @@
 /target/
 .cargo-home
-enclave.eif
+*.eif
+.env
+.DS_Store

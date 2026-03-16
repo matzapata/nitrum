@@ -1,102 +1,101 @@
-//! Ingress proxy: terminates TLS, serves enclave well-known endpoints and ACME
-//! challenges directly, and forwards everything else to the user application.
+//! Ingress proxy: Responsible for terminating TLS connections, serving well-known
+//! enclave endpoints and ACME challenges, and proxying all other traffic to the
+//! user application.
 //!
-//! Well-known paths served without touching the user app:
-//!   GET /.well-known/enclave/status      → 200 {"status":"ok"}
-//!   GET /.well-known/enclave/attestation → 200 base64-encoded attestation
-//!   GET /.well-known/acme-challenge/*    → 200 key_authorization (for ACME HTTP-01)
+//! The following well-known paths are handled directly (the user app is not invoked):
+//!   - GET /.well-known/enclave/status
+//!     -> Responds with 200 {"status":"ok"}
+//!   - GET /.well-known/enclave/attestation
+//!     -> Responds with 200 and base64-encoded attestation document
+//!   - GET /.well-known/acme-challenge/*
+//!     -> Responds with 200 and the ACME HTTP-01 key authorization string
 //!
-//! Both the plain-HTTP listener (port 80, for ACME HTTP-01 validation) and the
-//! TLS listener (port 443) serve the same router. The TLS listener uses the
-//! `RustlsConfig` built by `tls::build_tls_config`; the cert is hot-reloaded
-//! in the background renewal loop without restarting the server.
+//! The server exposes both a plain HTTP listener (default: port 80, for ACME HTTP-01
+//! validation) and a TLS listener (default: port 443) using the same Axum router.
+//! TLS config is provided by `tls::build_tls_config`. The certificate is renewed in
+//! the background and can be reloaded without restarting the ingress server.
 
+use super::tls::{TlsState, challenge_handler};
+use crate::crypto::get_attestation_doc;
 use crate::state::DataPlaneState;
-use crate::storage::keys;
-use crate::utils::leader::Leader;
+use anyhow::Context;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    extract::{Path, State},
+    extract::State,
     http::{Request, StatusCode},
     response::IntoResponse,
     routing::get,
 };
 use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
-use bytes::Bytes;
-use std::net::SocketAddr;
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use std::sync::Arc;
 use tracing::{info, warn};
 
-/// Shared app state available to all handlers.
-#[derive(Clone)]
-struct AppState {
-    state: Arc<DataPlaneState>,
-    forward_to: String,
-}
-
 // ── public entry point ────────────────────────────────────────────────────────
 
-// TODO: return error instead of panicking?
-pub async fn run(state: Arc<DataPlaneState>) {
-    let http_addr: SocketAddr = state
-        .config
-        .acme_http01_listen_addr 
-        .parse()
-        .unwrap_or_else(|e| {
-            panic!(
-                "ingress: invalid ACME HTTP-01 listen address '{}': {e}",
-                state.config.acme_http01_listen_addr
+/// Runs the ingress server (HTTP for ACME, HTTPS for app traffic). Returns when
+/// either server stops (e.g. bind/serve error) or an error occurs.
+pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
+    let (tls_config, challenge_server) = if state.config.tls_termination.acme {
+        // ACME HTTP-01 challenge handler
+        let acme_router = Router::new()
+            .route(
+                "/.well-known/acme-challenge/{token}",
+                get(challenge_handler),
             )
+            .fallback(|_: Request<Body>| async { (StatusCode::NOT_FOUND, "Not found") })
+            .with_state(state.clone());
+
+        // TLS state machine
+        let mut tls_state = TlsState::new(state.clone());
+        let tls_config = tls_state.rustls_config();
+
+        // Drive the ACME state machine
+        tokio::spawn(async move {
+            loop {
+                match tls_state.next().await {
+                    Ok(ok) => tracing::info!("event: {ok:?}"),
+                    Err(err) => tracing::error!("error: {err:?}"),
+                }
+            }
         });
-        let https_addr: SocketAddr = state
-    .config
-    .ingress_listen_addr
-    .parse()
-    .unwrap_or_else(|e| {
-        panic!(
-            "ingress: invalid TLS listen address '{}': {e}",
-            state.config.ingress_listen_addr
-        )
-    });
-    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
 
-    let tls_state = TlsConfig::new(state.clone()).state();
-    let acceptor = state.acceptor(state.default_rustls_config());
-    let acme_challenge_handler = tls_state.challenge_handler();
+        // Bind the ACME HTTP-01 server
+        let acme_http_addr = state.config.acme_http01_listen_addr;
+        info!(acme_http_addr = %acme_http_addr, "ACME HTTP-01 server listening");
+        let challenge_server = bind(acme_http_addr).serve(acme_router.into_make_service());
 
+        (tls_config, Some(challenge_server))
+    } else {
+        let tls_config = TlsState::new(state.clone()).rustls_config();
+        (tls_config, None)
+    };
 
-    let http_router = Router::new()
-        .route("/.well-known/acme-challenge/{token}", get(acme_challenge_handler));
-
+    // HTTPS router
     let https_router = Router::new()
         .route("/.well-known/enclave/status", get(ingress_status))
         .route("/.well-known/enclave/attestation", get(ingress_attestation))
         .fallback(ingress_proxy)
-        .with_state(AppState {
-            state: state.clone(),
-            forward_to: forward_to.clone(),
-        });
+        .with_state(state.clone());
 
-        // kick off the tls state machine
-    tokio::spawn(async move {
-        loop {
-            match tls_state.next().await.unwrap() {
-                Ok(ok) => log::info!("event: {ok:?}"),
-                Err(err) => log::error!("error: {err:?}"),
+    // Bind the ingress server
+    let ingress_addr = state.config.ingress_listen_addr;
+    info!(ingress = %ingress_addr, "ingress listening");
+    let ingress = bind_rustls(ingress_addr, tls_config).serve(https_router.into_make_service());
+
+    // Wait for the servers to stop
+    match challenge_server {
+        Some(http) => {
+            tokio::select! {
+                r = http => r.context("HTTP server stopped")?,
+                r = ingress => r.context("Ingress server stopped")?,
             }
         }
-    });
-
-    info!(http = %http_addr, https = %https_addr, app = %forward_to, "ingress listening");
-    let http = bind(http_addr).serve(http_router.into_make_service());
-    let https = bind_rustls(https_addr, tls_config).serve(https_router.into_make_service());
-
-    tokio::select! {
-        r = http => panic!("HTTP server stopped: {:?}", r),
-        r = https => panic!("HTTPS server stopped: {:?}", r),
+        None => ingress.await.context("Ingress server stopped")?,
     }
+    Ok(())
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────────
@@ -105,25 +104,56 @@ async fn ingress_status() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
+        r#"{"status":"ok"}"#, // TODO: add enclave status
     )
 }
 
-async fn ingress_attestation() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
-    )
+async fn ingress_attestation(
+    State(state): State<Arc<DataPlaneState>>,
+) -> impl IntoResponse {
+    let cert_hash = state.tls_cert_hash.read().unwrap().clone();
+    let public_key = match cert_hash {
+        Some(h) => Some(h),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [("content-type", "application/json")],
+                r#"{"error":"TLS certificate not yet available"}"#,
+            )
+                .into_response()
+        }
+    };
+
+    match get_attestation_doc(None, public_key, None) {
+        Ok(doc) => (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            format!(r#"{{"document":"{}"}}"#, B64.encode(&doc)),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "attestation failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"attestation failed: {}"}}"#, e),
+            )
+                .into_response()
+        }
+    }
 }
 
-async fn ingress_proxy(State(app): State<AppState>, req: Request<Body>) -> impl IntoResponse {
+async fn ingress_proxy(
+    State(state): State<Arc<DataPlaneState>>,
+    req: Request<Body>,
+) -> impl IntoResponse {
     let path_and_query = req
         .uri()
         .path_and_query()
         .map(|p| p.as_str())
         .unwrap_or("/");
-    let url = format!("http://{}{}", app.forward_to, path_and_query);
+    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
+    let url = format!("http://{}{}", forward_to, path_and_query);
     info!(url = %url, "ingress: proxying to app");
 
     let client = match reqwest::Client::builder().build() {

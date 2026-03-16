@@ -17,7 +17,7 @@ const NONCE_LEN: usize = 12;
 
 /// Client that holds the DEK-backed crypto. Bootstrap with [`CryptoClient::new`], then use encrypt/decrypt.
 pub struct CryptoClient {
-    crypto: Arc<Crypto>,
+    cipher: Aes256Gcm,
 }
 
 impl CryptoClient {
@@ -42,9 +42,9 @@ impl CryptoClient {
                     .decrypt_with_attestation(&encrypted_dek)
                     .await
                     .context("failed to decrypt DEK with KMS")?;
-                return Ok(Self {
-                    crypto: Arc::new(Crypto::new(dek)?),
-                });
+                let cipher =
+                Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+                return Ok(Self { cipher });
             }
 
             if let Some(_guard) = leader.try_acquire_leader().await? {
@@ -63,9 +63,9 @@ impl CryptoClient {
 
                 if stored {
                     tracing::info!("DEK stored successfully");
-                    return Ok(Self {
-                        crypto: Arc::new(Crypto::new(dek)?),
-                    });
+                    let cipher =
+                    Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+                    return Ok(Self { cipher });
                 }
             } else {
                 tracing::debug!("no DEK yet and not leader, retrying read");
@@ -77,12 +77,26 @@ impl CryptoClient {
 
     /// Encrypt `data` with the DEK. Returns `nonce (12 bytes) || ciphertext+tag`.
     pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        self.crypto.encrypt(data)
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let ciphertext = self
+            .cipher
+            .encrypt(&nonce, data)
+            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
+
+        let mut out = nonce.to_vec();
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
     }
 
     /// Decrypt a blob produced by [`CryptoClient::encrypt`].
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        self.crypto.decrypt(data)
+        anyhow::ensure!(data.len() > NONCE_LEN, "ciphertext too short");
+        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        self.cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| anyhow::anyhow!("AES-GCM decrypt error: {e}"))
     }
 
     /// Get an attestation document for the current enclave.
@@ -96,48 +110,3 @@ impl CryptoClient {
     }
 }
 
-// ── Crypto operations ────────────────────────────────────────────────────────────────────
-
-/// Symmetric encryption using a Data Encryption Key (DEK).
-/// Output format: `nonce (12 B) || ciphertext+tag`.
-struct Crypto {
-    cipher: Aes256Gcm,
-}
-
-impl Crypto {
-    /// Create from DEK bytes (must be 32 bytes for AES-256-GCM).
-    pub fn new(dek: Vec<u8>) -> Result<Self> {
-        anyhow::ensure!(
-            dek.len() == 32,
-            "DEK must be 32 bytes for AES-256-GCM, got {}",
-            dek.len()
-        );
-        let cipher =
-            Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
-        Ok(Self { cipher })
-    }
-
-    /// Encrypt `data` with AES-256-GCM. Returns `nonce (12 bytes) || ciphertext+tag`.
-    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = self
-            .cipher
-            .encrypt(&nonce, data)
-            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
-
-        let mut out = nonce.to_vec();
-        out.extend_from_slice(&ciphertext);
-        Ok(out)
-    }
-
-    /// Decrypt a blob produced by [`Crypto::encrypt`].
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        anyhow::ensure!(data.len() > NONCE_LEN, "ciphertext too short");
-        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        self.cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow::anyhow!("AES-GCM decrypt error: {e}"))
-    }
-}

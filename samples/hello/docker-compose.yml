@@ -9,17 +9,17 @@
 # Then you can use: curl -sk https://nitrum.local/...
 #
 # Test the enclave well-known endpoints:
-#   curl -sk https://localhost/.well-known/enclave/status
-#   curl -sk https://localhost/.well-known/enclave/attestation
+#   curl -sk https://nitrum.local/.well-known/enclave/status
+#   curl -sk https://nitrum.local/.well-known/enclave/attestation
 #
 # Test the user app through TLS ingress:
-#   curl -sk https://localhost/health
+#   curl -sk https://nitrum.local/health
 #
 # Access the internal data-plane API directly (no TLS):
-#   curl http://localhost:3000/attestation -d '{}'
+#   curl http://nitrum.local/attestation -d '{}'
 #
 # Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
-#   curl -sk https://localhost/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
+#   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 
 configs:
   pebble-config:
@@ -38,7 +38,7 @@ configs:
           "profiles": {
             "default": {
               "description": "Short-lived certs for testing renewal",
-              "validityPeriod": 10
+              "validityPeriod": 30
             }
           }
         }
@@ -92,15 +92,15 @@ services:
         condition: service_started
     environment:
       RUST_LOG: info
-      NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"
 
-      # ── DynamoDB Local ─────────────────────────────────────────────────────
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
       NITRUM_KMS_KEY_ID: local
       NITRUM_DYNAMODB_TABLE: nitrum-dev
       NITRUM_DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+      NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"
+      NITRUM_ACME_DIRECTORY_URL: https://pebble:14000/dir
 
       # ── crypto: local RSA key (required when using DynamoDB without KMS) ────
       # Generate once: openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out kms_private.pem
@@ -135,7 +135,6 @@ services:
         -----END PRIVATE KEY-----
 
       # ── pebble (ACME) ───────────────────────────────────────────────────────
-      PEBBLE_DIRECTORY: https://pebble:14000/dir
       PEBBLE_MINICA_CERT: |
         -----BEGIN CERTIFICATE-----
         MIIDPzCCAiegAwIBAgIIU0Xm9UFdQxUwDQYJKoZIhvcNAQELBQAwIDEeMBwGA1UE

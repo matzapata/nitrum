@@ -15,26 +15,17 @@ Test in aws:
 - kms
 - dynamo state with locks
 
-TODO: later, for now let's assume one instance and do it all
-- only one instance will be running the renewal flow
-
-TODO: use this to add the enclave file to the control-plane, then it's simply running that
-```
-docker build -t my-new-image -f- . <<'EOF'
-FROM my-base-image
-COPY extra_script.py /app/
-EOF
-```
-
 Ingress
 Egress
-Egress whitelist
-Reproducible builds
+TODO: Egress whitelist
+Reproducible builds. Ok?
 TLS certificate
 TLS certificate with acme
 TODO: TLS certificate sync
 TODO: properly wait for system to be up
-TODO: 
+TODO: add cert to attestation
+TODO: env vars support (later, inline code enc with kms)
+TODO: make sure cert is stored encrypted
 
 
 KMS to encrypt decript data (use public key to wrap a sync key and store the sync key in db)

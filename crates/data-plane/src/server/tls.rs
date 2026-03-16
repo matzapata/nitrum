@@ -3,67 +3,146 @@
 //! Provider is chosen from `TlsTermination.acme`: when true use ACME (Let's Encrypt; with
 //! `pebble` feature, use Pebble CA). Otherwise use self-signed (leader writes to storage, others load).
 //! Cert and key are stored in PEM in the shared storage; both providers use the same keys.
+//! TODO: cleanups
 
+use crate::constants::{CERTIFICATE_RENEWAL_FRACTION, ENV_ACME_DIRECTORY_URL, LETS_ENCRYPT_PROD_DIRECTORY};
+use crate::state::DataPlaneState;
+use crate::storage::StorageClient;
+use crate::storage::keys;
+use crate::utils::leader::Leader;
 use anyhow::{Context, Result, bail};
+use axum::response::IntoResponse;
 use axum_server::tls_rustls::RustlsConfig;
 use instant_acme::{
     Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, NewOrder,
     OrderStatus, RetryPolicy,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
+use sha2::{Digest, Sha256};
 use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::pki_types::CertificateDer;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use x509_parser::parse_x509_certificate;
-use crate::state::DataPlaneState;
-use crate::storage::StorageClient;
-use crate::storage::keys;
-use crate::utils::leader::Leader;
-use crate::constants::{CERTIFICATE_RENEWAL_FRACTION, LETS_ENCRYPT_STAGING_DIRECTORY};
 
 /// In-memory cert store (chain PEM, key PEM). Used by ACME renewal loop.
 pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
 
-/// Future that runs the ACME renewal loop. Spawn this when using ACME.
-pub type AcmeRenewalLoop = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
-
 // ---------------------------------------------------------------------------
-// Public: build TLS config from state
+// Public: TlsState (rustls_acme-style API)
 // ---------------------------------------------------------------------------
 
-pub struct TlsConfig {
-    pub acme: bool,
-    pub domain: String,
-    pub acme_directory: Option<String>,
-    acme_leader: Arc<Leader>,
+/// TLS state machine: provides RustlsConfig for the server and `.next()` to drive ACME events.
+pub struct TlsState {
+    state: Arc<DataPlaneState>,
+    rustls_config: RustlsConfig,
+    acme_state: Option<AcmeState>,
 }
 
-impl TlsConfig {
-    pub fn new(acme: bool, domain: String, acme_directory: Option<String>) -> Self {
+impl TlsState {
+    /// Build the TLS state. Use `.rustls_config()` for the server and spawn
+    /// `.next()` in a loop to drive provisioning/renewal and log events.
+    pub fn new(state: Arc<DataPlaneState>) -> Self {
+        let tls_config = &state.config.tls_termination;
+        let domain = tls_config.domain.clone();
+        let (server_config, cert_hash) = ephemeral_server_config(&[domain]);
+        *state.tls_cert_hash.write().unwrap() = Some(cert_hash);
+        let rustls_config = RustlsConfig::from_config(server_config);
+
+        if !tls_config.acme {
+            return TlsState {
+                state,
+                rustls_config,
+                acme_state: None,
+            };
+        }
+
         let acme_leader = Arc::new(Leader::new(
             state.storage.clone(),
             state.config.instance_id.clone(),
             keys::ACME_LEADER_KEY.to_string(),
         ));
-        Self { acme, domain, acme_directory, acme_leader }
+        let directory_url = std::env::var(ENV_ACME_DIRECTORY_URL)
+            .unwrap_or(LETS_ENCRYPT_PROD_DIRECTORY.to_string());
+        #[cfg(feature = "pebble")]
+        let client_tls_config = Some(pebble_client_tls_config().expect("pebble_client_tls_config"));
+        #[cfg(not(feature = "pebble"))]
+        let client_tls_config = None;
+
+        let acme_state = AcmeState::new(
+            tls_config.domain.clone(),
+            state.storage.clone(),
+            acme_leader,
+            directory_url,
+            client_tls_config,
+        );
+
+        TlsState {
+            state,
+            rustls_config,
+            acme_state: Some(acme_state),
+        }
     }
 
-    pub fn config(&self) -> Result<RustlsConfig> {
+    /// RustlsConfig to pass to `bind_rustls`. Hot-reloaded when ACME renews.
+    pub fn rustls_config(&self) -> RustlsConfig {
+        self.rustls_config.clone()
     }
 
-    pub fn state(&self) -> TlsState {
-    }
+    /// Drive the ACME state machine. Returns Ok(event) on success, Err on failure. When
+    /// CertRenewed is returned, the RustlsConfig has already been hot-reloaded.
+    pub async fn next(&mut self) -> Result<AcmeEvent, anyhow::Error> {
+        let acme = match &mut self.acme_state {
+            None => return Ok(AcmeEvent::CertIssued),
+            Some(a) => a,
+        };
 
-    async fn challenge_handler(
-        State(app): State<AppState>,
-        Path(token): Path<String>,
-    ) -> impl IntoResponse {
-        match app
-            .state
+        if acme.current_chain.is_none() {
+            let (chain, key) = acme.get_or_provision().await?;
+            acme.current_chain = Some(chain.clone());
+            *acme.cert_store.write().await = Some((chain.clone(), key.clone()));
+            if let Some(hash) = cert_hash_from_chain_pem(&chain) {
+                *self.state.tls_cert_hash.write().unwrap() = Some(hash);
+            }
+            if let Ok(cfg) = build_server_config_from_pem(&chain, &key) {
+                self.rustls_config.reload_from_config(cfg);
+            }
+            return Ok(AcmeEvent::CertIssued);
+        }
+        
+        match acme.next().await {
+            Ok(AcmeEvent::CertRenewed) => {
+                let (chain, key) = match acme.cert_store.read().await.as_ref() {
+                    Some(pair) => (pair.0.clone(), pair.1.clone()),
+                    None => return Ok(AcmeEvent::CertRenewed),
+                };
+                if let Some(hash) = cert_hash_from_chain_pem(&chain) {
+                    *self.state.tls_cert_hash.write().unwrap() = Some(hash);
+                }
+                if let Ok(new_config) = build_server_config_from_pem(&chain, &key) {
+                    self.rustls_config.reload_from_config(new_config);
+                    info!(domain = %acme.domain, "ACME certificate renewed, TLS config reloaded");
+                }
+                Ok(AcmeEvent::CertRenewed)
+            }
+            other => other.map_err(Into::into),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ACME HTTP-01 challenge handler (use with .with_state(state) on the router)
+// ---------------------------------------------------------------------------
+
+pub fn challenge_handler(
+    axum::extract::State(state): axum::extract::State<Arc<DataPlaneState>>,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = axum::response::Response> + Send>> {
+    Box::pin(async move {
+        match state
             .storage
             .get_object(&keys::acme_challenge_key(&token))
             .await
@@ -71,101 +150,41 @@ impl TlsConfig {
             Ok(Some(body)) => {
                 info!(token = %token, "ingress: ACME HTTP-01 challenge");
                 (
-                    StatusCode::OK,
+                    axum::http::StatusCode::OK,
                     [("content-type", "application/octet-stream")],
-                    Bytes::from(body),
+                    bytes::Bytes::from(body),
                 )
                     .into_response()
             }
-            _ => (StatusCode::NOT_FOUND, ()).into_response(),
+            _ => (axum::http::StatusCode::NOT_FOUND, ()).into_response(),
         }
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
-// ACME provider: initial config (blocks until first cert)
+// Shared: build ServerConfig from PEM / ephemeral; cert hash for attestation
 // ---------------------------------------------------------------------------
 
-async fn provision_acme(
-    state: &DataPlaneState,
-    acme_leader: Arc<Leader>,
-) -> Result<(RustlsConfig, Option<AcmeRenewalLoop>)> {
-    let tls = &state.config.tls_termination;
-    let domain = tls.domain.clone();
-
-    // TODO: no pebble
-    let directory_url = std::env::var("PEBBLE_DIRECTORY")
-        .ok()
-        .or_else(|| tls.acme_directory.clone())
-        .unwrap_or_else(|| LETS_ENCRYPT_STAGING_DIRECTORY.to_string());
-    let client_tls_config = {
-        #[cfg(feature = "pebble")]
-        {
-            Some(pebble_client_config()?)
-        }
-        #[cfg(not(feature = "pebble"))]
-        None
-    };
-
-    info!(
-        directory_url = %directory_url,
-        domain = %domain,
-        "ACME: provisioning certificate"
-    );
-
-    let mut acme_state = AcmeState::new(
-        domain.clone(),
-        state.storage.clone(),
-        acme_leader,
-        directory_url.clone(),
-        client_tls_config,
-    );
-
-    let (chain, key) = acme_state.get_or_provision().await.with_context(|| {
-        format!("ACME provision (directory_url={directory_url}, domain={domain})")
-    })?;
-    acme_state.current_chain = Some(chain.clone());
-    *acme_state.cert_store.write().await = Some((chain.clone(), key.clone()));
-
-    let server_config = build_server_config_from_pem(&chain, &key)?;
-    let tls_config = RustlsConfig::from_config(server_config);
-    let tls_config_for_loop = tls_config.clone();
-
-    let renewal_loop: AcmeRenewalLoop = Box::pin(async move {
-        run_acme_renewal_loop(acme_state, tls_config_for_loop).await;
-    });
-    Ok((tls_config, Some(renewal_loop)))
+/// Returns SHA-256 hash of the first (leaf) certificate in a PEM chain.
+pub fn cert_hash_from_chain_pem(chain_pem: &str) -> Option<Vec<u8>> {
+    let certs: Vec<CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+    let leaf = certs.first()?;
+    Some(Sha256::digest(leaf.as_ref()).to_vec())
 }
 
-/// Runs in a loop: sleep until 2/3 cert lifetime, then renew and hot-reload the TLS config.
-async fn run_acme_renewal_loop(mut acme_state: AcmeState, config: RustlsConfig) {
-    loop {
-        match acme_state.next().await {
-            Ok(AcmeEvent::CertRenewed) => {
-                let (chain, key) = match acme_state.cert_store.read().await.as_ref() {
-                    Some(pair) => (pair.0.clone(), pair.1.clone()),
-                    None => continue,
-                };
-                match build_server_config_from_pem(&chain, &key) {
-                    Ok(new_config) => {
-                        config.reload_from_config(new_config);
-                        info!(domain = %acme_state.domain, "ACME certificate renewed, TLS config reloaded");
-                    }
-                    Err(e) => warn!(error = %e, "renewal: failed to build server config"),
-                }
-            }
-            Ok(AcmeEvent::CertIssued) => {}
-            Err(e) => {
-                warn!(error = %e, "renewal loop error, sleeping 60s");
-                tokio::time::sleep(Duration::from_secs(60)).await;
-            }
-        }
-    }
+fn ephemeral_server_config(domains: &[String]) -> (Arc<ServerConfig>, Vec<u8>) {
+    let cert = rcgen::generate_simple_self_signed(domains.to_vec())
+        .expect("failed to generate self-signed certificate");
+    let chain_pem = cert.cert.pem();
+    let key_pem = cert.signing_key.serialize_pem();
+    let hash = cert_hash_from_chain_pem(&chain_pem).expect("hash from generated cert");
+    let config =
+        build_server_config_from_pem(&chain_pem, &key_pem).expect("ephemeral TLS from generated cert");
+    (config, hash)
 }
-
-// ---------------------------------------------------------------------------
-// Shared: build ServerConfig from PEM
-// ---------------------------------------------------------------------------
 
 fn build_server_config_from_pem(chain_pem: &str, key_pem: &str) -> Result<Arc<ServerConfig>> {
     let certs: Vec<CertificateDer<'static>> =
@@ -500,10 +519,9 @@ impl AcmeState {
 // ---------------------------------------------------------------------------
 // Pebble (feature-gated)
 // ---------------------------------------------------------------------------
-// TODO: cleanup
 
 #[cfg(feature = "pebble")]
-pub fn pebble_client_config() -> Result<Arc<rustls::ClientConfig>> {
+fn pebble_client_tls_config() -> Result<Arc<rustls::ClientConfig>> {
     use rustls::RootCertStore;
     use std::io::Cursor;
 

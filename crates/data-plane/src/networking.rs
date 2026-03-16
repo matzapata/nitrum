@@ -1,5 +1,6 @@
 // TODO: cleanup this
 
+#[cfg(feature = "enclave")]
 use tracing::info;
 use tracing::warn;
 
