@@ -1,6 +1,6 @@
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
-use super::rng::rand_bytes;
+use super::random::rand_bytes;
 use crate::config::RuntimeConfig;
 use crate::storage::{StorageClient, keys};
 use crate::utils::leader::Leader;
@@ -42,8 +42,8 @@ impl CryptoClient {
                     .decrypt_with_attestation(&encrypted_dek)
                     .await
                     .context("failed to decrypt DEK with KMS")?;
-                let cipher =
-                Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+                let cipher = Aes256Gcm::new_from_slice(&dek)
+                    .map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
                 return Ok(Self { cipher });
             }
 
@@ -63,8 +63,8 @@ impl CryptoClient {
 
                 if stored {
                     tracing::info!("DEK stored successfully");
-                    let cipher =
-                    Aes256Gcm::new_from_slice(&dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+                    let cipher = Aes256Gcm::new_from_slice(&dek)
+                        .map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
                     return Ok(Self { cipher });
                 }
             } else {
@@ -109,4 +109,3 @@ impl CryptoClient {
         get_attestation_doc(nonce, public_key, user_data).map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
-

@@ -1,8 +1,9 @@
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 pub mod commands;
-pub mod infrastructure;
 pub mod constants;
+pub mod infrastructure;
 
 use commands::{build, deploy, describe, destroy, dev, init};
 
@@ -31,6 +32,10 @@ enum Commands {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let cli = Cli::parse();
     match cli.command {
         Commands::Init(args) => init::run(args),

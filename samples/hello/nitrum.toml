@@ -29,10 +29,6 @@ num_cpus = 2
 ram_size_mib = 4320
 
 [tls_termination]
-# When true, the data-plane terminates TLS on ingress and forwards plain HTTP to the app.
-# When false, ingress connections are forwarded as raw TCP (no TLS handling).
-enabled = true
-
 # When true (future), use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
 # When false, a self-signed certificate is generated at startup for the configured domain.
 acme = true

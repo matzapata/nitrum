@@ -1,13 +1,19 @@
 //! Provide internal api for crypto operations.
 
-use anyhow::{Context, Result};
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::{get, post}};
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tracing::info;
 use super::attest::get_attestation_doc;
 use crate::state::DataPlaneState;
+use anyhow::Context;
+use axum::{
+    Json, Router,
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use serde::Deserialize;
+use std::sync::Arc;
+use tracing::info;
 
 /// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
 pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
@@ -36,7 +42,11 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
 // ── Health ────────────────────────────────────────────────────
 
 async fn health() -> impl IntoResponse {
-    (StatusCode::OK, [("content-type", "application/json")], r#"{"status":"ok"}"#)
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        r#"{"status":"ok"}"#,
+    )
 }
 
 // ── Random ────────────────────────────────────────────────────
@@ -48,19 +58,27 @@ pub struct RandomRequest {
     pub byte_length: Option<usize>,
 }
 
-async fn random(
-    req: Option<Json<RandomRequest>>,
-) -> impl IntoResponse {
-    let len = req
-        .and_then(|r| r.byte_length)
-        .unwrap_or(32)
-        .min(1024);
+async fn random(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
+    let len = req.and_then(|r| r.byte_length).unwrap_or(32).min(1024);
 
-    let bytes = super::random::rand_bytes(len).map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to generate random bytes: {e}"))
-    })?;
+    let bytes = match super::random::rand_bytes(len) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"failed to generate random bytes: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
 
-    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"random":"{}"}}"#, B64.encode(&bytes)))
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        format!(r#"{{"random":"{}"}}"#, B64.encode(&bytes)),
+    )
+        .into_response()
 }
 
 // ── Attestation ────────────────────────────────────────────────────
@@ -73,20 +91,30 @@ pub struct AttestationRequest {
     pub user_data: Option<String>,
 }
 
-
-async fn attestation(
-    Json(req): Json<AttestationRequest>,
-) -> impl IntoResponse {
+async fn attestation(Json(req): Json<AttestationRequest>) -> impl IntoResponse {
     let nonce = req.nonce.as_deref().and_then(|s| B64.decode(s).ok());
     let public_key = req.public_key.as_deref().and_then(|s| B64.decode(s).ok());
     let user_data = req.user_data.as_deref().and_then(|s| B64.decode(s).ok());
 
-    let raw = get_attestation_doc(nonce, public_key, user_data).map_err(|e| {
-        tracing::error!(error = %e, "attestation failed");
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("attestation failed: {e}"))
-    })?;
+    let raw = match get_attestation_doc(nonce, public_key, user_data) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "attestation failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"attestation failed: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
 
-    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"document":"{}"}}"#, B64.encode(&raw)))
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        format!(r#"{{"document":"{}"}}"#, B64.encode(&raw)),
+    )
+        .into_response()
 }
 
 // ── Encrypt ────────────────────────────────────────────────────
@@ -96,17 +124,29 @@ pub struct EncryptRequest {
     pub plaintext: String,
 }
 
-
 async fn encrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<EncryptRequest>,
 ) -> impl IntoResponse {
     let plaintext = req.plaintext.as_bytes();
-    let ciphertext = state.crypto.encrypt(plaintext).map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("encrypt error: {e}"))
-    })?;
-    
-    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"ciphertext":"{}"}}"#, B64.encode(&ciphertext)))
+    let ciphertext = match state.crypto.encrypt(plaintext) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"encrypt error: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        format!(r#"{{"ciphertext":"{}"}}"#, B64.encode(&ciphertext)),
+    )
+        .into_response()
 }
 
 // ── Decrypt ────────────────────────────────────────────────────
@@ -120,15 +160,44 @@ async fn decrypt(
     State(state): State<Arc<DataPlaneState>>,
     Json(req): Json<DecryptRequest>,
 ) -> impl IntoResponse {
-    let ciphertext = B64.decode(&req.ciphertext).map_err(|e| {
-        (StatusCode::BAD_REQUEST, format!("invalid base64 ciphertext: {e}"))
-    })?;
-    let plaintext_bytes = state.crypto.decrypt(&ciphertext).map_err(|e| {
-        (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypt error: {e}"))
-    })?;
-    let plaintext = String::from_utf8(plaintext_bytes).map_err(|e| {
-        (StatusCode::UNPROCESSABLE_ENTITY, format!("decrypted bytes not valid UTF-8: {e}"))
-    })?;
-    
-    (StatusCode::OK, [("content-type", "application/json")], format!(r#"{{"plaintext":"{}"}}"#, plaintext))
+    let ciphertext = match B64.decode(&req.ciphertext) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"invalid base64 ciphertext: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
+    let plaintext_bytes = match state.crypto.decrypt(&ciphertext) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"decrypt error: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
+    let plaintext = match String::from_utf8(plaintext_bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                [("content-type", "application/json")],
+                format!(r#"{{"error":"decrypted bytes not valid UTF-8: {e}"}}"#),
+            )
+                .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        format!(r#"{{"plaintext":"{}"}}"#, plaintext),
+    )
+        .into_response()
 }

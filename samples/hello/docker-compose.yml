@@ -38,7 +38,7 @@ configs:
           "profiles": {
             "default": {
               "description": "Short-lived certs for testing renewal",
-              "validityPeriod": 30
+              "validityPeriod": 10
             }
           }
         }

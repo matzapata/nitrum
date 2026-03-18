@@ -1,11 +1,13 @@
 mod config;
 mod constants;
 mod crypto;
-mod networking;
 mod server;
 mod state;
 mod storage;
 mod utils;
+
+#[cfg(feature = "enclave")]
+mod networking;
 
 use crate::config::RuntimeConfig;
 use crate::crypto::CryptoClient;
@@ -49,8 +51,11 @@ async fn main() {
         std::process::exit(1);
     });
 
-    // Kick off networking first, most services depend on it
+    // Kick off networking first, most services depend on it (only when built with `enclave`)
+    #[cfg(feature = "enclave")]
     networking::run().await;
+    #[cfg(not(feature = "enclave"))]
+    info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
 
     // Create storage client
     let storage = Arc::new(StorageClient::new(&runtime_config).await);

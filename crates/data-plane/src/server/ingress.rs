@@ -108,9 +108,7 @@ async fn ingress_status() -> impl IntoResponse {
     )
 }
 
-async fn ingress_attestation(
-    State(state): State<Arc<DataPlaneState>>,
-) -> impl IntoResponse {
+async fn ingress_attestation(State(state): State<Arc<DataPlaneState>>) -> impl IntoResponse {
     let cert_hash = state.tls_cert_hash.read().unwrap().clone();
     let public_key = match cert_hash {
         Some(h) => Some(h),
@@ -120,7 +118,7 @@ async fn ingress_attestation(
                 [("content-type", "application/json")],
                 r#"{"error":"TLS certificate not yet available"}"#,
             )
-                .into_response()
+                .into_response();
         }
     };
 
