@@ -19,7 +19,7 @@ rebuild tag="latest":
 # Build then run with docker run --rm. Exposes 443 (ingress), 3000 (API).
 run tag="latest" no_cache="":
     just build {{tag}} {{no_cache}}
-    docker compose up
+    ENCLAVE_IMAGE={{dockerhub_user}}/nitrum-hello:{{tag}} docker compose -f ../../docker/compose/enclave-dev.yml up
 
 # ── Push ─────────────────────────────────────────────────────────────────────
 

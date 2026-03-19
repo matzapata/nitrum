@@ -124,3 +124,55 @@ pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<
         detail,
     );
 }
+
+/// Run `nitro-cli describe-eif` in [`constants::NITRO_CLI_DOCKER_IMAGE`]; prints JSON to stdout.
+pub async fn describe_eif(eif_path: &Path) -> Result<()> {
+    let eif_path = eif_path.canonicalize().with_context(|| {
+        format!(
+            "EIF not found or path not readable: {}",
+            eif_path.display()
+        )
+    })?;
+
+    if !eif_path.is_file() {
+        bail!("not a file: {}", eif_path.display());
+    }
+
+    let parent = eif_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = parent
+        .canonicalize()
+        .with_context(|| format!("could not resolve directory {}", parent.display()))?;
+
+    let file_name = eif_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("EIF path must end with a file name")?;
+
+    let container_path = format!("/nitrum-eif/{file_name}");
+
+    let status = Command::new("docker")
+        .arg("run")
+        .arg("--rm")
+        .arg("--platform")
+        .arg(constants::DOCKER_PLATFORM)
+        .arg("-v")
+        .arg(format!("{}:/nitrum-eif:ro", parent.display()))
+        .arg(constants::NITRO_CLI_DOCKER_IMAGE)
+        .arg("describe-eif")
+        .arg("--eif-path")
+        .arg(&container_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .context("failed to spawn nitro-cli describe-eif (`docker run` …)")?;
+
+    if !status.success() {
+        bail!("nitro-cli describe-eif exited with status {status}");
+    }
+    Ok(())
+}

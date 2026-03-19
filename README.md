@@ -54,14 +54,21 @@ Test in aws
 curl -k https://Nitrum-Nitro-JFeawD8Jimon-8a5ef6f56c779882.elb.sa-east-1.amazonaws.com/health
 
 
-Build enclave with docker
+Build enclave with Docker (same flow as `nitrum build`): build the app image first, then run `nitro-cli` in a container. The `--docker-uri` value must be **exactly** the tag you passed to `docker build -t` (use a `matzapata/...` name so a cache miss does not try to pull a private repo from Hub).
+
+On **Apple Silicon**, both images must be **linux/amd64**: the enclave image (Nitro EIF is amd64), and the nitro-cli wrapper image—otherwise linuxkit looks for an arm64 enclave image, finds none, and tries to pull from Docker Hub. Build the CLI image with `docker build --platform linux/amd64 …` once, then:
 
 ```
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+docker build --platform linux/amd64 -f Dockerfile \
+  --build-arg DATA_PLANE_IMAGE=matzapata/nitrum-data-plane:latest \
+  -t matzapata/nitrum-enclave:latest .
+
+docker run --rm --platform linux/amd64 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(pwd):/output \
-  aws-nitro-enclaves-cli:latest \
+  matzapata/nitrum-nitro-cli:latest \
   build-enclave \
-  --docker-uri matzapata/data-plane:latest \
+  --docker-uri matzapata/nitrum-enclave:latest \
   --output-file /output/enclave.eif
 ```
 

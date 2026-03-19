@@ -1,5 +1,6 @@
-FROM amazonlinux:2
+FROM amazonlinux:2023
 
-RUN amazon-linux-extras install aws-nitro-enclaves-cli -y; yum install aws-nitro-enclaves-cli-devel -y;
+RUN dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel \
+    && dnf clean all
 
 ENTRYPOINT ["nitro-cli"]

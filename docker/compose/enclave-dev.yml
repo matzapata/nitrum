@@ -1,4 +1,4 @@
-# Local development compose for the hello sample.
+# Local development compose for the enclaves.
 #
 # Usage:
 #   docker compose up            # start (previously built hello image)
@@ -75,7 +75,7 @@ services:
       PEBBLE_VA_NOSLEEP: "1"
 
   enclave:
-    image: matzapata/nitrum-hello:dev
+    image: ${ENCLAVE_IMAGE}
     pull_policy: never
     hostname: nitrum.local
     ports:

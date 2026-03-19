@@ -29,7 +29,7 @@ enum Commands {
     Logs(logs::LogsArgs),
     /// Deploy to production
     Deploy(deploy::DeployArgs),
-    /// Describe enclave or project state
+    /// Describe an EIF (`nitro-cli describe-eif` in Docker)
     Describe(describe::DescribeArgs),
     /// Destroy resources
     Destroy(destroy::DestroyArgs),
