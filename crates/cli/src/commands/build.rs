@@ -1,3 +1,5 @@
+//! Build enclave eif file
+
 use clap::Args;
 
 #[derive(Args)]
@@ -7,6 +9,6 @@ pub struct BuildArgs {
     pub path: Option<std::path::PathBuf>,
 }
 
-pub fn run(_args: BuildArgs) {
+pub async fn run(_args: BuildArgs) {
     // TODO: build enclave using dev as base image (version for dev)
 }

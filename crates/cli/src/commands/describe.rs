@@ -7,6 +7,6 @@ pub struct DescribeArgs {
     pub resource: Option<String>,
 }
 
-pub fn run(_args: DescribeArgs) {
+pub async fn run(_args: DescribeArgs) {
     // TODO
 }

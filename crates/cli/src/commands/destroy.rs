@@ -1,3 +1,5 @@
+//! Destroy aws resources
+
 use clap::Args;
 
 #[derive(Args)]
@@ -7,6 +9,6 @@ pub struct DestroyArgs {
     pub path: Option<std::path::PathBuf>,
 }
 
-pub fn run(_args: DestroyArgs) {
+pub async fn run(_args: DestroyArgs) {
     // TODO
 }

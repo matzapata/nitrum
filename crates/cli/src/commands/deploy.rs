@@ -7,6 +7,6 @@ pub struct DeployArgs {
     pub path: Option<std::path::PathBuf>,
 }
 
-pub fn run(_args: DeployArgs) {
+pub async fn run(_args: DeployArgs) {
     // TODO
 }

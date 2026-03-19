@@ -1,5 +1,5 @@
 use crate::constants::{NITRUM_GITHUB_REPO_NAME, NITRUM_GITHUB_REPO_OWNER};
-use crate::infrastructure::{console, github};
+use crate::utils::{console, github};
 use clap::Args;
 use indicatif::ProgressBar;
 use std::env;
@@ -15,7 +15,7 @@ pub struct InitArgs {
     pub directory: Option<PathBuf>,
 }
 
-pub fn run(args: InitArgs) {
+pub async fn run(args: InitArgs) {
     let directory = args
         .directory
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
@@ -44,14 +44,18 @@ pub fn run(args: InitArgs) {
             "Downloading {}…",
             dest.file_name().unwrap().to_string_lossy()
         ));
-        github::download_file(
+        if let Err(e) = github::download_file(
             NITRUM_GITHUB_REPO_OWNER,
             NITRUM_GITHUB_REPO_NAME,
             SAMPLE_REF,
             repo_path,
-            dest,
+            dest.as_path(),
         )
-        .unwrap();
+        .await
+        {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
     }
 
     spinner.finish_with_message("Project initialized.");
