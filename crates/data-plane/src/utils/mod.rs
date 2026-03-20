@@ -1,3 +1,4 @@
+pub mod ssm;
 pub mod imds;
 pub mod leader;
 #[cfg(feature = "enclave")]

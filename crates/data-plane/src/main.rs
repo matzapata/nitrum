@@ -47,7 +47,7 @@ async fn main() {
     // Parse args and load runtime config
     let args = Args::parse();
     let runtime_config = RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
-        error!(error = %e, "failed to load runtime config (set NITRUM_DYNAMODB_TABLE and NITRUM_KMS_KEY_ID, or use load_dev for local)");
+        error!(error = %e, "failed to load runtime config");
         std::process::exit(1);
     });
 

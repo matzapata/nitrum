@@ -6,6 +6,7 @@
 //! In non-enclave (dev) builds the attestation step is skipped and decryption
 //! is performed locally using an RSA private key from `NITRUM_DEV_RSA_PRIVATE_KEY`.
 
+use crate::config::RuntimeConfig;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::EncryptionAlgorithmSpec;
@@ -17,13 +18,13 @@ pub struct Kms {
 }
 
 impl Kms {
-    pub async fn new(key_id: String) -> Self {
-        let aws_sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .load()
-            .await;
-        let client = aws_sdk_kms::Client::new(&aws_sdk_config);
-
-        Self { client, key_id }
+    pub async fn new(config: &RuntimeConfig) -> Self {
+        let mut builder = aws_sdk_kms::config::Builder::from(config.aws_sdk_config.as_ref());
+        if let Some(ref endpoint) = config.kms_endpoint {
+            builder = builder.endpoint_url(endpoint);
+        }
+        let client = aws_sdk_kms::Client::from_conf(builder.build());
+        Self { client, key_id: config.kms_key_id.clone() }
     }
 
     /// Encrypt `plaintext` under the configured RSA-2048 KMS key (RSAES_OAEP_SHA_256).

@@ -87,11 +87,13 @@ just build-control-plane dev
 just build-data-plane dev true
 ```
 
+On **EC2**, the data-plane loads region, instance id, and IAM credentials from **IMDS**, and the DynamoDB table name plus KMS key ID from **SSM** (`/nitrum/dynamodb_table`, `/nitrum/kms_key_id` by default); the CDK stack creates those parameters and grants `ssm:GetParameters`. For **local** runs use `docker/compose/enclave-dev.yml`: **LocalStack** (SSM + DynamoDB) plus **[Amazon EC2 Metadata Mock](https://github.com/aws/amazon-ec2-metadata-mock)** (`public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0`, config inlined in the compose file as `configs.aemm-config`). Point the app at them with `NITRUM_IMDS_BASE_URL` (default mock port **1338**), `NITRUM_SSM_ENDPOINT_URL`, and `NITRUM_DYNAMODB_ENDPOINT_URL`. SSM parameter names can be overridden only via env vars read by `SsmParameters` (`crates/data-plane/src/utils/ssm.rs`), not `config.rs`.
+
 ---
 
 ## Running locally with Docker Compose
 
-The **hello** sample runs the data-plane plus a small Node app behind TLS, with optional **DynamoDB Local** for persistent DEK storage and optional **Pebble** for ACME testing.
+Full enclave-style stack (IMDS mock + LocalStack SSM/DynamoDB + Pebble + enclave image) lives in **`docker/compose/enclave-dev.yml`**. A smaller reference stack is under **`samples/hello/docker-compose.yml`** (IMDS mock + LocalStack + init).
 
 ### 1. Build the data-plane dev image
 
@@ -103,29 +105,26 @@ just build-data-plane dev
 
 This produces `matzapata/nitrum-data-plane:dev` (no enclave feature; suitable for local runs).
 
-### 2. Start the stack
+### 2. Start the dev stack
 
-From the hello sample directory:
+From the repo root (set `ENCLAVE_IMAGE` to your built image):
 
 ```bash
-cd samples/hello
-docker compose up
+export ENCLAVE_IMAGE=matzapata/nitrum-hello:dev   # or your image
+docker compose -f docker/compose/enclave-dev.yml up
 ```
 
-This starts:
-
-- **dynamodb** – DynamoDB Local on port **8000** (in-memory).
-- **hello** – Data-plane + user app; HTTPS ingress on **443**, internal API on **3000**.
+This starts **imds-mock** (AEMM on **1338**), **LocalStack** (SSM + DynamoDB on **4566**), **localstack-init** (table `nitrum-dev` + `/nitrum/*` SSM params), **Pebble**, and the **enclave** service with `NITRUM_IMDS_BASE_URL` / `NITRUM_SSM_ENDPOINT_URL` / `NITRUM_DYNAMODB_ENDPOINT_URL` wired to the mocks.
 
 The data-plane uses **self-signed TLS** by default. All `curl` examples below use `-k` to skip certificate verification.
 
-### 3. Create the DynamoDB table (one-time, for DEK storage)
+### 3. DynamoDB table and SSM (handled by compose)
 
-If you want the data-plane to store the DEK in DynamoDB Local (so it survives restarts), create the table after DynamoDB is up:
+The compose file creates the DynamoDB table and SSM parameters. To recreate manually against LocalStack:
 
 ```bash
 aws dynamodb create-table \
-  --endpoint-url http://localhost:8000 \
+  --endpoint-url http://localhost:4566 \
   --region us-east-1 \
   --table-name nitrum-dev \
   --attribute-definitions AttributeName=pk,AttributeType=S \

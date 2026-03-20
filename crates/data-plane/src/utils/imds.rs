@@ -1,78 +1,254 @@
-//! EC2 Instance Metadata Service (IMDSv2) helpers.
+//! Enclave-side AWS credential source for the shared [`aws_config::SdkConfig`].
 //!
-//! Inside a Nitro Enclave, IMDS is proxied through vsock-proxy using the
-//! allowlist entry for 169.254.169.254.
-//! TODO: test this all, also get session for dynamodb table, etc
+//! [`EnclaveProvider`] implements [`ProvideCredentials`] and owns an [`ImdsClient`]
+//! that caches short-lived IMDSv2 role credentials by wall-clock time bucket.
+
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use aws_credential_types::provider::error::CredentialsError;
+use aws_credential_types::provider::future;
+use aws_credential_types::provider::ProvideCredentials;
+use aws_credential_types::provider::Result as ProviderResult;
+use aws_credential_types::Credentials;
+use serde::Deserialize;
+use tokio::sync::Mutex;
+use tracing::debug;
 
-const IMDS_BASE: &str = "http://169.254.169.254/latest";
-const TOKEN_TTL_SECONDS: &str = "21600";
+// ── IMDSv2 constants ─────────────────────────────────────────────────────────
 
-/// Fetch a short-lived IMDSv2 session token.
-async fn get_token(client: &reqwest::Client) -> Result<String> {
-    client
-        .put(format!("{IMDS_BASE}/api/token"))
-        .header("X-aws-ec2-metadata-token-ttl-seconds", TOKEN_TTL_SECONDS)
-        .send()
-        .await
-        .context("IMDSv2 token request failed")?
-        .text()
-        .await
-        .context("failed to read IMDSv2 token body")
+/// IMDSv2 token TTL (seconds). AWS allows up to 21600.
+const TOKEN_TTL_SECS: u64 = 21600;
+
+/// How often cached role credentials are refreshed (seconds).
+const CREDENTIALS_REFRESH_SECS: u64 = 3600;
+
+/// HTTP timeout for IMDS calls.
+const METADATA_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+
+// ── ImdsClient ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ImdsRoleCredentialsJson {
+    access_key_id: String,
+    secret_access_key: String,
+    token: String,
 }
 
-// TODO: get dynamo table and etc, etc
-/// Returns the AWS region this instance is running in.
-pub async fn get_region() -> Result<String> {
-    // Prefer the environment variable so local dev works without a real IMDS.
-    if let Ok(r) = std::env::var("AWS_REGION").or_else(|_| std::env::var("AWS_DEFAULT_REGION")) {
-        return Ok(r);
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .context("failed to build HTTP client")?;
-
-    let token = get_token(&client).await?;
-
-    let region = client
-        .get(format!("{IMDS_BASE}/meta-data/placement/region"))
-        .header("X-aws-ec2-metadata-token", &token)
-        .send()
-        .await
-        .context("IMDS region request failed")?
-        .text()
-        .await
-        .context("failed to read IMDS region body")?;
-
-    Ok(region)
+struct CredCache {
+    ttl_bucket: u64,
+    credentials: Option<Credentials>,
 }
 
-/// Returns a unique instance ID for this process (leader lock owner).
-/// Tries IMDS instance-id first, then NITRUM_INSTANCE_ID env, then a local fallback.
-pub async fn instance_id() -> Result<String> {
-    if let Ok(id) = std::env::var("NITRUM_INSTANCE_ID") {
-        return Ok(id);
+/// IMDSv2 client with built-in credential caching by wall-clock time bucket.
+pub struct ImdsClient {
+    /// Base URL including the `/latest` segment (no trailing slash), e.g. `http://169.254.169.254/latest`.
+    latest_base: String,
+    http: reqwest::Client,
+    cache: Mutex<CredCache>,
+}
+
+impl std::fmt::Debug for ImdsClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ImdsClient")
+    }
+}
+
+impl ImdsClient {
+    /// Create a new client for the given IMDS base URL (including `/latest`, trailing slashes stripped).
+    pub fn new(latest_base: impl AsRef<str>) -> Result<Self> {
+        let latest_base = latest_base
+            .as_ref()
+            .trim_end_matches('/')
+            .to_string();
+        let http = reqwest::Client::builder()
+            .timeout(METADATA_HTTP_TIMEOUT)
+            .build()
+            .context("failed to build HTTP client for IMDS")?;
+        Ok(Self {
+            latest_base,
+            http,
+            cache: Mutex::new(CredCache {
+                ttl_bucket: 0,
+                credentials: None,
+            }),
+        })
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .context("failed to build HTTP client for IMDS")?;
+    // ── internal helpers ────────────────────────────────────────────────────
 
-    let token = get_token(&client).await?;
+    async fn get_token(&self) -> Result<String> {
+        let base = &self.latest_base;
+        self.http
+            .put(format!("{base}/api/token"))
+            .header(
+                "X-aws-ec2-metadata-token-ttl-seconds",
+                TOKEN_TTL_SECS.to_string(),
+            )
+            .send()
+            .await
+            .context("IMDSv2 token request failed")?
+            .error_for_status()
+            .context("IMDSv2 token non-success response")?
+            .text()
+            .await
+            .context("failed to read IMDSv2 token body")
+    }
 
-    let id = client
-        .get(format!("{IMDS_BASE}/meta-data/instance-id"))
-        .header("X-aws-ec2-metadata-token", &token)
-        .send()
-        .await
-        .context("IMDS instance-id request failed")?
-        .text()
-        .await
-        .context("failed to read IMDS instance-id body")?;
+    async fn get_meta(&self, suffix: &str) -> Result<String> {
+        let token = self.get_token().await?;
+        let base = &self.latest_base;
+        let url = format!("{base}/{suffix}");
+        let text = self
+            .http
+            .get(&url)
+            .header("X-aws-ec2-metadata-token", &token)
+            .send()
+            .await
+            .with_context(|| format!("IMDS request failed: {url}"))?
+            .error_for_status()
+            .with_context(|| format!("IMDS non-success response: {url}"))?
+            .text()
+            .await
+            .with_context(|| format!("failed to read IMDS body: {url}"))?;
+        Ok(text.trim().to_string())
+    }
 
-    Ok(id)
+    fn ttl_bucket() -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now / CREDENTIALS_REFRESH_SECS
+    }
+
+    // ── public API ──────────────────────────────────────────────────────────
+
+    /// Returns the AWS region this instance is running in.
+    pub async fn get_region(&self) -> Result<String> {
+        self.get_meta("meta-data/placement/region")
+            .await
+            .context("IMDS region request failed")
+    }
+
+    /// Returns the EC2 instance ID.
+    pub async fn instance_id(&self) -> Result<String> {
+        self.get_meta("meta-data/instance-id")
+            .await
+            .context("IMDS instance-id request failed")
+    }
+
+    /// Fetch temporary IAM role credentials, refreshing only when the time bucket rolls over.
+    pub async fn get_cached_role_credentials(&self) -> Result<Credentials> {
+        let bucket = Self::ttl_bucket();
+        let mut guard = self.cache.lock().await;
+
+        if guard.ttl_bucket == bucket {
+            if let Some(ref c) = guard.credentials {
+                return Ok(c.clone());
+            }
+        }
+
+        let creds = self.fetch_role_credentials().await?;
+        guard.ttl_bucket = bucket;
+        guard.credentials = Some(creds.clone());
+        Ok(creds)
+    }
+
+    async fn fetch_role_credentials(&self) -> Result<Credentials> {
+        let token = self.get_token().await?;
+        let base = &self.latest_base;
+
+        let role_list_url = format!("{base}/meta-data/iam/security-credentials/");
+        let role_name = self
+            .http
+            .get(&role_list_url)
+            .header("X-aws-ec2-metadata-token", &token)
+            .send()
+            .await
+            .context("IMDS IAM role list request failed")?
+            .error_for_status()
+            .context("IMDS IAM role list non-success")?
+            .text()
+            .await
+            .context("failed to read IMDS IAM role name body")?;
+
+        let role_name = role_name
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .context("IMDS returned empty IAM role name")?
+            .to_owned();
+
+        let creds_url = format!("{base}/meta-data/iam/security-credentials/{role_name}");
+        let creds_json = self
+            .http
+            .get(&creds_url)
+            .header("X-aws-ec2-metadata-token", &token)
+            .send()
+            .await
+            .context("IMDS IAM credentials request failed")?
+            .error_for_status()
+            .context("IMDS IAM credentials non-success")?
+            .text()
+            .await
+            .context("failed to read IMDS IAM credentials body")?;
+
+        let parsed: ImdsRoleCredentialsJson =
+            serde_json::from_str(&creds_json).context("parse IMDS IAM credentials JSON")?;
+
+        let session_token = (!parsed.token.is_empty()).then_some(parsed.token);
+        let creds = Credentials::new(
+            parsed.access_key_id,
+            parsed.secret_access_key,
+            session_token,
+            None,
+            "imds",
+        );
+
+        debug!(bucket = Self::ttl_bucket(), "IMDS role credentials refreshed");
+        Ok(creds)
+    }
+}
+
+// ── EnclaveProvider ──────────────────────────────────────────────────────────
+
+/// Credential provider used for all AWS SDK clients inside the enclave.
+///
+/// Wraps a shared [`ImdsClient`] (and its cache) in an [`Arc`] so the provider
+/// is cheap to clone and hand to multiple SDK service clients.
+#[derive(Clone, Debug)]
+pub struct EnclaveProvider {
+    imds: Arc<ImdsClient>,
+}
+
+impl EnclaveProvider {
+    /// Create a provider with a new [`ImdsClient`] for `latest_base` (same rules as [`ImdsClient::new`]).
+    pub fn new(latest_base: impl AsRef<str>) -> Result<Self> {
+        Ok(Self::with_imds(Arc::new(ImdsClient::new(latest_base)?)))
+    }
+
+    /// Share an existing [`ImdsClient`] (e.g. with [`super::ssm::SsmParameters`]).
+    pub fn with_imds(imds: Arc<ImdsClient>) -> Self {
+        Self { imds }
+    }
+
+    async fn load_credentials(&self) -> ProviderResult {
+        self.imds
+            .get_cached_role_credentials()
+            .await
+            .map_err(CredentialsError::provider_error)
+    }
+}
+
+impl ProvideCredentials for EnclaveProvider {
+    fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        future::ProvideCredentials::new(self.load_credentials())
+    }
 }

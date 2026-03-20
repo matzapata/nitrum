@@ -33,12 +33,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+thiserror = "2"
 rand = "0.8"
 aes-gcm = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-credential-types = "1"
 aws-sdk-kms = "1"
 aws-sdk-dynamodb = "1"
+aws-sdk-ssm = "1"
 aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
 serde_bytes = { version = "0.11", optional = true }
 rsa = { version = "0.9", features = ["sha2"] }

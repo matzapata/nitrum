@@ -9,3 +9,6 @@ pub const LETS_ENCRYPT_PROD_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.
 
 /// Environment variable for the ACME directory URL.
 pub const ENV_ACME_DIRECTORY_URL: &str = "NITRUM_ACME_DIRECTORY_URL";
+
+/// Default IMDS base URL when `NITRUM_IMDS_BASE_URL` is unset (EC2 link-local, includes `/latest`).
+pub const DEFAULT_IMDS_LATEST_BASE_URL: &str = "http://169.254.169.254/latest";
