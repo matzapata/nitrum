@@ -38,6 +38,7 @@ cat > /etc/nitro_enclaves/vsock-proxy.yaml <<'VSOCK_EOF'
 allowlist:
 - {address: kms.${__REGION__}.amazonaws.com, port: 443}
 - {address: kms-fips.${__REGION__}.amazonaws.com, port: 443}
+- {address: ssm.${__REGION__}.amazonaws.com, port: 443}
 - {address: 169.254.169.254, port: 80}
 VSOCK_EOF
 
@@ -45,17 +46,16 @@ systemctl enable --now docker
 systemctl enable --now nitro-enclaves-allocator.service
 systemctl enable --now nitro-enclaves-vsock-proxy.service
 
-# ── Wait for services before pulling and building ─────────────────────────────
+# ── Wait for services before pulling containers and downloading EIF ───────────
 sleep 5
 
-# ── Pull images and build enclave EIF ────────────────────────────────────────
+# ── Pull control-plane image and download enclave EIF from S3 ────────────────
 CONTROL_PLANE_IMAGE="matzapata/nitrum-control-plane:latest"
-ENCLAVE_IMAGE="matzapata/nitrum-hello:latest"
+EIF_ASSET_HASH="${__EIF_ASSET_HASH__}"
 
 docker pull "$CONTROL_PLANE_IMAGE"
-docker pull "$ENCLAVE_IMAGE"
-
-nitro-cli build-enclave --docker-uri "$ENCLAVE_IMAGE" --output-file /usr/bin/enclave.eif
+aws s3 cp "s3://${__EIF_S3_BUCKET__}/${__EIF_S3_KEY__}" /usr/bin/enclave.eif --region "${__REGION__}"
+echo "Deployed EIF asset hash: $EIF_ASSET_HASH"
 
 # ── Systemd unit for control-plane (gvproxy + enclave) ───────────────────────
 cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'

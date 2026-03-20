@@ -1,5 +1,7 @@
+/// CDK app path relative to project root (populated by `nitrum deploy`).
+pub const NITRUM_INFRA_DIR: &str = ".nitrum/infra";
 /// Compose file path relative to the project root (local dev stack).
-pub const ENCLAVE_DEV_COMPOSE_FILE: &str = ".nitrum/enclave-dev-compose.yml";
+pub const ENCLAVE_DEV_COMPOSE_FILE: &str = ".nitrum/compose/enclave-dev.yml";
 
 /// All CLI-driven `docker build` / nitro-cli `docker run` use this platform (Nitro EIF + dev/prod parity).
 pub const DOCKER_PLATFORM: &str = "linux/amd64";
@@ -23,3 +25,8 @@ pub const NITRO_CLI_DOCKER_IMAGE: &str = "matzapata/nitrum-nitro-cli:latest";
 // Github repo constants
 pub const NITRUM_GITHUB_REPO_OWNER: &str = "matzapata";
 pub const NITRUM_GITHUB_REPO_NAME: &str = "nitrum";
+
+/// Git ref (branch/tag) when downloading `infra/` from GitHub for `nitrum deploy`.
+pub const NITRUM_GITHUB_REF: &str = "develop";
+
+

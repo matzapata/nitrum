@@ -5,16 +5,6 @@ use tokio::process::Command;
 
 use crate::constants;
 
-/// Build the project Dockerfile as [`constants::ENCLAVE_DEV_LOCAL_IMAGE`] (quiet; use a spinner in the caller).
-pub async fn build_enclave(root: &Path) -> Result<()> {
-    build_enclave_image(
-        root,
-        constants::ENCLAVE_DEV_BASE_IMAGE,
-        constants::ENCLAVE_DEV_LOCAL_IMAGE,
-    )
-    .await
-}
-
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 /// Always targets [`constants::DOCKER_PLATFORM`].
 pub async fn build_enclave_image(
@@ -127,12 +117,9 @@ pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<
 
 /// Run `nitro-cli describe-eif` in [`constants::NITRO_CLI_DOCKER_IMAGE`]; prints JSON to stdout.
 pub async fn describe_eif(eif_path: &Path) -> Result<()> {
-    let eif_path = eif_path.canonicalize().with_context(|| {
-        format!(
-            "EIF not found or path not readable: {}",
-            eif_path.display()
-        )
-    })?;
+    let eif_path = eif_path
+        .canonicalize()
+        .with_context(|| format!("EIF not found or path not readable: {}", eif_path.display()))?;
 
     if !eif_path.is_file() {
         bail!("not a file: {}", eif_path.display());

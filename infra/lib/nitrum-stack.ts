@@ -9,20 +9,26 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3assets from 'aws-cdk-lib/aws-s3-assets';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 
-export interface NitrumStackProps extends cdk.StackProps {
-  deployment: string;
+export interface NitrumStackProps {
+  /** CDK environment (AWS account/region target) */
+  cdkEnv: cdk.Environment;
+  /** AWS region */
   region: string;
-  /** Absolute path to the directory containing the enclave Dockerfile */
-  appDirectory: string;
+  /** Application environment */
+  appEnv: 'dev' | 'prod';
+  /** Absolute path to the EIF file to upload */
+  eifPath: string;
 }
 
 export class NitrumStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: NitrumStackProps) {
-    super(scope, id, props);
+    super(scope, id, { env: props.cdkEnv });
 
-    const { deployment, region } = props;
+    const { appEnv, region, eifPath } = props;
 
     // ── VPC ───────────────────────────────────────────────────────────────────
     const vpc = new ec2.Vpc(this, 'VPC', {
@@ -90,31 +96,48 @@ export class NitrumStack extends cdk.Stack {
     const enclaveKey = new kms.Key(this, 'EnclaveKey', {
       keySpec: kms.KeySpec.RSA_2048,
       keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
-      description: `Nitrum ${deployment} enclave key – attestation-based decrypt`,
+      description: `Nitrum ${appEnv} enclave key - attestation-based decrypt`,
       enableKeyRotation: false,
       removalPolicy:
-        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+        appEnv === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
     });
 
     // ── DynamoDB table ────────────────────────────────────────────────────────
     // Single-table design; pk values: "dek" | "cert" | "lock".
     // TTL is enabled on the `ttl` attribute (used by the distributed lock).
     const enclaveTable = new dynamodb.Table(this, 'EnclaveTable', {
-      tableName: `nitrum-${deployment}`,
+      tableName: `nitrum-${appEnv}`,
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: 'ttl',
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       removalPolicy:
-        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+        appEnv === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    });
+
+    // Plaintext params for the data-plane (SSM primary; IMDS tags remain as fallback).
+    const kmsKeyParam = new ssm.StringParameter(this, 'NitrumKmsKeyParam', {
+      parameterName: '/nitrum/kms_key_id',
+      stringValue: enclaveKey.keyId,
+      description: 'KMS key ID for Nitrum data-plane (enclave)',
+    });
+    const dynamoTableParam = new ssm.StringParameter(this, 'NitrumDynamoTableParam', {
+      parameterName: '/nitrum/dynamodb_table',
+      stringValue: enclaveTable.tableName,
+      description: 'DynamoDB table name for Nitrum data-plane (enclave)',
     });
 
     // ── CloudWatch log group ──────────────────────────────────────────────────
     const logGroup = new logs.LogGroup(this, 'EnclaveLogGroup', {
-      logGroupName: `/nitrum/${deployment}/enclave`,
+      logGroupName: `/nitrum/${appEnv}/enclave`,
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy:
-        deployment === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+        appEnv === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    });
+
+    // ── EIF asset ──────────────────────────────────────────────────────────────
+    const eifAsset = new s3assets.Asset(this, 'EnclaveEifAsset', {
+      path: eifPath,
     });
 
     // ── IAM instance role ─────────────────────────────────────────────────────
@@ -124,9 +147,12 @@ export class NitrumStack extends cdk.Stack {
     role.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
     );
+    eifAsset.grantRead(role);
     enclaveKey.grant(role, 'kms:Encrypt', 'kms:Decrypt', 'kms:GetPublicKey');
     enclaveTable.grantReadWriteData(role);
     logGroup.grantWrite(role);
+    kmsKeyParam.grantRead(role);
+    dynamoTableParam.grantRead(role);
 
     // ── User data ─────────────────────────────────────────────────────────────
     // Fn.sub replaces ${__VAR__} tokens before CloudFormation writes user data
@@ -136,12 +162,17 @@ export class NitrumStack extends cdk.Stack {
       fs.readFileSync(path.join(__dirname, '../user_data.sh'), 'utf8'),
       {
         __REGION__: region,
-        // __ENCLAVE_IMAGE_URI__: enclaveImageUri,
+        __EIF_S3_BUCKET__: eifAsset.s3BucketName,
+        __EIF_S3_KEY__: eifAsset.s3ObjectKey,
+        __EIF_ASSET_HASH__: eifAsset.assetHash,
       },
     );
 
     // ── Launch template ───────────────────────────────────────────────────────
     const launchTemplate = new ec2.LaunchTemplate(this, 'NitroLaunchTemplate', {
+      // Tie the launch template identity to the EIF hash so EIF changes force
+      // a concrete ASG config update on deploy.
+      launchTemplateName: `nitrum-${appEnv}-${eifAsset.assetHash.slice(0, 12)}`,
       instanceType: new ec2.InstanceType('m6i.xlarge'),
       userData: ec2.UserData.custom(userDataResolved),
       nitroEnclaveEnabled: true,
@@ -152,13 +183,14 @@ export class NitrumStack extends cdk.Stack {
           volume: ec2.BlockDeviceVolume.ebs(32, {
             volumeType: ec2.EbsDeviceVolumeType.GP3,
             encrypted: true,
-            deleteOnTermination: deployment === 'dev',
+            deleteOnTermination: appEnv === 'dev',
           }),
         },
       ],
       role,
       securityGroup: enclaveSg,
       requireImdsv2: true,
+      instanceMetadataTags: true,
     });
 
     // ── Auto Scaling Group ────────────────────────────────────────────────────
@@ -170,7 +202,6 @@ export class NitrumStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       updatePolicy: autoscaling.UpdatePolicy.rollingUpdate(),
-      // TODO: here review
       healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
         additionalTypes: [autoscaling.AdditionalHealthCheckType.ELB],
         gracePeriod: cdk.Duration.minutes(5),
@@ -204,11 +235,11 @@ export class NitrumStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'KmsKeyId', {
       value: enclaveKey.keyId,
-      description: 'KMS key ID – set as NITRUM_KMS_KEY_ID in the enclave environment',
+      description: 'KMS key ID',
     });
     new cdk.CfnOutput(this, 'DynamoTableName', {
       value: enclaveTable.tableName,
-      description: 'DynamoDB table name – set as NITRUM_DYNAMODB_TABLE in the enclave environment',
+      description: 'DynamoDB table name',
     });
     new cdk.CfnOutput(this, 'EC2InstanceRoleARN', {
       value: role.roleArn,
