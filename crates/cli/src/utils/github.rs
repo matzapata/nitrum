@@ -103,7 +103,10 @@ pub async fn extract_infra_folder(
 
     let mut extracted_any = false;
 
-    for entry in archive.entries().context("failed to read tarball entries")? {
+    for entry in archive
+        .entries()
+        .context("failed to read tarball entries")?
+    {
         let mut entry = entry.context("bad tarball entry")?;
         if entry.header().entry_type().is_symlink() {
             continue;

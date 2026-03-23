@@ -44,18 +44,23 @@ async fn main() {
         )
         .init();
 
-    // Parse args and load runtime config
     let args = Args::parse();
-    let runtime_config = RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
-        error!(error = %e, "failed to load runtime config");
-        std::process::exit(1);
-    });
 
-    // Kick off networking first, most services depend on it (only when built with `enclave`)
+    // gvproxy TAP path must be up before IMDS-adjacent HTTPS (SSM, etc.). IMDS uses loopback
+    // viproxy started from `networking::init` (not gvproxy).
     #[cfg(feature = "enclave")]
-    networking::run().await;
+    networking::init().await;
     #[cfg(not(feature = "enclave"))]
     info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
+
+    let runtime_config = RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
+        error!(
+            error = %format!("{:#}", e),
+            config_path = %args.config.display(),
+            "failed to load runtime config"
+        );
+        std::process::exit(1);
+    });
 
     // Create storage client
     let storage = Arc::new(StorageClient::new(&runtime_config).await);
@@ -65,7 +70,10 @@ async fn main() {
         CryptoClient::new(runtime_config.clone(), storage.clone())
             .await
             .unwrap_or_else(|e| {
-                error!(error = %e, "crypto setup failed");
+                error!(
+                    error = %format!("{:#}", e),
+                    "crypto setup failed"
+                );
                 std::process::exit(1);
             }),
     );

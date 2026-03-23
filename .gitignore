@@ -3,3 +3,5 @@
 *.eif
 .env
 .DS_Store
+
+.nitrum

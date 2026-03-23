@@ -26,7 +26,10 @@ TODO: properly wait for system to be up
 TODO: add cert to attestation
 TODO: env vars support (later, inline code enc with kms)
 TODO: make sure cert is stored encrypted
-
+TODO: reproducible builds
+TODO: control plane watchdog style, reset if killed, logs, etc
+TODO: native viproxy for imds
+TODO: cloudformation template instead of cdk
 
 KMS to encrypt decript data (use public key to wrap a sync key and store the sync key in db)
 
@@ -87,7 +90,7 @@ just build-control-plane dev
 just build-data-plane dev true
 ```
 
-On **EC2**, the data-plane loads region, instance id, and IAM credentials from **IMDS**, and the DynamoDB table name plus KMS key ID from **SSM** (`/nitrum/dynamodb_table`, `/nitrum/kms_key_id` by default); the CDK stack creates those parameters and grants `ssm:GetParameters`. For **local** runs use `docker/compose/enclave-dev.yml`: **LocalStack** (SSM + DynamoDB) plus **[Amazon EC2 Metadata Mock](https://github.com/aws/amazon-ec2-metadata-mock)** (`public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0`, config inlined in the compose file as `configs.aemm-config`). Point the app at them with `NITRUM_IMDS_BASE_URL` (default mock port **1338**), `NITRUM_SSM_ENDPOINT_URL`, and `NITRUM_DYNAMODB_ENDPOINT_URL`. SSM parameter names can be overridden only via env vars read by `SsmParameters` (`crates/data-plane/src/utils/ssm.rs`), not `config.rs`.
+On **EC2**, the data-plane loads region, instance id, and IAM credentials from **IMDS**, and the DynamoDB table name plus KMS key ID from **SSM** (`/nitrum/dynamodb_table`, `/nitrum/kms_key_id` by default); the CDK stack creates those parameters and grants `ssm:GetParameters`. **Inside a Nitro enclave** the app does not reach `169.254.169.254` directly: the data-plane image runs **Brave viproxy** on loopback (default **`127.0.0.1:8099`**, not port 80, to leave **`0.0.0.0:80`** for ACME) → vsock to the parent (CID **3**, port **8002**) and the host **`enclave-imds-proxy`** / **`vsock-proxy`** to IMDS. The default base URL is **`http://127.0.0.1:8099/latest`**; set **`NITRUM_IMDS_BASE_URL`** if you use another listener or run the binary on the **parent** instance (`http://169.254.169.254/latest`). User data can install **`enclave-imds-proxy.service`** (vsock → IMDS) alongside the allowlisted **`vsock-proxy.yaml`**. For **local** runs use `docker/compose/enclave-dev.yml`: **LocalStack** (SSM + DynamoDB) plus **[Amazon EC2 Metadata Mock](https://github.com/aws/amazon-ec2-metadata-mock)** (`public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0`, config inlined in the compose file as `configs.aemm-config`). Compose sets **`NITRUM_IMDS_BASE_URL`** to the mock (e.g. `http://imds:1338/latest`), plus `NITRUM_SSM_ENDPOINT_URL` and `NITRUM_DYNAMODB_ENDPOINT_URL`. SSM parameter names can be overridden only via env vars read by `SsmParameters` (`crates/data-plane/src/utils/ssm.rs`), not `config.rs`.
 
 ---
 
@@ -114,7 +117,7 @@ export ENCLAVE_IMAGE=matzapata/nitrum-hello:dev   # or your image
 docker compose -f docker/compose/enclave-dev.yml up
 ```
 
-This starts **imds-mock** (AEMM on **1338**), **LocalStack** (SSM + DynamoDB on **4566**), **localstack-init** (table `nitrum-dev` + `/nitrum/*` SSM params), **Pebble**, and the **enclave** service with `NITRUM_IMDS_BASE_URL` / `NITRUM_SSM_ENDPOINT_URL` / `NITRUM_DYNAMODB_ENDPOINT_URL` wired to the mocks.
+This starts **imds-mock** (AEMM on **1338**), **LocalStack** (SSM + DynamoDB + KMS on **4566**), **localstack-init** (table `nitrum-dev`, a symmetric KMS CMK, `/nitrum/*` SSM params), **Pebble**, and the **enclave** service with mock endpoints including `NITRUM_KMS_ENDPOINT_URL` wired to LocalStack.
 
 The data-plane uses **self-signed TLS** by default. All `curl` examples below use `-k` to skip certificate verification.
 
@@ -133,19 +136,27 @@ aws dynamodb create-table \
   --no-cli-pager
 ```
 
-Then provide a **local RSA key** so the data-plane can encrypt/decrypt the DEK without AWS KMS. Generate a key and pass it when starting the stack:
+The DEK is wrapped with **KMS** (`GenerateDataKeyWithoutPlaintext`); the compose init creates a symmetric CMK and stores its id in SSM as `/nitrum/kms_key_id`. The enclave service sets `NITRUM_KMS_ENDPOINT_URL=http://localstack:4566` so the data-plane talks to LocalStack KMS.
+
+To recreate the key parameter manually:
 
 ```bash
-# Generate key (one-time)
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out kms_private.pem
+KEY_ID=$(aws kms create-key \
+  --endpoint-url http://localhost:4566 \
+  --region us-east-1 \
+  --description nitrum-dev-symmetric-data-key \
+  --query KeyMetadata.KeyId --output text)
 
-# Run with key (from samples/hello)
-NITRUM_DEV_RSA_PRIVATE_KEY="$(cat kms_private.pem)" docker compose up
+aws ssm put-parameter \
+  --endpoint-url http://localhost:4566 \
+  --region us-east-1 \
+  --name /nitrum/kms_key_id \
+  --value "$KEY_ID" \
+  --type String \
+  --overwrite
 ```
 
-Alternatively, mount the key file and set the env var in `docker-compose.yml` (see the `NITRUM_DEV_RSA_PRIVATE_KEY` comment in the file).
-
-If you **do not** create the table or set `NITRUM_DEV_RSA_PRIVATE_KEY`, the data-plane still runs but uses an **ephemeral DEK** (lost on restart).
+If the table or KMS/SSM setup is missing, the data-plane may still run with an **ephemeral DEK** (lost on restart), depending on code paths.
 
 ### 4. Test endpoints
 

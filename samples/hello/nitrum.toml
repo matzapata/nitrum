@@ -31,7 +31,7 @@ ram_size_mib = 4320
 [tls_termination]
 # When true (future), use ACME (e.g. Let's Encrypt) to obtain and renew certificates.
 # When false, a self-signed certificate is generated at startup for the configured domain.
-acme = true
+acme = false
 
 # Domain name used for the TLS certificate (subject / SAN).
 # For self-signed certs this is the CN; for ACME this will be the domain to request.

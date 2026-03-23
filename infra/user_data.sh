@@ -36,15 +36,31 @@ sed -r "s/^(\s*cpu_count\s*:\s*).*/\12/" -i "$ALLOCATOR_YAML"
 # ${__REGION__} is substituted by CloudFormation Fn::Sub before bash runs.
 cat > /etc/nitro_enclaves/vsock-proxy.yaml <<'VSOCK_EOF'
 allowlist:
-- {address: kms.${__REGION__}.amazonaws.com, port: 443}
-- {address: kms-fips.${__REGION__}.amazonaws.com, port: 443}
-- {address: ssm.${__REGION__}.amazonaws.com, port: 443}
 - {address: 169.254.169.254, port: 80}
 VSOCK_EOF
 
 systemctl enable --now docker
 systemctl enable --now nitro-enclaves-allocator.service
 systemctl enable --now nitro-enclaves-vsock-proxy.service
+
+# ── IMDS path for enclave: vsock 8002 → parent IMDS:80 (enclave viproxy default http://127.0.0.1:8099/latest) ──
+cat > /etc/systemd/system/enclave-imds-proxy.service <<'IMDS_PROXY_UNIT'
+[Unit]
+Description=Forward enclave vsock 8002 to EC2 IMDS (HTTP)
+After=nitro-enclaves-vsock-proxy.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=2
+ExecStart=/bin/bash -ce 'exec /usr/bin/vsock-proxy 8002 169.254.169.254 80 --config /etc/nitro_enclaves/vsock-proxy.yaml -w 5'
+
+[Install]
+WantedBy=multi-user.target
+IMDS_PROXY_UNIT
+
+systemctl daemon-reload
+systemctl enable --now enclave-imds-proxy.service
 
 # ── Wait for services before pulling containers and downloading EIF ───────────
 sleep 5

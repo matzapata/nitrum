@@ -28,5 +28,3 @@ pub const NITRUM_GITHUB_REPO_NAME: &str = "nitrum";
 
 /// Git ref (branch/tag) when downloading `infra/` from GitHub for `nitrum deploy`.
 pub const NITRUM_GITHUB_REF: &str = "develop";
-
-

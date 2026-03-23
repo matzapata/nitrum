@@ -99,6 +99,19 @@ This document covers common issues and how to debug the nitrum deployment
 
 ---
 
+### `Missing required env: CDK_DEPLOY_ACCOUNT` (or `CDK_DEPLOY_REGION`)
+
+`cdk deploy` reads account and region from the environment. Export them (and the other variables below) **before** deploying—the same way as in **Deployment** at the top of this file:
+
+```bash
+export CDK_DEPLOY_REGION=sa-east-1
+export CDK_DEPLOY_ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
+```
+
+Replace `sa-east-1` with your region. You need working AWS CLI credentials so `aws sts get-caller-identity` returns your account. Also set `DEPLOYMENT` and `EIF_PATH` (see the full **Deployment** snippet).
+
+---
+
 ```bash
 export DEPLOYMENT=dev
 export CDK_DEPLOY_REGION=sa-east-1
@@ -531,7 +544,10 @@ sudo docker run \
 sudo nitro-cli run-enclave \
   --cpu-count 2 \
   --memory 4320 \
-  --eif-path "enclave.eif" \
+  --eif-path "/usr/bin/enclave.eif" \
   --enclave-cid 16 \
   --enclave-name app \
   --attach-console 
+
+
+  aws ssm start-session --target $(.nitrum/infra/scripts/get_asg_instances.sh "$(jq -r '.NitrumStack.ASGGroupName' out.json)") --region "$CDK_DEPLOY_REGION"

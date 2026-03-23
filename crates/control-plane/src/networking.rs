@@ -29,6 +29,8 @@ pub struct Networking {
     child: Option<Child>,
 }
 
+// TODO: run vsock-proxy for imds also
+
 impl Networking {
     /// Kill existing gvproxy, start a new one, wait for socket, set up forwards.
     pub async fn run() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -96,7 +98,7 @@ fn setup_forward(
         local_port, ENCLAVE_IP, remote_port
     );
 
-    // TODO: avoid curl?
+    // TODO: avoid curl
     let status = Command::new("curl")
         .args([
             "-sS",

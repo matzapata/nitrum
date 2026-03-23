@@ -89,15 +89,11 @@ export class NitrumStack extends cdk.Stack {
     enclaveSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS inbound from NLB');
 
     // ── KMS key ───────────────────────────────────────────────────────────────
-    // RSA-2048 asymmetric key.  The data-plane encrypts the DEK with the public
-    // key (kms:Encrypt) and decrypts it inside the enclave using a Nitro
-    // attestation document as the Recipient (kms:Decrypt + RecipientInfo).
-    // Key rotation is not available for asymmetric keys.
+    // Symmetric CMK: data-plane uses GenerateDataKeyWithoutPlaintext (AES-256) and
+    // Decrypt with a Nitro attestation Recipient inside the enclave (kms:GenerateDataKey + kms:Decrypt).
     const enclaveKey = new kms.Key(this, 'EnclaveKey', {
-      keySpec: kms.KeySpec.RSA_2048,
-      keyUsage: kms.KeyUsage.ENCRYPT_DECRYPT,
-      description: `Nitrum ${appEnv} enclave key - attestation-based decrypt`,
-      enableKeyRotation: false,
+      description: `Nitrum ${appEnv} enclave key — symmetric DEK wrapping (GenerateDataKey + attested Decrypt)`,
+      enableKeyRotation: appEnv === 'prod',
       removalPolicy:
         appEnv === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
     });
@@ -148,7 +144,12 @@ export class NitrumStack extends cdk.Stack {
       iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'),
     );
     eifAsset.grantRead(role);
-    enclaveKey.grant(role, 'kms:Encrypt', 'kms:Decrypt', 'kms:GetPublicKey');
+    enclaveKey.grant(
+      role,
+      'kms:GenerateDataKey', //TODO: also?
+      'kms:GenerateDataKeyWithoutPlaintext',
+      'kms:Decrypt',
+    );
     enclaveTable.grantReadWriteData(role);
     logGroup.grantWrite(role);
     kmsKeyParam.grantRead(role);

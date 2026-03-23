@@ -27,9 +27,11 @@ async fn main() {
 
     let _networking = Networking::run().await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to start networking");
+        std::process::exit(1);
     });
     info!("networking up, waiting for shutdown signal");
 
+    // TODO: tokio spawn
     let _enclave = Enclave::run(args.debug_mode).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to start enclave");
     });

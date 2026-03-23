@@ -1,6 +1,5 @@
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
-use super::random::rand_bytes;
 use crate::config::RuntimeConfig;
 use crate::storage::{StorageClient, keys};
 use crate::utils::leader::Leader;
@@ -38,10 +37,9 @@ impl CryptoClient {
                 .context("failed to retrieve DEK from storage")?
             {
                 tracing::info!("DEK found in storage, decrypting with KMS");
-                let dek = kms
-                    .decrypt_with_attestation(&encrypted_dek)
-                    .await
-                    .context("failed to decrypt DEK with KMS")?;
+                let dek = kms.decrypt_with_attestation(&encrypted_dek).await.context(
+                    "load DEK: decrypt ciphertext from storage failed (see KMS context above)",
+                )?;
                 let cipher = Aes256Gcm::new_from_slice(&dek)
                     .map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
                 return Ok(Self { cipher });
@@ -49,12 +47,27 @@ impl CryptoClient {
 
             if let Some(_guard) = leader.try_acquire_leader().await? {
                 tracing::info!("no DEK in storage, generating a new one (leader)");
-                let dek = rand_bytes(32).context("failed to generate DEK")?;
 
-                let encrypted_dek = kms
-                    .encrypt(&dek)
+                let enc = kms
+                    .generate_dek_envelope()
                     .await
-                    .context("failed to encrypt DEK with KMS")?;
+                    .context(
+                        "leader bootstrap: GenerateDataKeyWithoutPlaintext failed (see KMS context above)",
+                    )?;
+                let dek = kms
+                    .decrypt_with_attestation(&enc)
+                    .await
+                    .context(
+                        "leader bootstrap: unwrap new DEK envelope for in-memory use failed (see KMS context above)",
+                    )?;
+                    // TODO:
+                let encrypted_dek = enc;
+
+                anyhow::ensure!(
+                    dek.len() == 32,
+                    "DEK from KMS must be 32 bytes (AES-256), got {} bytes",
+                    dek.len()
+                );
 
                 let stored = storage
                     .put_object(keys::DEK_OBJECT_KEY, &encrypted_dek)

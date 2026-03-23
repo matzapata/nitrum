@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use aws_credential_types::provider::error::CredentialsError;
-use aws_credential_types::provider::future;
+use aws_credential_types::Credentials;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::provider::Result as ProviderResult;
-use aws_credential_types::Credentials;
+use aws_credential_types::provider::error::CredentialsError;
+use aws_credential_types::provider::future;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -44,7 +44,8 @@ struct CredCache {
 
 /// IMDSv2 client with built-in credential caching by wall-clock time bucket.
 pub struct ImdsClient {
-    /// Base URL including the `/latest` segment (no trailing slash), e.g. `http://169.254.169.254/latest`.
+    /// Base URL including the `/latest` segment (no trailing slash).
+    /// In a Nitro enclave this is typically `http://127.0.0.1:8099/latest` (viproxy → vsock → parent IMDS).
     latest_base: String,
     http: reqwest::Client,
     cache: Mutex<CredCache>,
@@ -57,12 +58,9 @@ impl std::fmt::Debug for ImdsClient {
 }
 
 impl ImdsClient {
-    /// Create a new client for the given IMDS base URL (including `/latest`, trailing slashes stripped).
+    /// Create a new client for the given IMDS base URL (including `/latest`; trailing slashes stripped).
     pub fn new(latest_base: impl AsRef<str>) -> Result<Self> {
-        let latest_base = latest_base
-            .as_ref()
-            .trim_end_matches('/')
-            .to_string();
+        let latest_base = latest_base.as_ref().trim_end_matches('/').to_string();
         let http = reqwest::Client::builder()
             .timeout(METADATA_HTTP_TIMEOUT)
             .build()
@@ -209,7 +207,10 @@ impl ImdsClient {
             "imds",
         );
 
-        debug!(bucket = Self::ttl_bucket(), "IMDS role credentials refreshed");
+        debug!(
+            bucket = Self::ttl_bucket(),
+            "IMDS role credentials refreshed"
+        );
         Ok(creds)
     }
 }

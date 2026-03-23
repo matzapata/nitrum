@@ -2,6 +2,7 @@ use crate::constants::{NITRUM_GITHUB_REPO_NAME, NITRUM_GITHUB_REPO_OWNER};
 use crate::utils::{console, github};
 use clap::Args;
 use indicatif::ProgressBar;
+use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -10,15 +11,17 @@ const SAMPLE_REF: &str = "develop";
 
 #[derive(Args)]
 pub struct InitArgs {
-    /// Project directory (default: current directory)
-    #[arg(short, long)]
-    pub directory: Option<PathBuf>,
+    /// Project name; creates a subdirectory with this name in the current directory
+    #[arg(value_name = "NAME")]
+    pub name: Option<String>,
 }
 
 pub async fn run(args: InitArgs) {
-    let directory = args
-        .directory
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
+    let cwd = env::current_dir().expect("current directory");
+    let directory = match &args.name {
+        Some(name) => cwd.join(name),
+        None => cwd,
+    };
 
     if directory.exists() && directory.read_dir().unwrap().next().is_some() {
         eprintln!("Directory is not empty");
@@ -56,6 +59,20 @@ pub async fn run(args: InitArgs) {
             eprintln!("{e:#}");
             std::process::exit(1);
         }
+    }
+
+    if let Some(name) = &args.name {
+        let package_json_path = directory.join("package.json");
+        let raw = fs::read_to_string(&package_json_path).expect("read package.json");
+        let mut value: Value = serde_json::from_str(&raw).expect("parse package.json");
+        if let Value::Object(map) = &mut value {
+            map.insert("name".to_string(), Value::String(name.clone()));
+        }
+        fs::write(
+            &package_json_path,
+            serde_json::to_string_pretty(&value).expect("serialize package.json"),
+        )
+        .expect("write package.json");
     }
 
     spinner.finish_with_message("Project initialized.");

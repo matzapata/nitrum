@@ -6,7 +6,11 @@ FROM rust:1.92-slim AS chef
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y musl-tools \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    musl-tools \
+    make \
+    perl \
+    && rm -rf /var/lib/apt/lists/* \
     && rustup target add x86_64-unknown-linux-musl \
     && cargo install cargo-chef --locked
 
@@ -63,6 +67,17 @@ RUN if [ -n "$FEATURES" ]; then \
     fi
 
 ################################################################################
+# imds-vsock-proxy (Brave viproxy example): loopback TCP → parent vsock (IMDS path)
+################################################################################
+
+FROM golang:1.22-bookworm AS viproxy-builder
+
+WORKDIR /build
+RUN git clone --depth 1 --branch v0.1.2 https://github.com/brave/viproxy.git \
+    && cd viproxy \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /build/imds-vsock-proxy ./example/main.go
+
+################################################################################
 # runtime
 ################################################################################
 
@@ -71,7 +86,8 @@ FROM alpine:3.20 AS runtime
 RUN apk update && apk upgrade && apk --no-cache add iproute2
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
-RUN chmod +x /app/data-plane
+COPY --from=viproxy-builder /build/imds-vsock-proxy /app/imds-vsock-proxy
+RUN chmod +x /app/data-plane /app/imds-vsock-proxy
 
 EXPOSE 443
 EXPOSE 9090

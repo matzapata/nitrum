@@ -10,10 +10,11 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
+use tracing::info;
 
+use crate::constants::DEFAULT_IMDS_LATEST_BASE_URL;
 use crate::utils::imds::{EnclaveProvider, ImdsClient};
 use crate::utils::ssm::SsmParameters;
-use crate::constants::DEFAULT_IMDS_LATEST_BASE_URL;
 
 /// Data-plane runtime config: nitrum.toml plus infra settings.
 #[derive(Clone)]
@@ -21,6 +22,7 @@ pub struct RuntimeConfig {
     /// User provided config.
     pub nitrum: NitrumConfig,
     /// IMDS base URL from `NITRUM_IMDS_BASE_URL` or [`DEFAULT_IMDS_LATEST_BASE_URL`] (no trailing slash).
+    /// Default is loopback for the enclave IMDS vsock tunnel; override for host-side runs or mocks.
     pub imds_latest_base_url: String,
     /// AWS region from IMDS.
     pub aws_region: String,
@@ -57,6 +59,10 @@ impl RuntimeConfig {
     /// for `kms_key_id` and `dynamodb_table`. SSM parameter names are configured in
     /// [`SsmParameters::parameter_names`](crate::utils::ssm::SsmParameters::parameter_names)
     /// (env there only — not in this module).
+    ///
+    /// There is no generic egress probe here: on Nitro, outbound traffic is restricted by the
+    /// parent `vsock-proxy` allowlist (e.g. KMS, SSM, IMDS). Probing arbitrary hosts such as
+    /// `httpbin.org` fails in production and would block startup for no benefit.
     pub async fn load(config_path: &Path) -> Result<Self> {
         let nitrum = shared::config::load(config_path);
 
@@ -65,20 +71,26 @@ impl RuntimeConfig {
             .trim_end_matches('/')
             .to_string();
 
-        let imds = Arc::new(
-            ImdsClient::new(&imds_latest_base_url).context("IMDS client init")?,
+        let imds = Arc::new(ImdsClient::new(&imds_latest_base_url).context("IMDS client init")?);
+        info!(
+            imds_base_url = %imds_latest_base_url,
+            "runtime config: fetching AWS region from IMDS (IMDSv2 token + placement/region)"
         );
         let aws_region = imds
             .get_region()
             .await
-            .context("IMDS placement region")?;
+            .with_context(|| {
+                format!(
+                    "fetch AWS region from IMDS (GET meta-data/placement/region via {imds_latest_base_url}; set NITRUM_IMDS_BASE_URL if needed)"
+                )
+            })?;
         let instance_id = imds.instance_id().await.context("IMDS instance-id")?;
         let aws_sdk_config = Arc::new(
             aws_config::defaults(BehaviorVersion::latest())
                 .region(Region::new(aws_region.clone()))
-                .credentials_provider(SharedCredentialsProvider::new(
-                    EnclaveProvider::with_imds(imds.clone()),
-                ))
+                .credentials_provider(SharedCredentialsProvider::new(EnclaveProvider::with_imds(
+                    imds.clone(),
+                )))
                 .load()
                 .await,
         );

@@ -34,19 +34,15 @@ pub async fn run(args: DeployArgs) {
         Some(p) => root.join(p),
         None => root.join("enclave.eif"),
     };
-    let eif_path = eif_path
-        .canonicalize()
-        .unwrap_or_else(|_| eif_path.clone());
+    let eif_path = eif_path.canonicalize().unwrap_or_else(|_| eif_path.clone());
     if !eif_path.is_file() {
         eprintln!("EIF file not found: {}", eif_path.display());
         std::process::exit(1);
     }
 
     if !infra_dir.exists() {
-        let spinner = console::style_spinner(
-            ProgressBar::new_spinner(),
-            "Fetching infra from GitHub…",
-        );
+        let spinner =
+            console::style_spinner(ProgressBar::new_spinner(), "Fetching infra from GitHub…");
         match github::extract_infra_folder(
             constants::NITRUM_GITHUB_REPO_OWNER,
             constants::NITRUM_GITHUB_REPO_NAME,
@@ -55,10 +51,8 @@ pub async fn run(args: DeployArgs) {
         )
         .await
         {
-            Ok(()) => spinner.finish_with_message(format!(
-                "Infra ready at `{}`.",
-                constants::NITRUM_INFRA_DIR
-            )),
+            Ok(()) => spinner
+                .finish_with_message(format!("Infra ready at `{}`.", constants::NITRUM_INFRA_DIR)),
             Err(e) => {
                 spinner.finish_and_clear();
                 eprintln!("{e:#}");
@@ -67,10 +61,7 @@ pub async fn run(args: DeployArgs) {
         }
     }
 
-    if !console::confirm(&format!(
-        "Deploy AWS resources ({} deployment)?",
-        args.env,
-    )) {
+    if !console::confirm(&format!("Deploy AWS resources ({} deployment)?", args.env,)) {
         return;
     }
 
@@ -78,10 +69,11 @@ pub async fn run(args: DeployArgs) {
         ("DEPLOYMENT", args.env.clone()),
         ("EIF_PATH", eif_path.display().to_string()),
     ];
+    let output_path = root.join("out.json");
     let mut deploy_args = vec![
         "NitrumStack".to_string(),
         "-O".to_string(),
-        "out.json".to_string(),
+        output_path.display().to_string(),
         "--require-approval".to_string(),
         "never".to_string(),
     ];

@@ -34,10 +34,7 @@ pub async fn run(args: DestroyArgs) {
         std::process::exit(1);
     }
 
-    if !console::confirm(&format!(
-        "Destroy AWS resources ({} deployment)?",
-        args.env,
-    )) {
+    if !console::confirm(&format!("Destroy AWS resources ({} deployment)?", args.env,)) {
         return;
     }
 
