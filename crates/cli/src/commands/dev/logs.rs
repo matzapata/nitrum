@@ -7,6 +7,7 @@ use tokio::process::Command;
 
 use crate::constants;
 use crate::utils::compose;
+use crate::utils::project;
 
 #[derive(Args)]
 pub struct LogsArgs {
@@ -34,10 +35,14 @@ pub async fn run(args: LogsArgs) {
 }
 
 async fn run_logs(root: &std::path::Path, args: &LogsArgs) -> Result<()> {
-    compose::require_compose_file(root)?;
+    compose::ensure_compose_file(root)?;
+
+    let cfg = project::load_project_config(root)?;
+    let enclave_image = project::enclave_image_dev(&cfg.name);
 
     let mut cmd = Command::new("docker");
     cmd.current_dir(root)
+        .env("ENCLAVE_IMAGE", enclave_image)
         .arg("compose")
         .arg("-f")
         .arg(constants::ENCLAVE_DEV_COMPOSE_FILE)

@@ -1,4 +1,4 @@
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct HealthCheck {
     /// Path to the health check endpoint.
     pub path: String,
@@ -21,7 +21,7 @@ impl Default for HealthCheck {
 }
 
 // TODO: contemplate this in deployment
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Scaling {
     /// Desired number of replicas.
     pub desired_replicas: u32,
@@ -51,7 +51,7 @@ impl Default for Scaling {
     }
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct TlsTermination {
     /// Use ACME (e.g. Let's Encrypt) for certificate issuance instead of self-signed.
     pub acme: bool,
@@ -69,7 +69,7 @@ impl Default for TlsTermination {
     }
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Egress {
     /// When false, all outbound traffic is allowed regardless of whitelist.
     pub enabled: bool,
@@ -89,7 +89,7 @@ impl Default for Egress {
     }
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Service {
     /// Port to use for the service.
     pub port: u16,
@@ -101,7 +101,7 @@ impl Default for Service {
     }
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Config {
     /// Project slug: CloudFormation `EnvironmentName`, stack name, bucket `nitrum-{name}` (SSM via `NITRUM_SSM_PREFIX` or `/nitrum/…` defaults).
     pub name: String,
@@ -122,3 +122,4 @@ pub fn try_load(path: &std::path::Path) -> Result<Config, String> {
 pub fn load(path: &std::path::Path) -> Config {
     try_load(path).unwrap_or_else(|e| panic!("{e}"))
 }
+

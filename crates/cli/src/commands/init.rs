@@ -1,13 +1,12 @@
-use crate::constants::{NITRUM_GITHUB_REPO_NAME, NITRUM_GITHUB_REPO_OWNER};
-use crate::utils::{console, github};
+use crate::bundled;
+use crate::utils::console;
 use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
+use shared::config::{Config, Egress, HealthCheck, Scaling, Service, TlsTermination};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-
-const SAMPLE_REF: &str = "develop";
 
 #[derive(Args)]
 pub struct InitArgs {
@@ -32,34 +31,43 @@ pub async fn run(args: InitArgs) {
 
     let spinner = console::style_spinner(
         ProgressBar::new_spinner(),
-        "Fetching sample files from GitHub…",
+        "Writing bundled sample project…",
     );
 
-    let files: &[(&str, PathBuf)] = &[
-        ("samples/hello/src/main.js", directory.join("src/main.js")),
-        ("samples/hello/package.json", directory.join("package.json")),
-        ("samples/hello/nitrum.toml", directory.join("nitrum.toml")),
-        ("samples/hello/Dockerfile", directory.join("Dockerfile")),
+    let nitrum_name = args.name.as_deref();
+    let writes: &[(&str, &str, PathBuf)] = &[
+        (
+            "main.js",
+            bundled::sample_main_js(),
+            directory.join("src/main.js"),
+        ),
+        (
+            "package.json",
+            bundled::sample_package_json(),
+            directory.join("package.json"),
+        ),
+        (
+            "Dockerfile",
+            bundled::sample_dockerfile(),
+            directory.join("Dockerfile"),
+        )
     ];
 
-    for (repo_path, dest) in files {
-        spinner.set_message(format!(
-            "Downloading {}…",
-            dest.file_name().unwrap().to_string_lossy()
-        ));
-        if let Err(e) = github::download_file(
-            NITRUM_GITHUB_REPO_OWNER,
-            NITRUM_GITHUB_REPO_NAME,
-            SAMPLE_REF,
-            repo_path,
-            dest.as_path(),
-        )
-        .await
-        {
-            eprintln!("{e:#}");
-            std::process::exit(1);
+    for (label, contents, dest) in writes {
+        spinner.set_message(format!("Writing {label}…"));
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).unwrap_or_else(|e| panic!("create {}: {e}", parent.display()));
         }
+        fs::write(dest, contents).unwrap_or_else(|e| panic!("write {label}: {e}"));
     }
+
+    spinner.set_message("Writing nitrum.toml…");
+    let nitrum_path = directory.join("nitrum.toml");
+    fs::write(
+        &nitrum_path,
+        nitrum_toml_for_init(nitrum_name.unwrap_or("nitrum-hello")),
+    )
+    .unwrap_or_else(|e| panic!("write nitrum.toml: {e}"));
 
     if let Some(name) = &args.name {
         let package_json_path = directory.join("package.json");
@@ -76,4 +84,20 @@ pub async fn run(args: InitArgs) {
     }
 
     spinner.finish_with_message("Project initialized.");
+}
+
+/// [`Config`] defaults plus hello-sample egress (`enabled = true`, `httpbin\.org$`).
+fn nitrum_toml_for_init(name: &str) -> String {
+    let config = Config {
+        name: name.to_string(),
+        service: Service::default(),
+        health_check: HealthCheck::default(),
+        scaling: Scaling::default(),
+        tls_termination: TlsTermination::default(),
+        egress: Egress {
+            enabled: true,
+            destinations: vec![r"httpbin\.org$".to_string()],
+        },
+    };
+    toml::to_string_pretty(&config).expect("serialize nitrum.toml for init")
 }

@@ -3,7 +3,7 @@ use indicatif::ProgressBar;
 use std::env;
 
 use crate::constants;
-use crate::utils::{compose, console, docker};
+use crate::utils::{compose, console, docker, project};
 
 #[derive(Args)]
 pub struct UpArgs {
@@ -17,11 +17,20 @@ pub async fn run(args: UpArgs) {
         .root
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
 
+    let cfg = match project::load_project_config(&root) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+    };
+    let dev_image = project::enclave_image_dev(&cfg.name);
+
     let spinner = console::style_spinner(ProgressBar::new_spinner(), "Building enclave…");
     match docker::build_enclave_image(
         &root,
         constants::ENCLAVE_DEV_BASE_IMAGE,
-        constants::ENCLAVE_DEV_LOCAL_IMAGE,
+        &dev_image,
     )
     .await
     {
@@ -34,7 +43,7 @@ pub async fn run(args: UpArgs) {
     }
 
     let spinner = console::style_spinner(ProgressBar::new_spinner(), "Starting local stack…");
-    match compose::docker_compose(&root, &["up", "-d"]).await {
+    match compose::docker_compose(&root, &dev_image, &["up", "-d"]).await {
         Ok(()) => spinner.finish_with_message("Local stack started."),
         Err(e) => {
             spinner.finish_and_clear();

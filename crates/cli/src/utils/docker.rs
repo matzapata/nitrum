@@ -6,7 +6,6 @@ use tokio::process::Command;
 use crate::constants;
 
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
-/// Always targets [`constants::DOCKER_PLATFORM`].
 ///
 /// The image should include `nitrum.toml`; the data-plane reads SSM paths from env or defaults (see `crates/data-plane/src/utils/ssm.rs`).
 pub async fn build_enclave_image(
@@ -28,7 +27,7 @@ pub async fn build_enclave_image(
         .arg("build")
         .arg("-q")
         .arg("--platform")
-        .arg(constants::DOCKER_PLATFORM)
+        .arg("linux/amd64")
         .arg("-f")
         .arg("Dockerfile")
         .arg("-t")
@@ -66,7 +65,7 @@ pub async fn build_enclave_image(
 /// Run `nitro-cli build-enclave` inside [`constants::NITRO_CLI_DOCKER_IMAGE`], writing `enclave.eif` under `project_root`.
 ///
 /// Requires a Docker socket mount (same pattern as the Nitrum README): the CLI container talks to the host daemon,
-/// so `docker_uri` must be an image available there (e.g. a local tag from [`build_enclave_image`]).
+/// so `docker_uri` must be an image available there (e.g. `nitrum-{name}:latest` from [`build_enclave_image`]).
 pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<()> {
     let host_dir = project_root.canonicalize().with_context(|| {
         format!(
@@ -79,7 +78,7 @@ pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<
         .arg("run")
         .arg("--rm")
         .arg("--platform")
-        .arg(constants::DOCKER_PLATFORM)
+        .arg("linux/amd64")
         .arg("-v")
         .arg("/var/run/docker.sock:/var/run/docker.sock")
         .arg("-v")
@@ -146,7 +145,7 @@ pub async fn describe_eif(eif_path: &Path) -> Result<()> {
         .arg("run")
         .arg("--rm")
         .arg("--platform")
-        .arg(constants::DOCKER_PLATFORM)
+        .arg("linux/amd64")
         .arg("-v")
         .arg(format!("{}:/nitrum-eif:ro", parent.display()))
         .arg(constants::NITRO_CLI_DOCKER_IMAGE)

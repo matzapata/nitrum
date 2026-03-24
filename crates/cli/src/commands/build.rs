@@ -5,7 +5,7 @@ use indicatif::ProgressBar;
 use std::env;
 
 use crate::constants;
-use crate::utils::{console, docker};
+use crate::utils::{console, docker, project};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -19,6 +19,15 @@ pub async fn run(args: BuildArgs) {
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
 
+    let cfg = match project::load_project_config(&root) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+    };
+    let prod_image = project::enclave_image_prod(&cfg.name);
+
     let spinner = console::style_spinner(
         ProgressBar::new_spinner(),
         "Building enclave image (prod data-plane base)…",
@@ -26,13 +35,12 @@ pub async fn run(args: BuildArgs) {
     match docker::build_enclave_image(
         &root,
         constants::ENCLAVE_PROD_BASE_IMAGE,
-        constants::ENCLAVE_PROD_LOCAL_IMAGE,
+        &prod_image,
     )
     .await
     {
         Ok(()) => spinner.finish_with_message(format!(
-            "Docker image built as `{}`.",
-            constants::ENCLAVE_PROD_LOCAL_IMAGE
+            "Docker image built as `{prod_image}`.",
         )),
         Err(e) => {
             spinner.finish_and_clear();
@@ -45,7 +53,7 @@ pub async fn run(args: BuildArgs) {
         ProgressBar::new_spinner(),
         "Building enclave.eif (nitro-cli in Docker)…",
     );
-    match docker::build_enclave_eif(&root, constants::ENCLAVE_PROD_LOCAL_IMAGE).await {
+    match docker::build_enclave_eif(&root, &prod_image).await {
         Ok(()) => spinner.finish_with_message("enclave.eif written."),
         Err(e) => {
             spinner.finish_and_clear();
@@ -56,5 +64,5 @@ pub async fn run(args: BuildArgs) {
 
     let eif = root.join("enclave.eif");
     println!();
-    println!("{}", eif.display());
+    println!("EIF written to {}", eif.display());
 }

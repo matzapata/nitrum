@@ -1,4 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use std::path::Path;
+
+use shared::config::{self, Config};
 
 fn sanitize_bucket_label(s: &str) -> String {
     s.trim()
@@ -25,4 +28,21 @@ pub fn derived_eif_bucket_name(project_name: &str) -> Result<String> {
         );
     }
     Ok(s)
+}
+
+/// Local enclave image for dev (`docker build` / compose `${ENCLAVE_IMAGE}`): `nitrum-{name}:dev`.
+pub fn enclave_image_dev(project_name: &str) -> String {
+    format!("nitrum-{project_name}:dev")
+}
+
+/// Local enclave image for prod / nitro-cli: `nitrum-{name}:latest`.
+pub fn enclave_image_prod(project_name: &str) -> String {
+    format!("nitrum-{project_name}:latest")
+}
+
+pub fn load_project_config(root: &Path) -> Result<Config> {
+    let path = root.join("nitrum.toml");
+    config::try_load(&path)
+        .map_err(|e| anyhow!(e))
+        .with_context(|| format!("loading {}", path.display()))
 }

@@ -1,11 +1,12 @@
-//! Delete the CloudFormation stack created by `nitrum deploy`.
+//! Delete the CloudFormation stack and EIF S3 bucket created by `nitrum deploy`.
 
 use clap::Args;
+use indicatif::ProgressBar;
 use std::env;
 use std::path::PathBuf;
 use tracing::info;
 
-use crate::utils::{aws, console};
+use crate::utils::{aws, console, project};
 
 #[derive(Args)]
 pub struct DestroyArgs {
@@ -31,19 +32,48 @@ pub async fn run(args: DestroyArgs) {
             std::process::exit(1);
         }
     };
+    let bucket = match project::derived_eif_bucket_name(&config.name) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+    };
     let stack_name = config.name;
-    info!(%stack_name, "stack name from nitrum.toml");
+    info!(%stack_name, %bucket, "stack and bucket from nitrum.toml");
 
-    if !args.force && !console::confirm(&format!("Delete CloudFormation stack `{stack_name}`?")) {
+    if !args.force
+        && !console::confirm(&format!(
+            "Delete CloudFormation stack `{stack_name}` and empty + delete S3 bucket `{bucket}`?"
+        ))
+    {
         return;
     }
 
     let sdk = aws::sdk_config(None).await;
-    if let Err(e) = aws::cloudformation_delete_stack_wait(&sdk, &stack_name).await {
-        eprintln!("{e:#}");
-        std::process::exit(1);
-    }
-    info!(%stack_name, "nitrum destroy: finished");
 
-    // TODO: delete s3 bucket
+    let spinner = console::style_spinner(
+        ProgressBar::new_spinner(),
+        "Deleting CloudFormation stack (this may take several minutes)…",
+    );
+    match aws::cloudformation_delete_stack_wait(&sdk, &stack_name).await {
+        Ok(()) => spinner.finish_with_message(format!("Stack `{stack_name}` deleted.")),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+    }
+
+    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Deleting S3 EIF bucket…");
+    match aws::s3_empty_and_delete_bucket(&sdk, &bucket).await {
+        Ok(()) => spinner.finish_with_message(format!("Bucket `{bucket}` removed.")),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+    }
+
+    info!(%stack_name, %bucket, "nitrum destroy: finished");
 }

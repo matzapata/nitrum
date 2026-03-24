@@ -1,6 +1,6 @@
 # Hello sample
 
-Nitrum hello enclave sample. Infra can be deployed with **CDK** (`samples/hello/.nitrum/infra`) or with the **CloudFormation template** in this directory (`template.yml`). The template uses a slug **`EnvironmentName`** (e.g. `nitrum-staging`, `myproject-staging`), optional **`Retain`** for deletion behavior, **Metadata** (MIT-0), and **no fixed IAM physical names**. Networking and NLB behavior align with `infra/lib/nitrum-stack.ts`. **SSM parameters** for the data-plane are **`/nitrum/kms_key_id`** and **`/nitrum/dynamodb_table`** in both CDK and this template (only one stack per account/region should own those names). See the comparison table below.
+Nitrum hello enclave sample. Infra can be deployed with **CDK** (`samples/hello/.nitrum/infra`) or with the **CloudFormation template** at **`infra/cloudformation/template.yml`** (bundled into **`nitrum deploy`** from the monorepo). The template uses a slug **`EnvironmentName`** (e.g. `nitrum-staging`, `myproject-staging`), optional **`Retain`** for deletion behavior, **Metadata** (MIT-0), and **no fixed IAM physical names**. Networking and NLB behavior align with `infra/lib/nitrum-stack.ts`. **SSM parameters** for the data-plane are **`/nitrum/kms_key_id`** and **`/nitrum/dynamodb_table`** in both CDK and this template (only one stack per account/region should own those names). See the comparison table below.
 
 ## Prerequisites
 
@@ -68,7 +68,7 @@ export EIF_HASH="$(sha256sum enclave.eif | cut -c1-12)"
 aws cloudformation deploy \
   --region "$AWS_REGION" \
   --stack-name "$STACK_NAME" \
-  --template-file samples/hello/template.yml \
+  --template-file infra/cloudformation/template.yml \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
     EnvironmentName="${ENV_SLUG}" \
@@ -106,7 +106,7 @@ curl -sk "https://${NLB}/health"
 
 ### CDK vs this template
 
-| Topic | CDK (`infra/`) | `template.yml` |
+| Topic | CDK (`infra/`) | `infra/cloudformation/template.yml` |
 |--------|----------------|----------------|
 | Env dimension | **`AppEnv`** `dev` / `prod` | **`EnvironmentName`** slug (`nitrum-staging`, …) |
 | Deletion / retain | `RemovalPolicy` from `appEnv` | **`Retain`** `true` / `false` (default **false**) |
@@ -116,7 +116,7 @@ curl -sk "https://${NLB}/health"
 | EIF in S3 | `s3assets.Asset` on deploy | You **`aws s3 cp`**, then deploy |
 | VPC AZs | Often **3** subnets | **2** AZs (2-AZ–safe regions) |
 
-**User data** in the template mirrors `infra/user_data.sh`. If you change that script for CDK, update the embedded block in `template.yml` (`Content-Type: multipart/mixed`).
+**User data** in the template mirrors `infra/user_data.sh`. If you change that script for CDK, update the embedded block in **`infra/cloudformation/template.yml`** (`Content-Type: multipart/mixed`).
 
 ## Scale up
 
@@ -126,7 +126,7 @@ Raise **`AsgMaxSize`** / **`AsgDesiredCapacity`** (and pass the same **`Environm
 aws cloudformation deploy \
   --region "$AWS_REGION" \
   --stack-name "$STACK_NAME" \
-  --template-file samples/hello/template.yml \
+  --template-file infra/cloudformation/template.yml \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
     EnvironmentName="${ENV_SLUG}" \

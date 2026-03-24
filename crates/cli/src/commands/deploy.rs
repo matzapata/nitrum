@@ -1,11 +1,16 @@
 //! Deploy with AWS CloudFormation (bundled `samples/hello` template) and S3 EIF upload.
 
+use anyhow::{Context, Result};
 use clap::Args;
+use indicatif::ProgressBar;
+use sha2::{Digest, Sha256};
 use std::env;
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::{Path, PathBuf};
 use tracing::info;
 
-use crate::utils::{aws, cloudformation, console, s3_bucket};
+use crate::utils::{aws, console, project};
 
 #[derive(Args)]
 pub struct DeployArgs {
@@ -55,9 +60,8 @@ pub async fn run(args: DeployArgs) {
     let sdk = aws::sdk_config(args.region.clone()).await;
 
     let slug = config.name.clone();
-    info!(%slug, "stack / EnvironmentName from nitrum.toml");
 
-    let bucket = match s3_bucket::derived_eif_bucket_name(&config.name) {
+    let bucket = match project::derived_eif_bucket_name(&config.name) {
         Ok(n) => n,
         Err(e) => {
             eprintln!("{e:#}");
@@ -67,15 +71,7 @@ pub async fn run(args: DeployArgs) {
 
     let retain_str = if args.retain { "true" } else { "false" };
 
-    info!(
-        eif_path = %eif_path.display(),
-        retain = args.retain,
-        control_plane_tag = %args.control_plane_image_tag,
-        cli_region = ?args.region,
-        "deploy parameters"
-    );
-
-    let eif_label = match cloudformation::eif_version_label(&eif_path) {
+    let eif_label = match eif_version_label(&eif_path) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("{e:#}");
@@ -83,14 +79,13 @@ pub async fn run(args: DeployArgs) {
         }
     };
 
-    let template_path = match cloudformation::write_bundled_template(&root) {
+    let template_path = match write_bundled_template(&root) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e:#}");
             std::process::exit(1);
         }
     };
-    info!(template_path = %template_path.display(), "bundled CloudFormation template written");
 
     let region_display = sdk
         .region()
@@ -111,14 +106,24 @@ pub async fn run(args: DeployArgs) {
         }
     };
 
-    if let Err(e) = aws::ensure_bucket_exists(&sdk, &bucket).await {
-        eprintln!("{e:#}");
-        std::process::exit(1);
+    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Ensuring S3 bucket…");
+    match aws::ensure_bucket_exists(&sdk, &bucket).await {
+        Ok(()) => spinner.finish_with_message("S3 bucket ready."),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
     }
 
-    if let Err(e) = aws::s3_put_file_if_needed(&sdk, &bucket, &eif_label, &eif_path).await {
-        eprintln!("{e:#}");
-        std::process::exit(1);
+    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Uploading EIF to S3…");
+    match aws::s3_put_file_if_needed(&sdk, &bucket, &eif_label, &eif_path).await {
+        Ok(()) => spinner.finish_with_message("EIF available on S3."),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
     }
 
     let params = vec![
@@ -136,16 +141,31 @@ pub async fn run(args: DeployArgs) {
         ),
     ];
 
-    if let Err(e) = aws::cloudformation_deploy(&sdk, &slug, &template_body, &params).await {
-        eprintln!("{e:#}");
-        std::process::exit(1);
+    let spinner = console::style_spinner(
+        ProgressBar::new_spinner(),
+        "Deploying CloudFormation stack (this may take several minutes)…",
+    );
+    match aws::cloudformation_deploy(&sdk, &slug, &template_body, &params).await {
+        Ok(()) => spinner.finish_with_message(format!("Stack `{slug}` deployed.")),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
     }
 
-    let outputs = match aws::cloudformation_stack_outputs(&sdk, &slug).await {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("failed to fetch CloudFormation stack outputs: {e:#}");
-            std::process::exit(1);
+    let outputs = {
+        let spinner = console::style_spinner(ProgressBar::new_spinner(), "Fetching stack outputs…");
+        match aws::cloudformation_stack_outputs(&sdk, &slug).await {
+            Ok(o) => {
+                spinner.finish_with_message("Stack outputs fetched.");
+                o
+            }
+            Err(e) => {
+                spinner.finish_and_clear();
+                eprintln!("failed to fetch CloudFormation stack outputs: {e:#}");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -155,18 +175,55 @@ pub async fn run(args: DeployArgs) {
         slug.clone(),
         serde_json::to_value(&outputs).expect("output map serializes to JSON"),
     );
+    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Writing out.json…");
     let out_file = match std::fs::File::create(&out_path) {
         Ok(f) => f,
         Err(e) => {
+            spinner.finish_and_clear();
             eprintln!("create {}: {e}", out_path.display());
             std::process::exit(1);
         }
     };
-    if let Err(e) = serde_json::to_writer_pretty(out_file, &serde_json::Value::Object(envelope)) {
-        eprintln!("write {}: {e}", out_path.display());
-        std::process::exit(1);
+    match serde_json::to_writer_pretty(out_file, &serde_json::Value::Object(envelope)) {
+        Ok(()) => spinner.finish_with_message(format!("Wrote {}.", out_path.display())),
+        Err(e) => {
+            spinner.finish_and_clear();
+            eprintln!("write {}: {e}", out_path.display());
+            std::process::exit(1);
+        }
     }
     info!(path = %out_path.display(), "wrote CloudFormation outputs to out.json");
 
     info!(%slug, "nitrum deploy: finished successfully");
+}
+
+/// Writes the bundled CloudFormation template for inspection; returns the path.
+fn write_bundled_template(project_root: &Path) -> Result<PathBuf> {
+    let path = project_root.join(crate::constants::NITRUM_CLOUDFORMATION_TEMPLATE_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    std::fs::write(&path, crate::bundled::cloudformation_template_yml())
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(path)
+}
+
+/// First 12 lowercase hex chars of the file SHA-256 (for `EifVersionLabel`).
+fn eif_version_label(path: &Path) -> Result<String> {
+    let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .with_context(|| format!("read {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    let hex = format!("{:x}", digest);
+    Ok(hex[..12].to_string())
 }

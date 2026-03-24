@@ -90,13 +90,13 @@ just build-control-plane dev
 just build-data-plane dev true
 ```
 
-On **EC2**, the data-plane loads region, instance id, and IAM credentials from **IMDS**, and the DynamoDB table name plus KMS key ID from **SSM** (`/nitrum/dynamodb_table`, `/nitrum/kms_key_id` by default); the CDK stack creates those parameters and grants `ssm:GetParameters`. **Inside a Nitro enclave**, IMDSv2 uses the same link-local URL as on the host (**`http://169.254.169.254/latest`**) over the **TAP ↔ gvproxy** path; the control-plane must run **[gvisor-tap-vsock](https://github.com/containers/gvisor-tap-vsock) gvproxy** (v0.8.7+) with **`-ec2-metadata-access`** so TCP to the metadata address is forwarded (see [PR #512](https://github.com/containers/gvisor-tap-vsock/pull/512)). That replaces a separate loopback **viproxy** plus parent **vsock-proxy** / **`enclave-imds-proxy`** for IMDS. ACME HTTP-01 still listens on **`0.0.0.0:80`** on the data-plane; set **`NITRUM_IMDS_BASE_URL`** for metadata mocks or unusual layouts. For **local** runs use `docker/compose/enclave-dev.yml`: **LocalStack** (SSM + DynamoDB) plus **[Amazon EC2 Metadata Mock](https://github.com/aws/amazon-ec2-metadata-mock)** (`public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0`, config inlined in the compose file as `configs.aemm-config`). Compose sets **`NITRUM_IMDS_BASE_URL`** to the mock (e.g. `http://imds:1338/latest`), plus `NITRUM_SSM_ENDPOINT_URL` and `NITRUM_DYNAMODB_ENDPOINT_URL`. SSM parameter names can be overridden only via env vars read by `SsmParameters` (`crates/data-plane/src/utils/ssm.rs`), not `config.rs`.
+On **EC2**, the data-plane loads region, instance id, and IAM credentials from **IMDS**, and the DynamoDB table name plus KMS key ID from **SSM** (`/nitrum/dynamodb_table`, `/nitrum/kms_key_id` by default); the CDK stack creates those parameters and grants `ssm:GetParameters`. **Inside a Nitro enclave**, IMDSv2 uses the same link-local URL as on the host (**`http://169.254.169.254/latest`**) over the **TAP ↔ gvproxy** path; the control-plane must run **[gvisor-tap-vsock](https://github.com/containers/gvisor-tap-vsock) gvproxy** (v0.8.7+) with **`-ec2-metadata-access`** so TCP to the metadata address is forwarded (see [PR #512](https://github.com/containers/gvisor-tap-vsock/pull/512)). That replaces a separate loopback **viproxy** plus parent **vsock-proxy** / **`enclave-imds-proxy`** for IMDS. ACME HTTP-01 still listens on **`0.0.0.0:80`** on the data-plane; set **`NITRUM_IMDS_BASE_URL`** for metadata mocks or unusual layouts. For **local** runs use **`infra/docker/compose.yml`** (the CLI writes the same content to **`.nitrum/docker-compose.yml`** the first time you run **`nitrum dev up`**, **`dev down`**, or **`dev logs`** if that file is missing): **LocalStack** (SSM + DynamoDB) plus **[Amazon EC2 Metadata Mock](https://github.com/aws/amazon-ec2-metadata-mock)** (`public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0`, config inlined in the compose file as `configs.aemm-config`). Compose sets **`NITRUM_IMDS_BASE_URL`** to the mock (e.g. `http://imds:1338/latest`), plus `NITRUM_SSM_ENDPOINT_URL` and `NITRUM_DYNAMODB_ENDPOINT_URL`. SSM parameter names can be overridden only via env vars read by `SsmParameters` (`crates/data-plane/src/utils/ssm.rs`), not `config.rs`.
 
 ---
 
 ## Running locally with Docker Compose
 
-Full enclave-style stack (IMDS mock + LocalStack SSM/DynamoDB + Pebble + enclave image) lives in **`docker/compose/enclave-dev.yml`**. A smaller reference stack is under **`samples/hello/docker-compose.yml`** (IMDS mock + LocalStack + init).
+Full enclave-style stack (IMDS mock + LocalStack SSM/DynamoDB + Pebble + enclave image) lives in **`infra/docker/compose.yml`**. **`nitrum dev up`** (and other **`nitrum dev`** commands) use **`.nitrum/docker-compose.yml`**: the CLI creates it from the bundled compose file if it is not there yet (same content as **`infra/docker/compose.yml`**).
 
 ### 1. Build the data-plane dev image
 
@@ -110,12 +110,14 @@ This produces `matzapata/nitrum-data-plane:dev` (no enclave feature; suitable fo
 
 ### 2. Start the dev stack
 
-From the repo root (set `ENCLAVE_IMAGE` to your built image):
+From an initialized project (or repo root with `-f`), set `ENCLAVE_IMAGE` to your built image (same pattern as **`nitrum dev up`**: `nitrum-{name}` from top-level **`name`** in `nitrum.toml`, tag **`dev`**):
 
 ```bash
-export ENCLAVE_IMAGE=matzapata/nitrum-hello:dev   # or your image
-docker compose -f docker/compose/enclave-dev.yml up
+export ENCLAVE_IMAGE=nitrum-nitrum-hello:dev   # example when name = "nitrum-hello" in nitrum.toml
+docker compose -f infra/docker/compose.yml up
 ```
+
+From a Nitrum project root, run **`nitrum dev up`** (the CLI ensures **`.nitrum/docker-compose.yml`** exists before starting compose).
 
 This starts **imds-mock** (AEMM on **1338**), **LocalStack** (SSM + DynamoDB + KMS on **4566**), **localstack-init** (table `nitrum-dev`, a symmetric KMS CMK, `/nitrum/*` SSM params), **Pebble**, and the **enclave** service with mock endpoints including `NITRUM_KMS_ENDPOINT_URL` wired to LocalStack.
 

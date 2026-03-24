@@ -7,13 +7,42 @@ use aws_sdk_cloudformation::operation::describe_stacks::DescribeStacksError;
 use aws_sdk_cloudformation::operation::RequestId;
 use aws_sdk_cloudformation::types::{Capability, Parameter, StackStatus};
 use aws_sdk_s3::error::SdkError as S3SdkError;
+use aws_sdk_s3::operation::head_bucket::HeadBucketError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration};
+use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration, Delete, ObjectIdentifier};
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
+
+/// `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `us-east-1`.
+#[must_use]
+pub fn resolve_aws_region() -> String {
+    std::env::var("AWS_REGION")
+        .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+        .unwrap_or_else(|_| "us-east-1".to_string())
+}
+
+/// Shared SDK config (credentials + region from the default chain; see [`aws_config::load_from_env`]).
+///
+/// When `region_override` is set, it wins over `AWS_REGION` / profile / IMDS for the resolved config.
+pub async fn sdk_config(region_override: Option<String>) -> aws_config::SdkConfig {
+    match &region_override {
+        Some(r) => {
+            info!(region = %r, "loading AWS config (region from --region)");
+            aws_config::from_env()
+                .region(Region::new(r.clone()))
+                .load()
+                .await
+        }
+        None => {
+            info!("loading AWS config (default chain: env, profile, IMDS, …)");
+            aws_config::load_from_env().await
+        }
+    }
+}
+
 
 /// CloudFormation returns `ValidationError` with message `Stack with id … does not exist`, but
 /// [`DescribeStacksError`]'s [`std::fmt::Display`] is only `unhandled error (ValidationError)` — the
@@ -42,32 +71,6 @@ fn describe_stacks_reports_missing_stack<R>(err: &CfSdkError<DescribeStacksError
     }
 }
 
-/// `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `us-east-1`.
-#[must_use]
-pub fn resolve_aws_region() -> String {
-    std::env::var("AWS_REGION")
-        .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-        .unwrap_or_else(|_| "us-east-1".to_string())
-}
-
-/// Shared SDK config (credentials + region from the default chain; see [`aws_config::load_from_env`]).
-///
-/// When `region_override` is set, it wins over `AWS_REGION` / profile / IMDS for the resolved config.
-pub async fn sdk_config(region_override: Option<String>) -> aws_config::SdkConfig {
-    match &region_override {
-        Some(r) => {
-            info!(region = %r, "loading AWS config (region from --region)");
-            aws_config::from_env()
-                .region(Region::new(r.clone()))
-                .load()
-                .await
-        }
-        None => {
-            info!("loading AWS config (default chain: env, profile, IMDS, …)");
-            aws_config::load_from_env().await
-        }
-    }
-}
 
 fn bucket_location_constraint(region: &str) -> Result<Option<BucketLocationConstraint>> {
     if region == "us-east-1" {
@@ -134,6 +137,97 @@ fn head_object_is_not_found<R>(err: &S3SdkError<HeadObjectError, R>) -> bool {
         err,
         S3SdkError::ServiceError(ctx) if ctx.err().is_not_found()
     )
+}
+
+fn head_bucket_is_not_found<R>(err: &S3SdkError<HeadBucketError, R>) -> bool {
+    matches!(
+        err,
+        S3SdkError::ServiceError(ctx) if ctx.err().is_not_found()
+    )
+}
+
+/// List and delete all objects, then delete the bucket. No-op if the bucket does not exist.
+pub async fn s3_empty_and_delete_bucket(config: &aws_config::SdkConfig, bucket: &str) -> Result<()> {
+    let client = aws_sdk_s3::Client::new(config);
+
+    match client.head_bucket().bucket(bucket).send().await {
+        Ok(_) => {}
+        Err(e) => {
+            if head_bucket_is_not_found(&e) {
+                info!(%bucket, "S3 bucket does not exist — skip delete");
+                return Ok(());
+            }
+            return Err(e.into());
+        }
+    }
+
+    info!(%bucket, "S3 emptying bucket before DeleteBucket");
+    loop {
+        let resp = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .max_keys(1000)
+            .send()
+            .await
+            .with_context(|| format!("ListObjectsV2 `{bucket}`"))?;
+
+        let contents = resp.contents();
+        if contents.is_empty() {
+            break;
+        }
+
+        let mut objects = Vec::with_capacity(contents.len());
+        for o in contents {
+            let Some(key) = o.key() else { continue };
+            objects.push(
+                ObjectIdentifier::builder()
+                    .key(key)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("ObjectIdentifier: {e}"))?,
+            );
+        }
+
+        if objects.is_empty() {
+            break;
+        }
+
+        let delete = Delete::builder()
+            .set_objects(Some(objects))
+            .build()
+            .context("build Delete for DeleteObjects")?;
+
+        let out = client
+            .delete_objects()
+            .bucket(bucket)
+            .delete(delete)
+            .send()
+            .await
+            .context("DeleteObjects")?;
+
+        let errors = out.errors();
+        if !errors.is_empty() {
+            let detail: Vec<String> = errors
+                .iter()
+                .map(|e| {
+                    format!(
+                        "{}: {}",
+                        e.key().unwrap_or("?"),
+                        e.message().unwrap_or("?")
+                    )
+                })
+                .collect();
+            bail!("DeleteObjects failures: {}", detail.join("; "));
+        }
+    }
+
+    client
+        .delete_bucket()
+        .bucket(bucket)
+        .send()
+        .await
+        .with_context(|| format!("DeleteBucket `{bucket}`"))?;
+    info!(%bucket, "S3 bucket deleted");
+    Ok(())
 }
 
 /// Upload `path` to `s3://bucket/key` unless the object already exists with the **same size** as the local file (cheap `HeadObject` check).
