@@ -27,40 +27,15 @@ set +e
 usermod -aG docker ec2-user
 usermod -aG ne ec2-user
 
-# ── Nitro enclaves allocator ──────────────────────────────────────────────────
+# Nitro enclaves allocator
 ALLOCATOR_YAML=/etc/nitro_enclaves/allocator.yaml
 sed -r "s/^(\s*memory_mib\s*:\s*).*/\16144/" -i "$ALLOCATOR_YAML"
 sed -r "s/^(\s*cpu_count\s*:\s*).*/\12/" -i "$ALLOCATOR_YAML"
 
-# ── vsock-proxy allowlist ─────────────────────────────────────────────────────
-# ${__REGION__} is substituted by CloudFormation Fn::Sub before bash runs.
-cat > /etc/nitro_enclaves/vsock-proxy.yaml <<'VSOCK_EOF'
-allowlist:
-- {address: 169.254.169.254, port: 80}
-VSOCK_EOF
-
+# Enable services
 systemctl enable --now docker
 systemctl enable --now nitro-enclaves-allocator.service
 systemctl enable --now nitro-enclaves-vsock-proxy.service
-
-# ── IMDS path for enclave: vsock 8002 → parent IMDS:80 (enclave viproxy default http://127.0.0.1:8099/latest) ──
-cat > /etc/systemd/system/enclave-imds-proxy.service <<'IMDS_PROXY_UNIT'
-[Unit]
-Description=Forward enclave vsock 8002 to EC2 IMDS (HTTP)
-After=nitro-enclaves-vsock-proxy.service
-
-[Service]
-Type=simple
-Restart=always
-RestartSec=2
-ExecStart=/bin/bash -ce 'exec /usr/bin/vsock-proxy 8002 169.254.169.254 80 --config /etc/nitro_enclaves/vsock-proxy.yaml -w 5'
-
-[Install]
-WantedBy=multi-user.target
-IMDS_PROXY_UNIT
-
-systemctl daemon-reload
-systemctl enable --now enclave-imds-proxy.service
 
 # ── Wait for services before pulling containers and downloading EIF ───────────
 sleep 5
@@ -71,8 +46,8 @@ EIF_ASSET_HASH="${__EIF_ASSET_HASH__}"
 
 docker pull "$CONTROL_PLANE_IMAGE"
 aws s3 cp "s3://${__EIF_S3_BUCKET__}/${__EIF_S3_KEY__}" /usr/bin/enclave.eif --region "${__REGION__}"
-echo "Deployed EIF asset hash: $EIF_ASSET_HASH"
 
+# TODO: remove debug mode
 # ── Systemd unit for control-plane (gvproxy + enclave) ───────────────────────
 cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'
 [Unit]

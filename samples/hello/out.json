@@ -1,8 +1,8 @@
 {
   "NitrumStack": {
-    "KmsKeyId": "51e53621-b862-483d-836b-1ee67279fb31",
-    "EC2InstanceRoleARN": "arn:aws:iam::447655722442:role/NitrumStack-InstanceRole3CCE2F1D-fqoquMYJMeK4",
+    "KmsKeyId": "bc50afbe-c08c-4afc-87b8-973f64dbe54a",
+    "EC2InstanceRoleARN": "arn:aws:iam::447655722442:role/NitrumStack-InstanceRole3CCE2F1D-zor1EDmgefH5",
     "DynamoTableName": "nitrum-dev",
-    "ASGGroupName": "NitrumStack-NitroASGC027A699-DycgHb5M0FMd"
+    "ASGGroupName": "NitrumStack-NitroASGC027A699-kMjhlmYHGLp7"
   }
 }

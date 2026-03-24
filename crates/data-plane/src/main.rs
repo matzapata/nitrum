@@ -46,8 +46,8 @@ async fn main() {
 
     let args = Args::parse();
 
-    // gvproxy TAP path must be up before IMDS-adjacent HTTPS (SSM, etc.). IMDS uses loopback
-    // viproxy started from `networking::init` (not gvproxy).
+    // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
+    // when the parent runs gvproxy with `-ec2-metadata-access`.
     #[cfg(feature = "enclave")]
     networking::init().await;
     #[cfg(not(feature = "enclave"))]

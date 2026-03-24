@@ -1,5 +1,5 @@
 use crate::constants::HOST_PROXY_PORT;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info};
@@ -20,9 +20,6 @@ const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
 
 const AF_VSOCK: libc::c_int = 40;
 
-/// Brave viproxy binary path in the data-plane image (`docker/data-plane.dockerfile`).
-const DEFAULT_IMDS_VSOCK_PROXY_PATH: &str = "/app/imds-vsock-proxy";
-
 /// Set up enclave networking via TAP device + VSOCK to gvproxy on the host.
 ///
 /// Creates a TAP device, connects to gvproxy over VSOCK, sends the POST /connect
@@ -31,14 +28,11 @@ const DEFAULT_IMDS_VSOCK_PROXY_PATH: &str = "/app/imds-vsock-proxy";
 /// using the 2-byte little-endian length-prefixed protocol.
 ///
 /// Returns once TAP ↔ VSOCK forwarding is running (background threads). Call **before** loading
-/// config that needs HTTPS egress (e.g. SSM), which uses this path to reach the VPC/internet.
-///
-/// Also starts **IMDS viproxy** on loopback (default `127.0.0.1:8099` → parent vsock `3:8002`) so
-/// [`RuntimeConfig::load`](crate::config::RuntimeConfig::load) can reach IMDS without a shell entrypoint.
+/// config that needs IMDS/HTTPS egress: the parent must run gvproxy with `-ec2-metadata-access`
+/// so `169.254.169.254` (IMDS) is reachable from the guest over TAP.
 pub async fn init() {
     // Enclave/minimal roots often start with `lo` down; without this, `127.0.0.1` returns ENETUNREACH.
     bring_loopback_up();
-    spawn_imds_vsock_proxy_and_wait().await;
 
     info!(
         port = HOST_PROXY_PORT,
@@ -70,98 +64,6 @@ pub async fn init() {
 
     start_forwarding(tap_fd, vsock_fd);
     info!("frame forwarding started (TAP ↔ VSOCK)");
-}
-
-// ── IMDS viproxy (loopback TCP → parent VSOCK → IMDS) ───────────────────
-
-fn parse_first_in_addr_host_port(in_addrs: &str) -> (String, u16) {
-    let first = in_addrs.split(',').next().unwrap_or(in_addrs).trim();
-    let (host, port_str) = first.rsplit_once(':').unwrap_or_else(|| {
-        panic!("invalid NITRUM_IMDS_VIPROXY_IN (expected host:port): {first:?}")
-    });
-    let port: u16 = port_str
-        .parse()
-        .unwrap_or_else(|_| panic!("invalid TCP port in NITRUM_IMDS_VIPROXY_IN: {port_str:?}"));
-    (host.to_string(), port)
-}
-
-async fn wait_imds_viproxy_tcp(host: &str, port: u16) {
-    let addr = format!("{host}:{port}");
-    const ATTEMPTS: u32 = 200;
-    const SLEEP_MS: u64 = 50;
-
-    for attempt in 1..=ATTEMPTS {
-        match tokio::net::TcpStream::connect(&addr).await {
-            Ok(_) => {
-                info!(%addr, attempt, "IMDS viproxy is accepting TCP connections");
-                return;
-            }
-            Err(e) if attempt == 1 || attempt % 40 == 0 => {
-                info!(%addr, attempt, error = %e, "waiting for IMDS viproxy to listen …");
-            }
-            Err(_) => {}
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(SLEEP_MS)).await;
-    }
-
-    panic!(
-        "timed out waiting for IMDS viproxy on {addr} ({ATTEMPTS} attempts); \
-         verify imds-vsock-proxy and parent enclave-imds-proxy / vsock (default OUT 3:8002)"
-    );
-}
-
-async fn spawn_imds_vsock_proxy_and_wait() {
-    let bin = std::env::var("NITRUM_IMDS_VSOCK_PROXY_PATH")
-        .unwrap_or_else(|_| DEFAULT_IMDS_VSOCK_PROXY_PATH.to_string());
-
-    if !std::path::Path::new(&bin).exists() {
-        panic!(
-            "IMDS vsock proxy not found at {bin:?}; install imds-vsock-proxy into the image or set NITRUM_IMDS_VSOCK_PROXY_PATH"
-        );
-    }
-
-    let in_addrs =
-        std::env::var("NITRUM_IMDS_VIPROXY_IN").unwrap_or_else(|_| "127.0.0.1:8099".to_string());
-    let out_addrs =
-        std::env::var("NITRUM_IMDS_VIPROXY_OUT").unwrap_or_else(|_| "3:8002".to_string());
-    let (listen_host, listen_port) = parse_first_in_addr_host_port(&in_addrs);
-
-    info!(
-        %bin,
-        in_addrs = %in_addrs,
-        out_addrs = %out_addrs,
-        "spawning IMDS viproxy (loopback TCP → parent VSOCK)"
-    );
-
-    let mut child = Command::new(&bin)
-        .env("IN_ADDRS", &in_addrs)
-        .env("OUT_ADDRS", &out_addrs)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap_or_else(|e| panic!("failed to spawn IMDS viproxy {bin}: {e}"));
-
-    let pid = child.id();
-    std::thread::spawn(move || match child.wait() {
-        Ok(status) if status.success() => {
-            error!(
-                pid,
-                code = ?status.code(),
-                "imds-vsock-proxy exited successfully (server should not exit on its own)"
-            );
-        }
-        Ok(status) => {
-            error!(
-                pid,
-                code = ?status.code(),
-                "imds-vsock-proxy exited with failure"
-            );
-        }
-        Err(e) => error!(pid, error = %e, "imds-vsock-proxy wait() failed"),
-    });
-
-    wait_imds_viproxy_tcp(&listen_host, listen_port).await;
 }
 
 // ── SockAddrVm ──────────────────────────────────────────────────────────
@@ -239,8 +141,9 @@ fn run_ip(args: &[&str]) {
     );
 }
 
+// TODO: check if needed
 fn bring_loopback_up() {
-    info!("bringing loopback lo up (required for IMDS viproxy on 127.0.0.1)");
+    info!("bringing loopback lo up (127.0.0.1 may otherwise be unreachable)");
     run_ip(&["link", "set", "dev", "lo", "up"]);
 }
 

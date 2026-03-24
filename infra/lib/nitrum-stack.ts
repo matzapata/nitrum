@@ -73,6 +73,17 @@ export class NitrumStack extends cdk.Stack {
       service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
     });
 
+    // ── NLB security group (required when CDK uses NLB SGs by default) ─────────
+    // Without explicit rules, the NLB may block client ingress and/or egress to targets, so
+    // health checks never succeed and the NLB DNS appears to hang.
+    const nlbSg = new ec2.SecurityGroup(this, 'NitroNLBSG', {
+      vpc,
+      allowAllOutbound: true,
+      description: 'NLB: internet clients in, forwarded traffic to instances',
+    });
+    nlbSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'HTTPS from internet (IPv4)');
+    nlbSg.addIngressRule(ec2.Peer.anyIpv6(), ec2.Port.tcp(443), 'HTTPS from internet (IPv6)');
+
     // ── Security group ────────────────────────────────────────────────────────
     const enclaveSg = new ec2.SecurityGroup(this, 'NitroInstanceSG', {
       vpc,
@@ -84,9 +95,10 @@ export class NitrumStack extends cdk.Stack {
       ec2.Port.tcp(443),
       'Allow HTTPS from within VPC',
     );
+    enclaveSg.addIngressRule(nlbSg, ec2.Port.tcp(443), 'HTTPS from NLB (health checks + traffic)');
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.tcp(443), 'Intra-SG HTTPS');
     enclaveSg.addIngressRule(enclaveSg, ec2.Port.icmpPing(), 'Intra-SG ping');
-    enclaveSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS inbound from NLB');
+    enclaveSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'HTTPS (optional direct / debugging)');
 
     // ── KMS key ───────────────────────────────────────────────────────────────
     // Symmetric CMK: data-plane uses GenerateDataKeyWithoutPlaintext (AES-256) and
@@ -214,13 +226,23 @@ export class NitrumStack extends cdk.Stack {
       internetFacing: true,
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroups: [nlbSg],
+      crossZoneEnabled: true,
     });
 
     const targetGroup = new elbv2.NetworkTargetGroup(this, 'NitroTargetGroup', {
       targets: [asg],
       protocol: elbv2.Protocol.TCP,
       port: 443,
-      vpc
+      vpc,
+      healthCheck: {
+        protocol: elbv2.Protocol.TCP,
+        port: '443',
+        interval: cdk.Duration.seconds(30),
+        timeout: cdk.Duration.seconds(10),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
     });
 
     nlb.addListener('HTTPSListener', {

@@ -45,7 +45,7 @@ struct CredCache {
 /// IMDSv2 client with built-in credential caching by wall-clock time bucket.
 pub struct ImdsClient {
     /// Base URL including the `/latest` segment (no trailing slash).
-    /// In a Nitro enclave this is typically `http://127.0.0.1:8099/latest` (viproxy → vsock → parent IMDS).
+    /// In a Nitro enclave this is typically `http://169.254.169.254/latest` when gvproxy runs with `-ec2-metadata-access`.
     latest_base: String,
     http: reqwest::Client,
     cache: Mutex<CredCache>,

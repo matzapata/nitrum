@@ -22,7 +22,7 @@ pub struct RuntimeConfig {
     /// User provided config.
     pub nitrum: NitrumConfig,
     /// IMDS base URL from `NITRUM_IMDS_BASE_URL` or [`DEFAULT_IMDS_LATEST_BASE_URL`] (no trailing slash).
-    /// Default is loopback for the enclave IMDS vsock tunnel; override for host-side runs or mocks.
+    /// Default is standard EC2 IMDS; override for host-side runs or metadata mocks.
     pub imds_latest_base_url: String,
     /// AWS region from IMDS.
     pub aws_region: String,
@@ -60,9 +60,8 @@ impl RuntimeConfig {
     /// [`SsmParameters::parameter_names`](crate::utils::ssm::SsmParameters::parameter_names)
     /// (env there only — not in this module).
     ///
-    /// There is no generic egress probe here: on Nitro, outbound traffic is restricted by the
-    /// parent `vsock-proxy` allowlist (e.g. KMS, SSM, IMDS). Probing arbitrary hosts such as
-    /// `httpbin.org` fails in production and would block startup for no benefit.
+    /// There is no generic egress probe here: on Nitro, API traffic uses the TAP↔gvproxy path;
+    /// probing arbitrary hosts such as `httpbin.org` fails in many setups and would block startup for no benefit.
     pub async fn load(config_path: &Path) -> Result<Self> {
         let nitrum = shared::config::load(config_path);
 

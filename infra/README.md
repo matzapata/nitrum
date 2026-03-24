@@ -53,12 +53,12 @@ cdk deploy NitrumStack -O out.json --require-approval never
 
 ### 3) Ensure gvproxy is running on the EC2 host
 
-Your host-side service should start `gvproxy` with VSOCK listening on `:1024` and configure forwarding rules for `443` and `9090`.
+Your host-side service should start `gvproxy` with VSOCK listening on `:1024`, **`-ec2-metadata-access`** so the enclave can use IMDSv2 at `169.254.169.254` over TAP, and configure forwarding rules for `443` and `9090`.
 
 Expected command shape:
 
 ```bash
-./gvproxy -listen vsock://:1024 -listen unix:///tmp/network.sock
+./gvproxy -listen vsock://:1024 -listen unix:///tmp/network.sock -ec2-metadata-access=true
 ```
 
 And exposes:

@@ -7,7 +7,8 @@ FROM golang:1.25 AS gvproxy-builder
 
 WORKDIR /
 
-RUN git clone --depth 1 --branch v0.7.4 https://github.com/containers/gvisor-tap-vsock.git
+# v0.8.7+ provides -ec2-metadata-access for IMDSv2 over TAP (see containers/gvisor-tap-vsock#512).
+RUN git clone --depth 1 --branch v0.8.7 https://github.com/containers/gvisor-tap-vsock.git
 RUN cd gvisor-tap-vsock && CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldflags '-extldflags "-static"' -o bin/gvproxy-linux-amd64 ./cmd/gvproxy
 
 ################################################################################
