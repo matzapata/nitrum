@@ -60,7 +60,7 @@ impl CryptoClient {
                     .context(
                         "leader bootstrap: unwrap new DEK envelope for in-memory use failed (see KMS context above)",
                     )?;
-                    // TODO:
+                // TODO:
                 let encrypted_dek = enc;
 
                 anyhow::ensure!(

@@ -24,11 +24,12 @@ TLS certificate with acme
 TODO: TLS certificate sync
 TODO: properly wait for system to be up
 TODO: add cert to attestation
-TODO: env vars support (later, inline code enc with kms)
+TODO: env vars support (later, POST request, add authority pub key in image)
 TODO: make sure cert is stored encrypted
 TODO: reproducible builds
 TODO: control plane watchdog style, reset if killed, logs, etc
 TODO: cloudformation template instead of cdk
+
 
 KMS to encrypt decript data (use public key to wrap a sync key and store the sync key in db)
 

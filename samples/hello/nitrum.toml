@@ -1,3 +1,6 @@
+# Project name
+name = "nitrum-hello"
+
 [service]
 # Port the app listens on (ingress forwards TLS traffic here as plain HTTP).
 port = 8080

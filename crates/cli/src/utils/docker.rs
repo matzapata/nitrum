@@ -7,6 +7,8 @@ use crate::constants;
 
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 /// Always targets [`constants::DOCKER_PLATFORM`].
+///
+/// The image should include `nitrum.toml`; the data-plane reads SSM paths from env or defaults (see `crates/data-plane/src/utils/ssm.rs`).
 pub async fn build_enclave_image(
     root: &Path,
     data_plane_image: &str,

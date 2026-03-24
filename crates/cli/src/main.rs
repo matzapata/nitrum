@@ -27,7 +27,7 @@ enum Commands {
     Down(down::DownArgs),
     /// Tail service logs (docker compose logs)
     Logs(logs::LogsArgs),
-    /// Deploy to production
+    /// Deploy to AWS (CloudFormation)
     Deploy(deploy::DeployArgs),
     /// Describe an EIF (`nitro-cli describe-eif` in Docker)
     Describe(describe::DescribeArgs),
@@ -37,9 +37,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Nitrum CLI progress at info; keep AWS/Hyper noise down unless you raise them via RUST_LOG.
+        EnvFilter::new("warn,cli=info")
+    });
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let cli = Cli::parse();
     match cli.command {

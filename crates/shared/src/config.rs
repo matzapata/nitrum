@@ -20,6 +20,7 @@ impl Default for HealthCheck {
     }
 }
 
+// TODO: contemplate this in deployment
 #[derive(Clone, serde::Deserialize)]
 pub struct Scaling {
     /// Desired number of replicas.
@@ -102,6 +103,8 @@ impl Default for Service {
 
 #[derive(Clone, serde::Deserialize)]
 pub struct Config {
+    /// Project slug: CloudFormation `EnvironmentName`, stack name, bucket `nitrum-{name}` (SSM via `NITRUM_SSM_PREFIX` or `/nitrum/…` defaults).
+    pub name: String,
     pub service: Service,
     pub health_check: HealthCheck,
     pub scaling: Scaling,
@@ -109,9 +112,13 @@ pub struct Config {
     pub egress: Egress,
 }
 
-pub fn load(path: &std::path::Path) -> Config {
+/// Load `nitrum.toml` without panicking (for CLIs and tools).
+pub fn try_load(path: &std::path::Path) -> Result<Config, String> {
     let contents = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read config file {}: {e}", path.display()));
-    toml::from_str(&contents)
-        .unwrap_or_else(|e| panic!("failed to parse config file {}: {e}", path.display()))
+        .map_err(|e| format!("failed to read config file {}: {e}", path.display()))?;
+    toml::from_str(&contents).map_err(|e| format!("failed to parse config file {}: {e}", path.display()))
+}
+
+pub fn load(path: &std::path::Path) -> Config {
+    try_load(path).unwrap_or_else(|e| panic!("{e}"))
 }

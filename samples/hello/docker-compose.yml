@@ -9,7 +9,7 @@
 # Then you can use: curl -sk https://nitrum.local/...
 #
 # Test the enclave well-known endpoints:
-#   curl -sk https://nitrum.local/.well-known/enclave/status
+#   curl -sk https://localhost:443/.well-known/enclave/status
 #   curl -sk https://nitrum.local/.well-known/enclave/attestation
 #
 # Test the user app through TLS ingress:
@@ -19,7 +19,7 @@
 #   curl http://nitrum.local/attestation -d '{}'
 #
 # Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
-#   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
+#   curl -sk https://Nitrum-Nitro-SgCJ7DU9Jn0A-00aac5a9b479f2f5.elb.sa-east-1.amazonaws.com/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 
 
 configs:

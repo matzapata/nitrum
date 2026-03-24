@@ -1,5 +1,7 @@
-/// CDK app path relative to project root (populated by `nitrum deploy`).
-pub const NITRUM_INFRA_DIR: &str = ".nitrum/infra";
+/// Staging directory under the project root (`template.yml` for CloudFormation deploy).
+pub const NITRUM_STATE_DIR: &str = ".nitrum";
+pub const NITRUM_TEMPLATE_FILE: &str = "template.yml";
+
 /// Compose file path relative to the project root (local dev stack).
 pub const ENCLAVE_DEV_COMPOSE_FILE: &str = ".nitrum/compose/enclave-dev.yml";
 
@@ -26,5 +28,5 @@ pub const NITRO_CLI_DOCKER_IMAGE: &str = "matzapata/nitrum-nitro-cli:latest";
 pub const NITRUM_GITHUB_REPO_OWNER: &str = "matzapata";
 pub const NITRUM_GITHUB_REPO_NAME: &str = "nitrum";
 
-/// Git ref (branch/tag) when downloading `infra/` from GitHub for `nitrum deploy`.
+/// Git ref (branch/tag) when downloading sample files from GitHub for `nitrum init`.
 pub const NITRUM_GITHUB_REF: &str = "develop";

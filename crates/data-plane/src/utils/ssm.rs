@@ -48,8 +48,8 @@ impl SsmParameters {
         match (kms, ddb) {
             (Some(k), Some(d)) => vec![k, d],
             _ => vec![
-                "/nitrum/kms_key_id".to_string(),
-                "/nitrum/dynamodb_table".to_string(),
+                    "/nitrum/kms_key_id".to_string(),
+                    "/nitrum/dynamodb_table".to_string(),
             ],
         }
     }

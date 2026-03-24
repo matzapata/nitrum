@@ -1,55 +1,49 @@
-//! Run `cdk destroy` in `.nitrum/infra`.
+//! Delete the CloudFormation stack created by `nitrum deploy`.
 
 use clap::Args;
 use std::env;
 use std::path::PathBuf;
+use tracing::info;
 
-use crate::constants;
-use crate::utils::{cdk, console};
+use crate::utils::{aws, console};
 
 #[derive(Args)]
 pub struct DestroyArgs {
-    /// Project directory (default: current directory)
+    /// Project directory (default: current directory); used to read `nitrum.toml` for stack name (`name`)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
-    /// Deployment environment for infra (`dev` or `prod`)
-    #[arg(long, value_name = "ENV", default_value = "dev", value_parser = ["dev", "prod"])]
-    pub env: String,
-    /// Pass `--force` to `cdk destroy` (skip CDK confirmation)
+    /// Skip the confirmation prompt (for scripts)
     #[arg(long)]
     pub force: bool,
 }
 
 pub async fn run(args: DestroyArgs) {
+    info!("nitrum destroy: starting");
     let root = args
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let infra_dir = root.join(constants::NITRUM_INFRA_DIR);
+    info!(project_root = %root.display(), "project directory");
+    let cfg_path = root.join("nitrum.toml");
+    let config = match shared::config::try_load(&cfg_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let stack_name = config.name;
+    info!(%stack_name, "stack name from nitrum.toml");
 
-    if !infra_dir.is_dir() {
-        eprintln!(
-            "{} does not exist. Run `nitrum deploy` first.",
-            infra_dir.display()
-        );
-        std::process::exit(1);
-    }
-
-    if !console::confirm(&format!("Destroy AWS resources ({} deployment)?", args.env,)) {
+    if !args.force && !console::confirm(&format!("Delete CloudFormation stack `{stack_name}`?")) {
         return;
     }
 
-    // `infra.ts` requires EIF_PATH for stack synthesis; destroy does not use the file,
-    // so pass a stable file that always exists in the infra directory.
-    let env_vars = [
-        ("DEPLOYMENT", args.env.clone()),
-        (
-            "EIF_PATH",
-            infra_dir.join("README.md").display().to_string(),
-        ),
-    ];
-    let mut destroy_args = vec!["NitrumStack".to_string(), "--force".to_string()];
-    if let Err(e) = cdk::run_cdk(&infra_dir, "destroy", &destroy_args, &env_vars).await {
+    let sdk = aws::sdk_config(None).await;
+    if let Err(e) = aws::cloudformation_delete_stack_wait(&sdk, &stack_name).await {
         eprintln!("{e:#}");
         std::process::exit(1);
     }
+    info!(%stack_name, "nitrum destroy: finished");
+
+    // TODO: delete s3 bucket
 }

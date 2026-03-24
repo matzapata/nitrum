@@ -2,12 +2,14 @@
 name = "cli"
 version = "0.1.0"
 edition = "2024"
+include = ["src/**/*", "../../samples/hello/template.yml"]
 
 [lints]
 workspace = true
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+shared = { path = "../shared" }
+clap = { version = "4", features = ["derive", "env"] }
 bollard = "0.20.2"
 bytes = "1"
 colored = "2.1.0"
@@ -23,6 +25,10 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+sha2 = "0.10"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+aws-sdk-cloudformation = "1"
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "charset",

@@ -124,7 +124,7 @@ async fn setup_forward(
 }
 
 /// POST `/services/forwarder/expose` on gvproxy's Unix socket. Returns response status, or I/O error.
-#[cfg(unix)]
+#[cfg(unix)] // TODO: remove this, allways unix
 async fn post_forwarder_expose(socket_path: &str, body: &str) -> std::io::Result<Option<u16>> {
     const EXPOSE_PATH: &str = "/services/forwarder/expose";
     const IO_TIMEOUT: Duration = Duration::from_secs(15);
@@ -170,10 +170,7 @@ fn parse_http_status_line(raw: &[u8]) -> Option<u16> {
 }
 
 #[cfg(not(unix))]
-async fn post_forwarder_expose(
-    _socket_path: &str,
-    _body: &str,
-) -> std::io::Result<Option<u16>> {
+async fn post_forwarder_expose(_socket_path: &str, _body: &str) -> std::io::Result<Option<u16>> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "gvproxy Unix socket API requires a Unix host",
