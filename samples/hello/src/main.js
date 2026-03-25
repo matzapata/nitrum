@@ -14,7 +14,7 @@ app.get("/health", (req, res) => {
 
 app.get("/egress", async (req, res) => {
   try {
-    const { data } = await axios.get("http://httpbin.org/ip");
+    const { data } = await axios.get("https://httpbin.org/ip");
     res.json(data);
   } catch (err) {
     console.error(`[server] egress error: ${err.message}`);

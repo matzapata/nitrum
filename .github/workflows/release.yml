@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push control-plane
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/control-plane.dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            FEATURES=enclave
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-control-plane:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-control-plane:latest
+
+      - name: Build and push data-plane
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/data-plane.dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            FEATURES=enclave
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-data-plane:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-data-plane:latest
+
+      - name: Build and push nitro-cli
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/nitro-cli.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-nitro-cli:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-nitro-cli:latest
+
+  cli-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            suffix: darwin-aarch64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64
+            ext: .exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI
+        run: cargo build --release -p cli
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          src="target/release/nitrum${{ matrix.ext }}"
+          dest="dist/nitrum-${{ matrix.suffix }}${{ matrix.ext }}"
+          cp "$src" "$dest"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nitrum-${{ matrix.suffix }}
+          path: dist/*
+
+  github-release:
+    needs: [cli-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nitrum-*
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

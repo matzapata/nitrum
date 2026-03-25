@@ -2,6 +2,7 @@
 name = "cli"
 version = "0.1.0"
 edition = "2024"
+autobins = false
 include = [
     "src/**/*",
     "../../infra/cloudformation/template.yml",
@@ -10,6 +11,10 @@ include = [
     "../../samples/hello/package.json",
     "../../samples/hello/src/main.js",
 ]
+
+[[bin]]
+name = "nitrum"
+path = "src/main.rs"
 
 [lints]
 workspace = true

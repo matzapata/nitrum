@@ -99,5 +99,11 @@ fn nitrum_toml_for_init(name: &str) -> String {
             destinations: vec![r"httpbin\.org$".to_string()],
         },
     };
-    toml::to_string_pretty(&config).expect("serialize nitrum.toml for init")
+    let body = toml::to_string_pretty(&config).expect("serialize nitrum.toml for init");
+    format!(
+        "# Default template generated with `nitrum init`\n\
+         # For details check https://github.com/matzapata/nitrum/blob/develop/crates/shared/src/config.rs\n\
+         \n\
+         {body}"
+    )
 }

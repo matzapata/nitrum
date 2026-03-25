@@ -16,7 +16,7 @@ format:
 build-nitro-cli tag="latest" no_cache="":
     docker build \
         --platform linux/amd64 \
-        -f docker/nitro-cli.dockerfile \
+        -f infra/docker/nitro-cli.dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-nitro-cli:{{tag}} \
         .
@@ -27,7 +27,7 @@ push-nitro-cli tag="latest":
 build-control-plane tag="latest" no_cache="":
     docker build \
         --platform linux/amd64 \
-        {{ if tag == "dev" { "-f docker/control-plane.dockerfile" } else { "-f docker/control-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        {{ if tag == "dev" { "-f infra/docker/control-plane.dockerfile" } else { "-f infra/docker/control-plane.dockerfile --build-arg FEATURES=enclave" } }} \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-control-plane:{{tag}} \
         .
@@ -38,7 +38,7 @@ push-control-plane tag="latest":
 build-data-plane tag="latest" no_cache="":
     docker build \
         --platform linux/amd64 \
-        {{ if tag == "dev" { "-f docker/data-plane.dockerfile --build-arg FEATURES=pebble" } else { "-f docker/data-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        {{ if tag == "dev" { "-f infra/docker/data-plane.dockerfile --build-arg FEATURES=pebble" } else { "-f infra/docker/data-plane.dockerfile --build-arg FEATURES=enclave" } }} \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}} \
         .
