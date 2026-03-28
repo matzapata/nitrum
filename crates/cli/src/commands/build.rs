@@ -1,11 +1,11 @@
 //! Build enclave Docker image (prod data-plane base) and produce `enclave.eif` via nitro-cli in Docker.
 
+use anyhow::Result;
 use clap::Args;
-use indicatif::ProgressBar;
+use shared::config::NitrumConfig;
 use std::env;
 
-use crate::constants;
-use crate::utils::{console, docker, project};
+use crate::{artifact::EnclaveArtifact, utils};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -14,55 +14,27 @@ pub struct BuildArgs {
     pub path: Option<std::path::PathBuf>,
 }
 
-pub async fn run(args: BuildArgs) {
+pub async fn run(args: BuildArgs) -> Result<()> {
+    // Load config
     let root = args
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
+    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
-    let cfg = match project::load_project_config(&root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    };
-    let prod_image = project::enclave_image_prod(&cfg.name);
-
-    let spinner = console::style_spinner(
-        ProgressBar::new_spinner(),
-        "Building enclave image (prod data-plane base)…",
-    );
-    match docker::build_enclave_image(
-        &root,
-        constants::ENCLAVE_PROD_BASE_IMAGE,
-        &prod_image,
+    // Build artifact
+    let artifact = utils::with_spinner(
+        "Building enclave artifact from source…",
+        "enclave.eif built and measured.",
+        EnclaveArtifact::try_from(&root, &cfg),
     )
-    .await
-    {
-        Ok(()) => spinner.finish_with_message(format!(
-            "Docker image built as `{prod_image}`.",
-        )),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
+    .await?;
 
-    let spinner = console::style_spinner(
-        ProgressBar::new_spinner(),
-        "Building enclave.eif (nitro-cli in Docker)…",
-    );
-    match docker::build_enclave_eif(&root, &prod_image).await {
-        Ok(()) => spinner.finish_with_message("enclave.eif written."),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
-
-    let eif = root.join("enclave.eif");
     println!();
-    println!("EIF written to {}", eif.display());
+    println!("EIF written to {}", artifact.eif_path.display());
+    println!("EIF hash (sha256): {}", artifact.hash);
+    println!("PCR0: {}", artifact.pcr0);
+    println!("PCR1: {}", artifact.pcr1);
+    println!("PCR2: {}", artifact.pcr2);
+
+    Ok(())
 }

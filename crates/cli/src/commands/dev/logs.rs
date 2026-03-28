@@ -1,13 +1,10 @@
 use clap::Args;
 use std::env;
-use std::process::Stdio;
 
-use anyhow::{Context, Result, bail};
-use tokio::process::Command;
+use anyhow::Result;
+use shared::config::NitrumConfig;
 
-use crate::constants;
-use crate::utils::compose;
-use crate::utils::project;
+use crate::local::EnclaveLocalStack;
 
 #[derive(Args)]
 pub struct LogsArgs {
@@ -22,52 +19,15 @@ pub struct LogsArgs {
     pub follow: bool,
 }
 
-pub async fn run(args: LogsArgs) {
+pub async fn run(args: LogsArgs) -> Result<()> {
+    // Load config
     let root = args
         .root
         .clone()
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
+    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
-    if let Err(e) = run_logs(&root, &args).await {
-        eprintln!("{e:#}");
-        std::process::exit(1);
-    }
-}
-
-async fn run_logs(root: &std::path::Path, args: &LogsArgs) -> Result<()> {
-    compose::ensure_compose_file(root)?;
-
-    let cfg = project::load_project_config(root)?;
-    let enclave_image = project::enclave_image_dev(&cfg.name);
-
-    let mut cmd = Command::new("docker");
-    cmd.current_dir(root)
-        .env("ENCLAVE_IMAGE", enclave_image)
-        .arg("compose")
-        .arg("-f")
-        .arg(constants::ENCLAVE_DEV_COMPOSE_FILE)
-        .arg("logs")
-        .arg("enclave")
-        .arg("--no-log-prefix");
-
-    if let Some(n) = args.tail {
-        cmd.arg("--tail").arg(n.to_string());
-    }
-    if args.follow {
-        cmd.arg("--follow");
-    }
-
-    cmd.stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-
-    let status = cmd
-        .status()
-        .await
-        .context("failed to spawn `docker compose logs`")?;
-
-    if !status.success() {
-        bail!("docker compose logs exited with status {status}");
-    }
-    Ok(())
+    // Tail logs
+    let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
+    local_stack.logs(args.tail, args.follow).await
 }

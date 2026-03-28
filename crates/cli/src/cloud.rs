@@ -1,20 +1,147 @@
 //! AWS SDK helpers (S3 + CloudFormation) — replaces shelling out to the AWS CLI.
+// TODO: cleanup
 
 use anyhow::{Context, Result, bail};
 use aws_config::Region;
 use aws_sdk_cloudformation::error::SdkError as CfSdkError;
-use aws_sdk_cloudformation::operation::describe_stacks::DescribeStacksError;
 use aws_sdk_cloudformation::operation::RequestId;
+use aws_sdk_cloudformation::operation::describe_stacks::DescribeStacksError;
 use aws_sdk_cloudformation::types::{Capability, Parameter, StackStatus};
 use aws_sdk_s3::error::SdkError as S3SdkError;
 use aws_sdk_s3::operation::head_bucket::HeadBucketError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration, Delete, ObjectIdentifier};
-use std::path::Path;
+use aws_sdk_s3::types::{
+    BucketLocationConstraint, CreateBucketConfiguration, Delete, ObjectIdentifier,
+};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
+
+use crate::artifact::EnclaveArtifact;
+
+pub struct EnclaveCloudStack {
+    config: aws_config::SdkConfig,
+    project_root: PathBuf,
+    stack_name: String,
+    bucket: String,
+}
+
+impl EnclaveCloudStack {
+    /// Loads AWS configuration, writes the bundled CloudFormation template under `.nitrum/` for inspection,
+    /// and returns the stack handle.
+    pub async fn new(
+        project_root: PathBuf,
+        stack_name: String,
+        region_override: Option<String>,
+    ) -> Result<Self> {
+        Self::write_bundled_template(&project_root)?;
+        let bucket = derived_eif_bucket_name(&stack_name)?;
+        let config = sdk_config(region_override).await;
+        Ok(Self {
+            config,
+            project_root,
+            stack_name,
+            bucket,
+        })
+    }
+
+    /// Resolved region for user-facing messages (`AWS_REGION` / profile when no explicit override).
+    #[must_use]
+    pub fn region_display(&self) -> String {
+        self.config
+            .region()
+            .map(|r| r.as_ref().to_string())
+            .unwrap_or_else(resolve_aws_region)
+    }
+
+    #[must_use]
+    pub fn bucket_name(&self) -> &str {
+        &self.bucket
+    }
+
+    fn template_path(&self) -> PathBuf {
+        self.project_root
+            .join(crate::constants::ENCLAVE_CLOUD_STACK_TEMPLATE_FILE)
+    }
+
+    fn write_bundled_template(project_root: &Path) -> Result<()> {
+        let path = project_root.join(crate::constants::ENCLAVE_CLOUD_STACK_TEMPLATE_FILE);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
+        std::fs::write(&path, crate::constants::cloud_stack_template())
+            .with_context(|| format!("write {}", path.display()))?;
+        Ok(())
+    }
+
+    /// Upload EIF artifact and create/update the stack, then return stack outputs.
+    pub async fn deploy(
+        &self,
+        artifact: &EnclaveArtifact,
+        retain: bool,
+        control_plane_image_tag: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>> {
+        let eif_label = eif_version_label_from_hash(&artifact.hash);
+        ensure_bucket_exists(&self.config, &self.bucket).await?;
+        s3_put_file_if_needed(&self.config, &self.bucket, &eif_label, &artifact.eif_path).await?;
+
+        let retain_str = if retain { "true" } else { "false" };
+        let params = vec![
+            ("EnvironmentName".to_string(), self.stack_name.clone()),
+            ("Retain".to_string(), retain_str.to_string()),
+            ("EifS3Bucket".to_string(), self.bucket.clone()),
+            ("EifS3Key".to_string(), eif_label.clone()),
+            ("EifVersionLabel".to_string(), eif_label),
+            ("AsgMinSize".to_string(), "1".to_string()),
+            ("AsgMaxSize".to_string(), "1".to_string()),
+            ("AsgDesiredCapacity".to_string(), "1".to_string()),
+            (
+                "ControlPlaneImageTag".to_string(),
+                control_plane_image_tag.to_string(),
+            ),
+        ];
+
+        let template_path = self.template_path();
+        let template_body = std::fs::read_to_string(&template_path)
+            .with_context(|| format!("read CloudFormation template {}", template_path.display()))?;
+        cloudformation_deploy(&self.config, &self.stack_name, &template_body, &params).await?;
+        cloudformation_stack_outputs(&self.config, &self.stack_name).await
+    }
+
+    /// Delete this stack and wait until deletion finishes.
+    pub async fn destroy(&self) -> Result<()> {
+        cloudformation_delete_stack_wait(&self.config, &self.stack_name).await?;
+        s3_empty_and_delete_bucket(&self.config, &self.bucket).await
+    }
+}
+
+fn sanitize_bucket_label(s: &str) -> String {
+    s.trim()
+        .trim_matches(|c| c == '.' || c == '-')
+        .chars()
+        .map(|c| match c {
+            'A'..='Z' => c.to_ascii_lowercase(),
+            'a'..='z' | '0'..='9' | '-' | '.' => c,
+            _ => '-',
+        })
+        .collect()
+}
+
+/// Default EIF bucket: `nitrum-{project-name}` (S3 label rules, ≤63 chars).
+fn derived_eif_bucket_name(project_name: &str) -> Result<String> {
+    let slug = sanitize_bucket_label(project_name);
+    if slug.is_empty() {
+        bail!("`name` in nitrum.toml is empty after sanitization; set a valid project slug");
+    }
+    let s = format!("nitrum-{slug}");
+    if !(3..=63).contains(&s.len()) {
+        bail!("derived S3 bucket name `{s}` is not 3-63 characters; shorten `name` in nitrum.toml");
+    }
+    Ok(s)
+}
 
 /// `AWS_REGION`, then `AWS_DEFAULT_REGION`, then `us-east-1`.
 #[must_use]
@@ -22,6 +149,12 @@ pub fn resolve_aws_region() -> String {
     std::env::var("AWS_REGION")
         .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
         .unwrap_or_else(|_| "us-east-1".to_string())
+}
+
+/// First 12 lowercase hex chars of a SHA-256 hex string.
+#[must_use]
+pub fn eif_version_label_from_hash(hash: &str) -> String {
+    hash.chars().take(12).collect()
 }
 
 /// Shared SDK config (credentials + region from the default chain; see [`aws_config::load_from_env`]).
@@ -42,7 +175,6 @@ pub async fn sdk_config(region_override: Option<String>) -> aws_config::SdkConfi
         }
     }
 }
-
 
 /// CloudFormation returns `ValidationError` with message `Stack with id … does not exist`, but
 /// [`DescribeStacksError`]'s [`std::fmt::Display`] is only `unhandled error (ValidationError)` — the
@@ -71,14 +203,13 @@ fn describe_stacks_reports_missing_stack<R>(err: &CfSdkError<DescribeStacksError
     }
 }
 
-
 fn bucket_location_constraint(region: &str) -> Result<Option<BucketLocationConstraint>> {
     if region == "us-east-1" {
         return Ok(None);
     }
-    let lc: BucketLocationConstraint = region
-        .parse()
-        .with_context(|| format!("unknown S3 location region `{region}` (cannot derive CreateBucketConfiguration)"))?;
+    let lc: BucketLocationConstraint = region.parse().with_context(|| {
+        format!("unknown S3 location region `{region}` (cannot derive CreateBucketConfiguration)")
+    })?;
     Ok(Some(lc))
 }
 
@@ -91,13 +222,7 @@ pub async fn ensure_bucket_exists(config: &aws_config::SdkConfig, bucket: &str) 
         .unwrap_or_else(resolve_aws_region);
 
     info!(%bucket, %region, "S3 HeadBucket (check if bucket exists)");
-    if client
-        .head_bucket()
-        .bucket(bucket)
-        .send()
-        .await
-        .is_ok()
-    {
+    if client.head_bucket().bucket(bucket).send().await.is_ok() {
         info!(%bucket, "S3 bucket already exists for this account");
         return Ok(());
     }
@@ -147,7 +272,10 @@ fn head_bucket_is_not_found<R>(err: &S3SdkError<HeadBucketError, R>) -> bool {
 }
 
 /// List and delete all objects, then delete the bucket. No-op if the bucket does not exist.
-pub async fn s3_empty_and_delete_bucket(config: &aws_config::SdkConfig, bucket: &str) -> Result<()> {
+pub async fn s3_empty_and_delete_bucket(
+    config: &aws_config::SdkConfig,
+    bucket: &str,
+) -> Result<()> {
     let client = aws_sdk_s3::Client::new(config);
 
     match client.head_bucket().bucket(bucket).send().await {
@@ -208,13 +336,7 @@ pub async fn s3_empty_and_delete_bucket(config: &aws_config::SdkConfig, bucket: 
         if !errors.is_empty() {
             let detail: Vec<String> = errors
                 .iter()
-                .map(|e| {
-                    format!(
-                        "{}: {}",
-                        e.key().unwrap_or("?"),
-                        e.message().unwrap_or("?")
-                    )
-                })
+                .map(|e| format!("{}: {}", e.key().unwrap_or("?"), e.message().unwrap_or("?")))
                 .collect();
             bail!("DeleteObjects failures: {}", detail.join("; "));
         }
@@ -238,18 +360,10 @@ pub async fn s3_put_file_if_needed(
     path: &Path,
 ) -> Result<()> {
     let meta = std::fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
-    let local_len: i64 = meta
-        .len()
-        .try_into()
-        .unwrap_or(-1);
+    let local_len: i64 = meta.len().try_into().unwrap_or(-1);
 
     let client = aws_sdk_s3::Client::new(config);
-    let head = client
-        .head_object()
-        .bucket(bucket)
-        .key(key)
-        .send()
-        .await;
+    let head = client.head_object().bucket(bucket).key(key).send().await;
 
     let upload = match head {
         Ok(resp) => {
@@ -367,7 +481,10 @@ fn stack_failed(status: Option<&StackStatus>) -> bool {
     )
 }
 
-async fn wait_stack_stable(client: &aws_sdk_cloudformation::Client, stack_name: &str) -> Result<()> {
+async fn wait_stack_stable(
+    client: &aws_sdk_cloudformation::Client,
+    stack_name: &str,
+) -> Result<()> {
     let mut tick: u32 = 0;
     loop {
         let resp = client
@@ -376,10 +493,7 @@ async fn wait_stack_stable(client: &aws_sdk_cloudformation::Client, stack_name: 
             .send()
             .await
             .context("DescribeStacks while waiting")?;
-        let stack = resp
-            .stacks()
-            .first()
-            .context("stack missing during wait")?;
+        let stack = resp.stacks().first().context("stack missing during wait")?;
         let status = stack.stack_status();
         tick = tick.saturating_add(1);
         if tick == 1 || tick % 6 == 0 {
@@ -400,9 +514,7 @@ async fn wait_stack_stable(client: &aws_sdk_cloudformation::Client, stack_name: 
             return Ok(());
         }
         if stack_failed(status) {
-            let reason = stack
-                .stack_status_reason()
-                .unwrap_or("no reason returned");
+            let reason = stack.stack_status_reason().unwrap_or("no reason returned");
             bail!("stack `{stack_name}` failed: {:?} — {reason}", status);
         }
         if stack_in_progress(status) || status.is_none() {
@@ -477,7 +589,8 @@ pub async fn cloudformation_deploy(
         if let Err(e) = upd {
             let s = e.to_string();
             let dbg = format!("{e:?}");
-            if s.contains("No updates are to be performed") || dbg.contains("No updates are to be performed")
+            if s.contains("No updates are to be performed")
+                || dbg.contains("No updates are to be performed")
             {
                 info!(%stack_name, "no template/parameter changes — skipping wait");
                 return Ok(());

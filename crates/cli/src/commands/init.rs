@@ -1,94 +1,63 @@
-use crate::bundled;
-use crate::utils::console;
+use crate::utils;
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
-use shared::config::{Config, Egress, HealthCheck, Scaling, Service, TlsTermination};
+use shared::config::{Egress, HealthCheck, NitrumConfig, Scaling, Service, TlsTermination};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct InitArgs {
     /// Project name; creates a subdirectory with this name in the current directory
-    #[arg(value_name = "NAME")]
-    pub name: Option<String>,
+    #[arg(value_name = "NAME", default_value = "nitrum-hello")]
+    pub name: String,
 }
 
-pub async fn run(args: InitArgs) {
+pub async fn run(args: InitArgs) -> Result<()> {
     let cwd = env::current_dir().expect("current directory");
-    let directory = match &args.name {
-        Some(name) => cwd.join(name),
-        None => cwd,
-    };
+    let directory = cwd.join(&args.name);
 
-    if directory.exists() && directory.read_dir().unwrap().next().is_some() {
-        eprintln!("Directory is not empty");
-        std::process::exit(1);
+    if directory.exists()
+        && directory
+            .read_dir()
+            .with_context(|| format!("read {}", directory.display()))?
+            .next()
+            .is_some()
+    {
+        bail!("Directory is not empty");
     }
 
-    fs::create_dir_all(directory.join("src")).unwrap();
+    fs::create_dir_all(directory.join("src"))
+        .with_context(|| format!("create {}", directory.join("src").display()))?;
 
-    let spinner = console::style_spinner(
+    let spinner = utils::style_spinner(
         ProgressBar::new_spinner(),
         "Writing bundled sample project…",
     );
 
-    let nitrum_name = args.name.as_deref();
-    let writes: &[(&str, &str, PathBuf)] = &[
-        (
-            "main.js",
-            bundled::sample_main_js(),
-            directory.join("src/main.js"),
-        ),
-        (
-            "package.json",
-            bundled::sample_package_json(),
-            directory.join("package.json"),
-        ),
-        (
-            "Dockerfile",
-            bundled::sample_dockerfile(),
-            directory.join("Dockerfile"),
-        )
+    let writes: Vec<(&str, String)> = vec![
+        ("src/main.js", sample_main_js().to_string()),
+        ("package.json", sample_package_json(&args.name)?),
+        ("Dockerfile", sample_dockerfile().to_string()),
+        ("nitrum.toml", sample_nitro_config(&args.name)),
     ];
 
-    for (label, contents, dest) in writes {
-        spinner.set_message(format!("Writing {label}…"));
+    for (relative_path, contents) in writes {
+        spinner.set_message(format!("Writing {relative_path}…"));
+        let dest = directory.join(relative_path);
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).unwrap_or_else(|e| panic!("create {}: {e}", parent.display()));
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        fs::write(dest, contents).unwrap_or_else(|e| panic!("write {label}: {e}"));
+        fs::write(dest, contents).with_context(|| format!("write {}", relative_path))?;
     }
-
-    spinner.set_message("Writing nitrum.toml…");
-    let nitrum_path = directory.join("nitrum.toml");
-    fs::write(
-        &nitrum_path,
-        nitrum_toml_for_init(nitrum_name.unwrap_or("nitrum-hello")),
-    )
-    .unwrap_or_else(|e| panic!("write nitrum.toml: {e}"));
-
-    if let Some(name) = &args.name {
-        let package_json_path = directory.join("package.json");
-        let raw = fs::read_to_string(&package_json_path).expect("read package.json");
-        let mut value: Value = serde_json::from_str(&raw).expect("parse package.json");
-        if let Value::Object(map) = &mut value {
-            map.insert("name".to_string(), Value::String(name.clone()));
-        }
-        fs::write(
-            &package_json_path,
-            serde_json::to_string_pretty(&value).expect("serialize package.json"),
-        )
-        .expect("write package.json");
-    }
-
     spinner.finish_with_message("Project initialized.");
+
+    Ok(())
 }
 
-/// [`Config`] defaults plus hello-sample egress (`enabled = true`, `httpbin\.org$`).
-fn nitrum_toml_for_init(name: &str) -> String {
-    let config = Config {
+fn sample_nitro_config(name: &str) -> String {
+    let config = NitrumConfig {
         name: name.to_string(),
         service: Service::default(),
         health_check: HealthCheck::default(),
@@ -106,4 +75,37 @@ fn nitrum_toml_for_init(name: &str) -> String {
          \n\
          {body}"
     )
+}
+
+fn sample_main_js() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/src/main.js"
+    ))
+}
+
+fn sample_package_json(name: &str) -> Result<String> {
+    let mut value: Value = serde_json::from_str(sample_package_json_template())
+        .context("parse sample package.json")?;
+    if let Value::Object(map) = &mut value {
+        map.insert("name".to_string(), Value::String(name.to_string()));
+    }
+    serde_json::to_string_pretty(&value).context("serialize package.json")
+}
+
+fn sample_package_json_template() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/package.json"
+    ))
+}
+
+fn sample_dockerfile() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/Dockerfile"
+    ))
 }

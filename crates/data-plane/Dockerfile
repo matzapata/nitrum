@@ -78,6 +78,5 @@ COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /
 RUN chmod +x /app/data-plane
 
 EXPOSE 443
-EXPOSE 9090
 
 CMD ["/app/data-plane"]

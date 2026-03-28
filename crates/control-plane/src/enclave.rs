@@ -9,6 +9,8 @@ use tracing::info;
 
 const NITRO_CLI: &str = "nitro-cli";
 const EIF_PATH: &str = "/app/enclave.eif";
+
+// TODO: config, this should come from app args, which cli will load to cloudformation stack
 const ENCLAVE_CID: &str = "16";
 const NUM_CPUS: &str = "2";
 const RAM_SIZE_MIB: &str = "4320";
@@ -21,7 +23,6 @@ pub enum EnclaveError {
     SendDebugLogsFailed(String),
 }
 
-// TODO: cleanup
 impl From<std::io::Error> for EnclaveError {
     fn from(e: std::io::Error) -> Self {
         EnclaveError::CommandFailed(e.to_string())

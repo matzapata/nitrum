@@ -1,12 +1,11 @@
 //! Delete the CloudFormation stack and EIF S3 bucket created by `nitrum deploy`.
 
+use anyhow::Result;
 use clap::Args;
-use indicatif::ProgressBar;
 use std::env;
 use std::path::PathBuf;
-use tracing::info;
-
-use crate::utils::{aws, console, project};
+use shared::config::NitrumConfig;
+use crate::{cloud::EnclaveCloudStack, utils};
 
 #[derive(Args)]
 pub struct DestroyArgs {
@@ -16,64 +15,46 @@ pub struct DestroyArgs {
     /// Skip the confirmation prompt (for scripts)
     #[arg(long)]
     pub force: bool,
+    /// AWS region (overrides `AWS_REGION` / `AWS_DEFAULT_REGION`)
+    #[arg(long, value_name = "REGION")]
+    pub region: Option<String>,
 }
 
-pub async fn run(args: DestroyArgs) {
-    info!("nitrum destroy: starting");
+pub async fn run(args: DestroyArgs) -> Result<()> {
+    // Load config
     let root = args
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    info!(project_root = %root.display(), "project directory");
-    let cfg_path = root.join("nitrum.toml");
-    let config = match shared::config::try_load(&cfg_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-    let bucket = match project::derived_eif_bucket_name(&config.name) {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    };
+    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
+    
+    // Create CloudFormation stack
     let stack_name = config.name;
-    info!(%stack_name, %bucket, "stack and bucket from nitrum.toml");
+    let cloud_stack = EnclaveCloudStack::new(
+        root.clone(),
+        stack_name.clone(),
+        args.region.clone(),
+    )
+    .await?;
 
+    // Confirm deletion
+    let bucket = cloud_stack.bucket_name().to_string();
+    let region_display = cloud_stack.region_display();
     if !args.force
-        && !console::confirm(&format!(
-            "Delete CloudFormation stack `{stack_name}` and empty + delete S3 bucket `{bucket}`?"
+        && !utils::confirm(&format!(
+            "Delete CloudFormation stack `{stack_name}` and empty + delete S3 bucket `{bucket}` (region {region_display})?"
         ))
     {
-        return;
+        return Ok(());
     }
 
-    let sdk = aws::sdk_config(None).await;
+    // Delete CloudFormation stack
+    let destroy_success = format!("Stack `{stack_name}` deleted.");
+    utils::with_spinner(
+        "Deleting stack and S3 bucket (this may take a while)…",
+        &destroy_success,
+        cloud_stack.destroy(),
+    )
+    .await?;
 
-    let spinner = console::style_spinner(
-        ProgressBar::new_spinner(),
-        "Deleting CloudFormation stack (this may take several minutes)…",
-    );
-    match aws::cloudformation_delete_stack_wait(&sdk, &stack_name).await {
-        Ok(()) => spinner.finish_with_message(format!("Stack `{stack_name}` deleted.")),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
-
-    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Deleting S3 EIF bucket…");
-    match aws::s3_empty_and_delete_bucket(&sdk, &bucket).await {
-        Ok(()) => spinner.finish_with_message(format!("Bucket `{bucket}` removed.")),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
-
-    info!(%stack_name, %bucket, "nitrum destroy: finished");
+    Ok(())
 }

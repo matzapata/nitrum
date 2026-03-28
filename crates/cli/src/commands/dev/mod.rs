@@ -2,6 +2,7 @@ mod down;
 mod logs;
 mod up;
 
+use anyhow::Result;
 use clap::{Args, Subcommand};
 
 #[derive(Args)]
@@ -20,7 +21,7 @@ pub enum DevCommand {
     Logs(logs::LogsArgs),
 }
 
-pub async fn run(args: DevArgs) {
+pub async fn run(args: DevArgs) -> Result<()> {
     match args.command {
         DevCommand::Up(a) => up::run(a).await,
         DevCommand::Down(a) => down::run(a).await,

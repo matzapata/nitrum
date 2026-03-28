@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use aws_credential_types::provider::SharedCredentialsProvider;
-use shared::config::Config as NitrumConfig;
+use shared::config::NitrumConfig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -63,7 +63,7 @@ impl RuntimeConfig {
     /// There is no generic egress probe here: on Nitro, API traffic uses the TAP↔gvproxy path;
     /// probing arbitrary hosts such as `httpbin.org` fails in many setups and would block startup for no benefit.
     pub async fn load(config_path: &Path) -> Result<Self> {
-        let nitrum = shared::config::load(config_path);
+        let nitrum = NitrumConfig::try_from(config_path)?;
 
         let imds_latest_base_url = std::env::var("NITRUM_IMDS_BASE_URL")
             .unwrap_or_else(|_| DEFAULT_IMDS_LATEST_BASE_URL.to_string())

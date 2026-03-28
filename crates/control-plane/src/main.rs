@@ -31,7 +31,7 @@ async fn main() {
     });
     info!("networking up, waiting for shutdown signal");
 
-    // TODO: tokio spawn
+    // TODO: tokio spawn, also restart on crash
     let _enclave = Enclave::run(args.debug_mode).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "failed to start enclave");
     });

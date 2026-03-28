@@ -621,7 +621,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 443:443 -p 9090:9090 -v /usr/bin/enclave.eif:/app/enclave.eif matzapata/nitrum-control-plane:${ControlPlaneImageTag} /app/control-plane --debug-mode
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif matzapata/nitrum-control-plane:${ControlPlaneImageTag} /app/control-plane --debug-mode
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]

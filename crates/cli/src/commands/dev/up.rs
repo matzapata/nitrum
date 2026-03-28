@@ -1,9 +1,9 @@
+use anyhow::Result;
 use clap::Args;
-use indicatif::ProgressBar;
+use shared::config::NitrumConfig;
 use std::env;
 
-use crate::constants;
-use crate::utils::{compose, console, docker, project};
+use crate::{utils, local::EnclaveLocalStack};
 
 #[derive(Args)]
 pub struct UpArgs {
@@ -12,45 +12,21 @@ pub struct UpArgs {
     pub root: Option<std::path::PathBuf>,
 }
 
-pub async fn run(args: UpArgs) {
+pub async fn run(args: UpArgs) -> Result<()> {
+    // Load config
     let root = args
         .root
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
+    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
-    let cfg = match project::load_project_config(&root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    };
-    let dev_image = project::enclave_image_dev(&cfg.name);
-
-    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Building enclave…");
-    match docker::build_enclave_image(
-        &root,
-        constants::ENCLAVE_DEV_BASE_IMAGE,
-        &dev_image,
+    // Start local stack
+    let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
+    utils::with_spinner(
+        "Starting local stack…",
+        "Local stack started.",
+        local_stack.up(),
     )
-    .await
-    {
-        Ok(()) => spinner.finish_with_message("Enclave built."),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
-
-    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Starting local stack…");
-    match compose::docker_compose(&root, &dev_image, &["up", "-d"]).await {
-        Ok(()) => spinner.finish_with_message("Local stack started."),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
+    .await?;
 
     println!();
     println!("Stack is running.");
@@ -62,4 +38,6 @@ pub async fn run(args: UpArgs) {
     println!();
     println!("  If nitrum.local does not resolve, add to /etc/hosts: 127.0.0.1 nitrum.local");
     println!();
+    
+    Ok(())
 }

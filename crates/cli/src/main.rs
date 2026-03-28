@@ -1,10 +1,12 @@
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-pub mod bundled;
+pub mod artifact;
+pub mod cloud;
 pub mod commands;
-pub mod constants;
 pub mod utils;
+pub mod constants;
+pub mod local;
 
 use commands::{build, deploy, describe, destroy, dev, init};
 
@@ -41,12 +43,17 @@ async fn main() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let cli = Cli::parse();
-    match cli.command {
+    let result = match cli.command {
         Commands::Init(args) => init::run(args).await,
         Commands::Build(args) => build::run(args).await,
         Commands::Dev(args) => dev::run(args).await,
         Commands::Deploy(args) => deploy::run(args).await,
         Commands::Describe(args) => describe::run(args).await,
         Commands::Destroy(args) => destroy::run(args).await,
+    };
+
+    if let Err(e) = result {
+        eprintln!("{e:#}");
+        std::process::exit(1);
     }
 }

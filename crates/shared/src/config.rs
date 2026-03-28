@@ -1,3 +1,21 @@
+use std::path::PathBuf;
+
+#[derive(Debug, thiserror::Error)]
+pub enum NitrumConfigError {
+    #[error("failed to read config file {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse config file {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+}
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct HealthCheck {
     /// Path to the health check endpoint.
@@ -102,8 +120,7 @@ impl Default for Service {
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct Config {
-    /// Project slug: CloudFormation `EnvironmentName`, stack name, bucket `nitrum-{name}` (SSM via `NITRUM_SSM_PREFIX` or `/nitrum/…` defaults).
+pub struct NitrumConfig {
     pub name: String,
     pub service: Service,
     pub health_check: HealthCheck,
@@ -112,14 +129,18 @@ pub struct Config {
     pub egress: Egress,
 }
 
-/// Load `nitrum.toml` without panicking (for CLIs and tools).
-pub fn try_load(path: &std::path::Path) -> Result<Config, String> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read config file {}: {e}", path.display()))?;
-    toml::from_str(&contents).map_err(|e| format!("failed to parse config file {}: {e}", path.display()))
-}
+impl TryFrom<&std::path::Path> for NitrumConfig {
+    type Error = NitrumConfigError;
 
-pub fn load(path: &std::path::Path) -> Config {
-    try_load(path).unwrap_or_else(|e| panic!("{e}"))
+    fn try_from(path: &std::path::Path) -> Result<Self, Self::Error> {
+        let path_buf = path.to_path_buf();
+        let contents = std::fs::read_to_string(path).map_err(|source| NitrumConfigError::Read {
+            path: path_buf.clone(),
+            source,
+        })?;
+        toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
+            path: path_buf,
+            source,
+        })
+    }
 }
-

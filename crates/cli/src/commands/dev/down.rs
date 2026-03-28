@@ -1,8 +1,9 @@
+use anyhow::Result;
 use clap::Args;
-use indicatif::ProgressBar;
+use shared::config::NitrumConfig;
 use std::env;
 
-use crate::utils::{compose, console, project};
+use crate::{utils, local::EnclaveLocalStack};
 
 #[derive(Args)]
 pub struct DownArgs {
@@ -11,27 +12,21 @@ pub struct DownArgs {
     pub root: Option<std::path::PathBuf>,
 }
 
-pub async fn run(args: DownArgs) {
+pub async fn run(args: DownArgs) -> Result<()> {
+    // Load config
     let root = args
         .root
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
+    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
+    
+    // Stop local stack
+    let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
+    utils::with_spinner(
+        "Stopping local stack…",
+        "Local stack stopped.",
+        local_stack.down(),
+    )
+    .await?;
 
-    let cfg = match project::load_project_config(&root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    };
-    let dev_image = project::enclave_image_dev(&cfg.name);
-
-    let spinner = console::style_spinner(ProgressBar::new_spinner(), "Stopping local stack…");
-    match compose::docker_compose(&root, &dev_image, &["down"]).await {
-        Ok(()) => spinner.finish_with_message("Local stack stopped."),
-        Err(e) => {
-            spinner.finish_and_clear();
-            eprintln!("{e:#}");
-            std::process::exit(1);
-        }
-    }
+    Ok(())
 }

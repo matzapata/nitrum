@@ -152,6 +152,11 @@ services:
   enclave:
     image: ${ENCLAVE_IMAGE}
     pull_policy: never
+    build:
+      context: ..
+      dockerfile: ../Dockerfile
+      args:
+        DATA_PLANE_IMAGE: ${DATA_PLANE_IMAGE}
     hostname: nitrum.local
     ports:
       - "443:443"
