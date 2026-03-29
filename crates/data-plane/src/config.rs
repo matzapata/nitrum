@@ -13,8 +13,8 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::constants::{
-    app_env_parameter_name, data_plane_dynamodb_parameter_name, data_plane_kms_parameter_name,
-    DEFAULT_IMDS_LATEST_BASE_URL,
+    DEFAULT_IMDS_LATEST_BASE_URL, app_env_parameter_name, data_plane_dynamodb_parameter_name,
+    data_plane_kms_parameter_name,
 };
 use crate::utils::imds::{EnclaveProvider, ImdsClient};
 use crate::utils::ssm::SsmParameters;
@@ -117,23 +117,18 @@ impl RuntimeConfig {
         info!("loading KMS config");
         let kms_endpoint = std::env::var("NITRUM_KMS_ENDPOINT_URL").ok();
         let kms_path = data_plane_kms_parameter_name(&nitrum.name);
-        let kms_key_id = ssm
-            .get_parameter(&kms_path)
-            .await
-            .with_context(|| {
-                format!(
-                    "SSM kms_key_id (expected {kms_path}, e.g. /nitrum/myapp/data-plane/kms_key_id)"
-                )
-            })?;
+        let kms_key_id = ssm.get_parameter(&kms_path).await.with_context(|| {
+            format!(
+                "SSM kms_key_id (expected {kms_path}, e.g. /nitrum/myapp/data-plane/kms_key_id)"
+            )
+        })?;
 
         info!("loading app env from SSM");
         let app_env_path = app_env_parameter_name(&nitrum.name);
         let user_env = ssm
             .get_parameters_by_path_recursive(&app_env_path)
             .await
-            .with_context(|| {
-                format!("SSM GetParametersByPath for app env ({app_env_path})")
-            })?;
+            .with_context(|| format!("SSM GetParametersByPath for app env ({app_env_path})"))?;
 
         info!("loading listen addresses from env");
         let ingress_listen_addr: SocketAddr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
