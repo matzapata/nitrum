@@ -18,3 +18,18 @@ pub const ENV_ACME_DIRECTORY_URL: &str = "NITRUM_ACME_DIRECTORY_URL";
 ///
 /// **Local dev:** set `NITRUM_IMDS_BASE_URL` (e.g. `http://imds:1338/latest` for docker-compose metadata mock).
 pub const DEFAULT_IMDS_LATEST_BASE_URL: &str = "http://169.254.169.254/latest";
+
+/// SSM path for KMS key ID under `/nitrum/{project name}/data-plane/kms_key_id`.
+pub fn data_plane_kms_parameter_name(project_name: &str) -> String {
+    format!("/nitrum/{project_name}/data-plane/kms_key_id")
+}
+
+/// SSM path for DynamoDB table name under `/nitrum/{project name}/data-plane/dynamodb_table`.
+pub fn data_plane_dynamodb_parameter_name(project_name: &str) -> String {
+    format!("/nitrum/{project_name}/data-plane/dynamodb_table")
+}
+
+/// SSM path for app env under `/nitrum/{project name}/env/`.
+pub fn app_env_parameter_name(project_name: &str) -> String {
+    format!("/nitrum/{project_name}/env/")
+}

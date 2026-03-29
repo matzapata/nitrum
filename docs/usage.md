@@ -10,6 +10,7 @@ This guide summarizes the **nitrum** CLI, the configuration file, and what you n
 | `nitrum build`, `nitrum describe` | [Docker](https://docs.docker.com/get-docker/) |
 | `nitrum dev` | Docker with Compose support |
 | `nitrum deploy` / `nitrum destroy` | [AWS credentials](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html) and permissions for CloudFormation, S3, and related resources |
+| `nitrum env` | AWS credentials with **SSM** `PutParameter` / `GetParameter` / `DeleteParameter` on `/nitrum/{name}/env/*` (`name` from `nitrum.toml`, same as CloudFormation **`ProjectName`**) |
 
 Install the CLI from a release binary or from the repository root:
 
@@ -59,6 +60,16 @@ The **`control_plane`** field in `nitrum.toml` is the full Docker image referenc
 
 Tears down deployed AWS resources (see command help for options such as retaining KMS/SSM data).
 
+### `nitrum env`
+
+Manage **application** environment variables as **SSM Parameter Store** `SecureString` values under `/nitrum/{name}/env/{KEY}`, where **`name`** is the **`name`** field in `nitrum.toml` (same value as the CloudFormation stack name and **`ProjectName`** parameter).
+
+- **`nitrum env set KEY VALUE`** — create or overwrite a parameter.
+- **`nitrum env get`** — list every app env parameter as `KEY=value` (decrypted; sensitive).
+- **`nitrum env delete KEY`** — remove the parameter.
+
+The **data-plane** loads every parameter under that path at startup (unless `NITRUM_APP_ENV_SSM_PREFIX` is set to empty to skip) and passes them to the **user process**, overlaying the parent environment.
+
 ### `nitrum describe`
 
 Runs **`nitro-cli describe-eif`** in Docker against an EIF path (wrapper for inspecting measurements and metadata).
@@ -67,7 +78,7 @@ Runs **`nitro-cli describe-eif`** in Docker against an EIF path (wrapper for ins
 
 Options are defined in the `shared` crate; the sample project comments point to the source. Common sections:
 
-- **`name`** — project identifier; used for stack name, S3 bucket, and local image tags.
+- **`name`** — project identifier; CloudFormation stack name and **`ProjectName`** match **`name`**; S3 bucket is **`nitrum-{name}`**; SSM paths use **`/nitrum/{name}/…`** (data-plane infra and app env).
 - **`data_plane`** — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for **`nitrum build`** and **`nitrum dev`** (base containing the in-enclave data-plane).
 - **`control_plane`** — full image ref for the host control-plane on **`nitrum deploy`** (CloudFormation).
 - **`[service]`** — listen port for your app.

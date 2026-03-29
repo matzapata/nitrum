@@ -1043,6 +1043,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-cloudformation",
  "aws-sdk-s3",
+ "aws-sdk-ssm",
  "bollard",
  "bytes",
  "clap",

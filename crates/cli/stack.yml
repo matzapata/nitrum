@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 80 and 443), KMS, DynamoDB,
-  SSM parameters /nitrum/kms_key_id and /nitrum/dynamodb_table (data-plane defaults), and VPC endpoints.
-  EnvironmentName is the slug for DynamoDB table, KMS alias, log group, tags, and launch template.
-  Only one stack per account/region should manage those two SSM names. Retain defaults false.
+  SSM parameters under /nitrum/{ProjectName}/data-plane/ (KMS key id + DynamoDB table) and /nitrum/{ProjectName}/env/ (app secrets), plus VPC endpoints.
+  ProjectName: stack name, DynamoDB table, KMS alias, log group, tags, launch template, and SSM layout.
+  Retain defaults false.
   Upload the EIF to S3; set EifVersionLabel when you publish a new EIF to refresh instances.
   Two AZs, single NAT, NLB security group and cross-zone load balancing enabled.
 
@@ -29,14 +29,13 @@ Metadata:
 # Parameters
 # ─────────────────────────────────────────────────────────────────────────────
 Parameters:
-  EnvironmentName:
+  ProjectName:
     Type: String
-    Default: nitrum-dev
     AllowedPattern: '^[a-z][a-z0-9-]{2,127}$'
     Description: >
-      Lowercase slug per environment (e.g. hello-staging, myproject-staging). Used for DynamoDB
-      table name, KMS alias, CloudWatch log group, tags, and launch template name.
-      SSM keys for the data-plane are fixed at /nitrum/kms_key_id and /nitrum/dynamodb_table.
+      Project name used to determine CloudFormation stack name, DynamoDB table name, KMS alias,
+      CloudWatch log group, tags, launch template, and SSM paths
+      /nitrum/{ProjectName}/data-plane/… and /nitrum/{ProjectName}/env/….
 
   Retain:
     Type: String
@@ -130,7 +129,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} VPC"
+          Value: !Sub "${ProjectName} VPC"
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -141,7 +140,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Public Subnet (AZ1)"
+          Value: !Sub "${ProjectName} Public Subnet (AZ1)"
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -152,7 +151,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Public Subnet (AZ2)"
+          Value: !Sub "${ProjectName} Public Subnet (AZ2)"
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -162,7 +161,7 @@ Resources:
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Private Subnet (AZ1)"
+          Value: !Sub "${ProjectName} Private Subnet (AZ1)"
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -172,14 +171,14 @@ Resources:
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Private Subnet (AZ2)"
+          Value: !Sub "${ProjectName} Private Subnet (AZ2)"
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Internet Gateway"
+          Value: !Sub "${ProjectName} Internet Gateway"
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -194,7 +193,7 @@ Resources:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} NAT EIP"
+          Value: !Sub "${ProjectName} NAT EIP"
 
   NatGateway:
     Type: AWS::EC2::NatGateway
@@ -203,7 +202,7 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} NAT Gateway"
+          Value: !Sub "${ProjectName} NAT Gateway"
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -211,7 +210,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Public Routes"
+          Value: !Sub "${ProjectName} Public Routes"
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -239,7 +238,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Private Routes"
+          Value: !Sub "${ProjectName} Private Routes"
 
   PrivateRoute:
     Type: AWS::EC2::Route
@@ -264,8 +263,8 @@ Resources:
   VpcEndpointSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "${EnvironmentName} VPC Endpoints"
-      GroupDescription: !Sub "HTTPS from VPC CIDR to interface endpoints (${EnvironmentName})"
+      GroupName: !Sub "${ProjectName} VPC Endpoints"
+      GroupDescription: !Sub "HTTPS from VPC CIDR to interface endpoints (${ProjectName})"
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -274,7 +273,7 @@ Resources:
           CidrIp: 10.0.0.0/16
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} VPC Endpoint SG"
+          Value: !Sub "${ProjectName} VPC Endpoint SG"
 
   KMSEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -326,8 +325,8 @@ Resources:
   NitroNLBSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "${EnvironmentName} NLB"
-      GroupDescription: !Sub "Network Load Balancer - HTTP/HTTPS from internet, egress to targets (${EnvironmentName})"
+      GroupName: !Sub "${ProjectName} NLB"
+      GroupDescription: !Sub "Network Load Balancer - HTTP/HTTPS from internet, egress to targets (${ProjectName})"
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -355,20 +354,20 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} NLB Security Group"
+          Value: !Sub "${ProjectName} NLB Security Group"
 
   NitroInstanceSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "${EnvironmentName} Nitro Instance"
-      GroupDescription: !Sub "Nitro Enclave EC2 instances - HTTP/HTTPS, NLB, and VPC access (${EnvironmentName})"
+      GroupName: !Sub "${ProjectName} Nitro Instance"
+      GroupDescription: !Sub "Nitro Enclave EC2 instances - HTTP/HTTPS, NLB, and VPC access (${ProjectName})"
       VpcId: !Ref VPC
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName} Instance Security Group"
+          Value: !Sub "${ProjectName} Instance Security Group"
 
   NitroSGIngressVpc:
     Type: AWS::EC2::SecurityGroupIngress
@@ -466,7 +465,7 @@ Resources:
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      Description: !Sub "${EnvironmentName} | enclave CMK (GenerateDataKey + attested Decrypt)"
+      Description: !Sub "${ProjectName} | enclave CMK (GenerateDataKey + attested Decrypt)"
       EnableKeyRotation: !If [RetainData, true, false]
       # Account root in the key policy lets this account use IAM policies to grant principals
       # (e.g. InstanceRole) access to the key — no per-role statement needed, which avoids a
@@ -485,7 +484,7 @@ Resources:
   EnclaveKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub "alias/${EnvironmentName}-enclave"
+      AliasName: !Sub "alias/${ProjectName}-enclave"
       TargetKeyId: !Ref EnclaveKey
 
   # ── DynamoDB Table ───────────────────────────────────────────────────────────
@@ -494,7 +493,7 @@ Resources:
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      TableName: !Ref EnvironmentName
+      TableName: !Ref ProjectName
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -514,20 +513,20 @@ Resources:
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      Name: /nitrum/kms_key_id
+      Name: !Sub "/nitrum/${ProjectName}/data-plane/kms_key_id"
       Type: String
       Value: !Ref EnclaveKey
-      Description: !Sub "KMS key ID for Nitrum data-plane (stack ${EnvironmentName})"
+      Description: !Sub "KMS key ID for Nitrum data-plane (${ProjectName})"
 
   NitrumDynamoTableParam:
     Type: AWS::SSM::Parameter
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      Name: /nitrum/dynamodb_table
+      Name: !Sub "/nitrum/${ProjectName}/data-plane/dynamodb_table"
       Type: String
       Value: !Ref EnclaveTable
-      Description: !Sub "DynamoDB table name for Nitrum data-plane (stack ${EnvironmentName})"
+      Description: !Sub "DynamoDB table name for Nitrum data-plane (${ProjectName})"
 
   # ── CloudWatch Log Group ─────────────────────────────────────────────────────
   EnclaveLogGroup:
@@ -535,7 +534,7 @@ Resources:
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      LogGroupName: !Sub "/nitrum/${EnvironmentName}/enclave"
+      LogGroupName: !Sub "/nitrum/${ProjectName}/enclave"
       RetentionInDays: 7
 
   # ── IAM (CloudFormation-generated physical names) ────────────────────────────
@@ -596,9 +595,15 @@ Resources:
                 Action:
                   - ssm:GetParameter
                   - ssm:GetParameters
+                  - ssm:GetParametersByPath
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nitrum/kms_key_id"
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nitrum/dynamodb_table"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nitrum/${ProjectName}/*"
+
+              - Sid: SsmSecureStringKms
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm"
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -609,7 +614,7 @@ Resources:
   NitroLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
-      LaunchTemplateName: !Sub "${EnvironmentName}-${EifVersionLabel}"
+      LaunchTemplateName: !Sub "${ProjectName}-${EifVersionLabel}"
       LaunchTemplateData:
         ImageId: !Ref LatestAmazonLinux2023Ami
         InstanceType: m6i.xlarge
@@ -723,7 +728,7 @@ Resources:
       HealthCheckGracePeriod: 300
       Tags:
         - Key: Name
-          Value: !Ref EnvironmentName
+          Value: !Ref ProjectName
           PropagateAtLaunch: true
 
   # ── Network Load Balancer ────────────────────────────────────────────────────
@@ -739,7 +744,7 @@ Resources:
           Value: "true"
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName}-nlb"
+          Value: !Sub "${ProjectName}-nlb"
 
   NitroTargetGroup:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
@@ -756,7 +761,7 @@ Resources:
       UnhealthyThresholdCount: 5
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName}-tg"
+          Value: !Sub "${ProjectName}-tg"
 
   # TCP 80 to instances for ACME HTTP-01. Health check uses 443 so targets stay healthy when ACME
   # is disabled (nothing may listen on enclave :80 in that case).
@@ -775,7 +780,7 @@ Resources:
       UnhealthyThresholdCount: 5
       Tags:
         - Key: Name
-          Value: !Sub "${EnvironmentName}-tg-http"
+          Value: !Sub "${ProjectName}-tg-http"
 
   NitroHTTPSListener:
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
@@ -801,14 +806,14 @@ Resources:
 # Outputs
 # ─────────────────────────────────────────────────────────────────────────────
 Outputs:
-  EnvironmentName:
+  ProjectName:
     Description: Environment slug (DynamoDB table name, log group path segment, tags)
-    Value: !Ref EnvironmentName
+    Value: !Ref ProjectName
 
   NitrumSsmPrefix:
     Description: >
-      Prefix for optional NITRUM_SSM_PREFIX builds; data-plane defaults use /nitrum/kms_key_id and /nitrum/dynamodb_table without a per-env prefix.
-    Value: "/nitrum"
+      Data-plane infra SSM path prefix (/nitrum/{ProjectName}/data-plane/).
+    Value: !Sub "/nitrum/${ProjectName}/data-plane"
 
   NLBDnsName:
     Description: >

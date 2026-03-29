@@ -1,4 +1,5 @@
 dockerhub_user := "matzapata"
+tag := "v0.1.0"
 
 # ── dev tools ─────────────────────────────────────────
 
@@ -11,55 +12,61 @@ lint:
 format:
     cargo fmt --all
 
-# ── Docker builds ───────────────────────────────────
+# ── Nitro CLI ───────────────────────────────────
 
-build-nitro-cli tag="latest" no_cache="":
+build-nitro-cli no_cache="":
     docker build \
         --platform linux/amd64 \
-        -f infra/docker/nitro-cli.dockerfile \
+        -f crates/cli/Dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-nitro-cli:{{tag}} \
         .
 
-push-nitro-cli tag="latest":
+push-nitro-cli:
     docker push {{dockerhub_user}}/nitrum-nitro-cli:{{tag}}
 
-build-control-plane tag="latest" no_cache="":
+# ── Control Plane ───────────────────────────────────
+
+build-control-plane no_cache="":
     docker build \
         --platform linux/amd64 \
-        {{ if tag == "dev" { "-f infra/docker/control-plane.dockerfile" } else { "-f infra/docker/control-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        -f crates/control-plane/Dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-control-plane:{{tag}} \
         .
 
-push-control-plane tag="latest":
+push-control-plane:
     docker push {{dockerhub_user}}/nitrum-control-plane:{{tag}}
 
-build-data-plane tag="latest" no_cache="":
+# ── Data Plane ───────────────────────────────────
+
+build-data-plane no_cache="":
     docker build \
         --platform linux/amd64 \
-        -f infra/docker/data-plane.dockerfile \
+        -f crates/data-plane/Dockerfile \
         --build-arg FEATURES=enclave \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}} \
         .
 
-build-dev-data-plane no_cache="":
-    docker build \
-        --platform linux/amd64 \
-        -f infra/docker/data-plane.dockerfile \
-        --build-arg FEATURES=pebble \
-        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
-        -t {{ dockerhub_user }}/nitrum-data-plane:dev \
-        .
 
-push-data-plane tag="latest":
+push-data-plane:
     docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}
 
-# ── Push ──────────────────────────────────────────────
+# ── Data Plane Dev ───────────────────────────────────
 
-push-all tag="latest":
-    just push-control-plane {{tag}}
-    just push-data-plane {{tag}}
-    just push-nitro-cli {{tag}} 
+build-data-plane-dev no_cache="":
+    docker build \
+        --platform linux/amd64 \
+        -f crates/data-plane/Dockerfile \
+        --build-arg FEATURES=pebble \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}}-dev \
+        .
+
+push-data-plane-dev:
+    docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}-dev
+
+
+
     

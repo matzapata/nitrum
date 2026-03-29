@@ -1,11 +1,14 @@
 //! Run the user process and forward its stdout/stderr to the data-plane logs.
 
+use anyhow::Result;
+use std::collections::HashMap;
 use std::process::Stdio;
 use tracing::info;
 
 /// Spawn the user command and stream its stdout/stderr to the tracing log (target "app").
+/// `child_env` is the child's full environment (e.g. [`RuntimeConfig::user_env`](crate::config::RuntimeConfig::structfield.user_env) from SSM only).
 /// Returns the process exit code when the child exits.
-pub async fn run(command: &[String]) -> std::io::Result<i32> {
+pub async fn run(command: &[String], child_env: &HashMap<String, String>) -> Result<i32> {
     if command.is_empty() {
         return Ok(0);
     }
@@ -18,6 +21,8 @@ pub async fn run(command: &[String]) -> std::io::Result<i32> {
 
     let mut child = tokio::process::Command::new(program)
         .args(args)
+        .env_clear()
+        .envs(child_env)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

@@ -242,8 +242,7 @@ fn validate_docker_image_ref(value: &str, key: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Rules for [`NitrumConfig::name`]: CloudFormation `EnvironmentName` in `stack.yml` (`^[a-z][a-z0-9-]{2,127}$`)
-/// and S3 bucket `nitrum-{name}` length 3–63 (see CLI deploy).
+/// Rules for [`NitrumConfig::name`]: Must be compatible with CloudFormation, SSM, Docker and S3
 pub fn validate_project_name(name: &str) -> Result<(), String> {
     if name != name.trim() {
         return Err("`name` must not have leading or trailing whitespace".to_string());
@@ -257,10 +256,7 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
         return Err("`name` must not be empty".to_string());
     };
     if !matches!(first, 'a'..='z') {
-        return Err(
-            "`name` must start with a lowercase letter (a–z); required for `nitrum deploy` (CloudFormation EnvironmentName)"
-                .to_string(),
-        );
+        return Err("`name` must start with a lowercase letter (a-z)".to_string());
     }
 
     let mut rest_len = 0usize;
@@ -274,15 +270,8 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
     }
     if !(2..=127).contains(&rest_len) {
         return Err(format!(
-            "`name` must be 3–128 characters (one leading letter plus 2–127 more); got {} character(s) after the first",
+            "`name` must be 3-128 characters (one leading letter plus 2-127 more); got {} character(s) after the first",
             rest_len
-        ));
-    }
-
-    let bucket = format!("nitrum-{name}");
-    if !(3..=63).contains(&bucket.len()) {
-        return Err(format!(
-            "S3 bucket `{bucket}` (nitrum-{{name}}) must be 3–63 characters; shorten `name`"
         ));
     }
 

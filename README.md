@@ -30,6 +30,7 @@ On the **parent EC2 instance**, the **control-plane** starts **gvproxy** (listen
 - **`nitrum build`** — Enclave image and **`enclave.eif`** via Docker and **nitro-cli**.
 - **`nitrum dev`** — Local **Docker Compose** stack.
 - **`nitrum deploy` / `nitrum destroy`** — **S3** EIF artifact and **CloudFormation** stack.
+- **`nitrum env set|get|delete`** — Application secrets in **SSM** (`SecureString` under `/nitrum/{name}/env/` for `nitrum.toml` **`name`**); the **data-plane** loads them at startup and injects them into the **user process** environment (overlay on the parent env).
 - **`nitrum describe`** — **EIF** measurements/metadata via **nitro-cli** in Docker.
 
 Install from the repo: `cargo install --path crates/cli` (binary **`nitrum`**; Cargo package name is still **`cli`** — use `cargo run -p cli -- …` without installing). Command reference: [docs/usage.md](docs/usage.md).
@@ -69,17 +70,19 @@ Nitrum is **early-stage**. APIs, defaults, and CloudFormation resources may chan
 
 <!-- 
 TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-multi-party-crypto-wallet-with-aws-nitro-enclave/blob/main/README.md
+- [ ] Option to override project name in cli, so we can do deploy --proy-name ...-staging
 - [ ] Control plane resilience: watchdog, restart if killed, clearer logs, health endpoints
+- [x] Env vars support (SSM params via `nitrum env`, data-plane startup load)
+- [ ] Enclave / control-plane logs to CloudWatch
+- [ ] Networking cleanup
+- [ ] CloudFormation: PCR0 / KMS policy alignment documented and verified
+- [ ] Reproducible builds
+- [ ] Js sdk?
+- [ ] Add samples for MCP / MPC / etc
+- [ ] Egress allowlist enforced end-to-end (`[egress].destinations` in config today)
+
+Testing
 - [ ] Exercise TLS certificates with ACME in real deployments
 - [ ] test cert in attestation
 - [ ] Verify certs are stored encrypted at rest
-- [ ] Networking cleanup
-- [ ] Enclave / control-plane logs to CloudWatch
-- [ ] Instances config, ram, etc, look at config
-- [ ] CloudFormation: PCR0 / KMS policy alignment documented and verified
-- [ ] Env vars support (SSM params, rollout depl)
-- [ ] Js sdk?
-- [ ] Reproducible builds
-- [ ] Add samples for MCP / MPC / etc
-- [ ] Egress allowlist enforced end-to-end (`[egress].destinations` in config today)
 -->

@@ -1,4 +1,4 @@
-ARG DATA_PLANE_IMAGE=matzapata/nitrum-data-plane:dev
+ARG DATA_PLANE_IMAGE=matzapata/nitrum-data-plane:v0.1.0-dev
 FROM ${DATA_PLANE_IMAGE}
 
 # Base is Alpine; install Node from apk (no bash/yum).

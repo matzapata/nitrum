@@ -113,7 +113,7 @@ async fn main() {
         0
     } else {
         tokio::select! {
-            result = server::runner::run(&args.command) => {
+            result = server::runner::run(&args.command, &runtime_config.user_env) => {
                 result.unwrap_or_else(|e| {
                     tracing::error!(error = %e, "failed to run user process");
                     1

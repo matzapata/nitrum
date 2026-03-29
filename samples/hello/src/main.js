@@ -55,6 +55,10 @@ app.post("/random", async (req, res) => {
   res.json(data);
 });
 
+app.get("/env", async (req, res) => {
+  res.json({ env: process.env.DEMO });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`[server] listening on port ${PORT}`);
 });

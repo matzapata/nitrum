@@ -43,8 +43,8 @@ async fn main() {
         .unwrap_or_else(|e| {
             tracing::error!(error = %e, "failed to start enclave");
         });
-    info!("enclave started, waiting for shutdown signal");
 
+    info!("enclave started, waiting for shutdown signal");
     tokio::signal::ctrl_c()
         .await
         .expect("failed to listen for ctrl_c");

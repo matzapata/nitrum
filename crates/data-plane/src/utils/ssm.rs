@@ -1,4 +1,5 @@
-//! SSM parameter batch load via [`GetParameters`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameters.html).
+//! SSM access via [`GetParameter`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html)
+//! and [`GetParametersByPath`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParametersByPath.html).
 //!
 //! [`SsmParameters`] holds an [`Arc<ImdsClient>`](crate::utils::imds::ImdsClient): region and
 //! SigV4 credentials for SSM come from the same IMDS-backed [`EnclaveProvider`] as the rest of the app.
@@ -15,6 +16,12 @@ use tracing::debug;
 
 use super::imds::{EnclaveProvider, ImdsClient};
 
+/// Last path segment of an SSM parameter name, used as the child process env var name.
+#[must_use]
+pub fn parameter_name_to_env_key(name: &str) -> String {
+    name.split('/').next_back().unwrap_or(name).to_string()
+}
+
 /// Batch SSM loader tied to a shared [`ImdsClient`] (same IMDS session / credential cache as the rest of the data-plane).
 #[derive(Clone, Debug)]
 pub struct SsmParameters {
@@ -26,42 +33,13 @@ impl SsmParameters {
         Self { imds }
     }
 
-    /// Comma-separated override (`NITRUM_SSM_PARAMETER_NAMES`) or default Nitrum paths.
-    pub fn parameter_names() -> Vec<String> {
-        if let Ok(names) = std::env::var("NITRUM_SSM_PARAMETER_NAMES") {
-            let v: Vec<String> = names
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !v.is_empty() {
-                return v;
-            }
-        }
-
-        let kms = std::env::var("NITRUM_SSM_PARAM_KMS_KEY_ID")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let ddb = std::env::var("NITRUM_SSM_PARAM_DYNAMODB_TABLE")
-            .ok()
-            .filter(|s| !s.is_empty());
-        match (kms, ddb) {
-            (Some(k), Some(d)) => vec![k, d],
-            _ => vec![
-                "/nitrum/kms_key_id".to_string(),
-                "/nitrum/dynamodb_table".to_string(),
-            ],
-        }
-    }
-
-    /// Load parameters and map **last path segment** → value (e.g. `kms_key_id`, `dynamodb_table`).
-    pub async fn get_parameters_as_map(&self) -> Result<HashMap<String, String>> {
+    async fn ssm_client(&self) -> Result<Client> {
+        // TODO: sdk_config should be built in different module and shared
         let region = self
             .imds
             .get_region()
             .await
             .context("IMDS placement region for SSM")?;
-        // TODO: check this, we can pass sdk_condf as param instead
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
             .region(Region::new(region))
             .credentials_provider(SharedCredentialsProvider::new(EnclaveProvider::with_imds(
@@ -70,7 +48,6 @@ impl SsmParameters {
             .load()
             .await;
 
-        let names = Self::parameter_names();
         let mut builder = aws_sdk_ssm::config::Builder::from(&sdk_config);
         if let Some(url) = std::env::var("NITRUM_SSM_ENDPOINT_URL")
             .ok()
@@ -78,33 +55,85 @@ impl SsmParameters {
         {
             builder = builder.endpoint_url(url);
         }
-        let client = Client::from_conf(builder.build());
+        Ok(Client::from_conf(builder.build()))
+    }
 
+    /// Single-parameter fetch (infra keys are plain `String`, not `SecureString`).
+    pub async fn get_parameter(&self, name: &str) -> Result<String> {
+        let client = self.ssm_client().await?;
         let out = client
-            .get_parameters()
-            .set_names(Some(names.clone()))
+            .get_parameter()
+            .name(name)
             .with_decryption(false)
             .send()
             .await
-            .context("SSM GetParameters failed")?;
+            .with_context(|| format!("SSM GetParameter {name}"))?;
+        let Some(p) = out.parameter() else {
+            anyhow::bail!("SSM parameter not found: {name}");
+        };
+        let value = p.value().unwrap_or("");
+        if value.is_empty() {
+            anyhow::bail!("SSM parameter empty: {name}");
+        }
+        Ok(value.to_string())
+    }
 
-        let invalid = out.invalid_parameters();
-        if !invalid.is_empty() {
-            debug!(?invalid, "SSM invalid or missing parameter names");
+    /// Load all parameters under `path` (recursive) with decryption. Maps **last path segment** → value.
+    pub async fn get_parameters_by_path_recursive(
+        &self,
+        path: &str,
+    ) -> Result<HashMap<String, String>> {
+        let path = path.trim_end_matches('/');
+        if path.is_empty() {
+            return Ok(HashMap::new());
         }
 
+        let client = self.ssm_client().await?;
         let mut map = HashMap::new();
-        for p in out.parameters() {
-            let name = p.name().unwrap_or("");
-            let value = p.value().unwrap_or("");
-            if name.is_empty() || value.is_empty() {
-                continue;
+        let mut next_token = None::<String>;
+
+        loop {
+            let mut req = client
+                .get_parameters_by_path()
+                .path(path)
+                .recursive(true)
+                .with_decryption(true);
+            if let Some(ref t) = next_token {
+                req = req.next_token(t);
             }
-            let key = name.split('/').next_back().unwrap_or(name).to_string();
-            map.insert(key, value.to_string());
+            let out = req.send().await.context("SSM GetParametersByPath failed")?;
+
+            for p in out.parameters() {
+                let name = p.name().unwrap_or("");
+                let value = p.value().unwrap_or("");
+                if name.is_empty() || value.is_empty() {
+                    continue;
+                }
+                let key = parameter_name_to_env_key(name);
+                map.insert(key, value.to_string());
+            }
+
+            next_token = out.next_token().map(str::to_string);
+            if next_token.is_none() {
+                break;
+            }
         }
 
-        debug!(keys = ?map.keys().collect::<Vec<_>>(), "SSM parameter refresh");
+        debug!(keys = ?map.keys().collect::<Vec<_>>(), "SSM app env by path");
         Ok(map)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parameter_name_to_env_key;
+
+    #[test]
+    fn last_segment_env_key() {
+        assert_eq!(
+            parameter_name_to_env_key("/nitrum/nitrum-app/env/DATABASE_URL"),
+            "DATABASE_URL"
+        );
+        assert_eq!(parameter_name_to_env_key("SIMPLE"), "SIMPLE");
     }
 }

@@ -8,7 +8,7 @@ pub mod constants;
 pub mod local;
 pub mod utils;
 
-use commands::{build, deploy, describe, destroy, dev, init};
+use commands::{build, deploy, describe, destroy, dev, env, init};
 
 #[derive(Parser)]
 #[command(name = "nitrum")]
@@ -32,6 +32,8 @@ enum Commands {
     Describe(describe::DescribeArgs),
     /// Destroy resources
     Destroy(destroy::DestroyArgs),
+    /// App environment variables in SSM
+    Env(env::EnvArgs),
 }
 
 #[tokio::main]
@@ -50,6 +52,7 @@ async fn main() {
         Commands::Deploy(args) => deploy::run(args).await,
         Commands::Describe(args) => describe::run(args).await,
         Commands::Destroy(args) => destroy::run(args).await,
+        Commands::Env(args) => env::run(args).await,
     };
 
     if let Err(e) = result {

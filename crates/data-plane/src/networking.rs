@@ -31,13 +31,13 @@ const AF_VSOCK: libc::c_int = 40;
 /// config that needs IMDS/HTTPS egress: the parent must run gvproxy with `-ec2-metadata-access`
 /// so `169.254.169.254` (IMDS) is reachable from the guest over TAP.
 pub async fn init() {
-    // Enclave/minimal roots often start with `lo` down; without this, `127.0.0.1` returns ENETUNREACH.
-    bring_loopback_up();
-
     info!(
         port = HOST_PROXY_PORT,
         "setting up enclave networking (TAP + VSOCK → gvproxy)"
     );
+
+    // Enclave/minimal roots often start with `lo` down; without this, `127.0.0.1` returns ENETUNREACH.
+    bring_loopback_up();
 
     let vsock_fd = loop {
         match connect_vsock(HOST_PROXY_PORT) {
@@ -141,7 +141,6 @@ fn run_ip(args: &[&str]) {
     );
 }
 
-// TODO: check if needed
 fn bring_loopback_up() {
     info!("bringing loopback lo up (127.0.0.1 may otherwise be unreachable)");
     run_ip(&["link", "set", "dev", "lo", "up"]);

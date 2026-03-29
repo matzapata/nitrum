@@ -58,10 +58,7 @@ impl EnclaveCloudStack {
         let eif_label: String = artifact.hash.chars().take(12).collect();
         let retain_str = if retain { "true" } else { "false" };
         let params = vec![
-            (
-                "EnvironmentName".to_string(),
-                self.cloudformation.stack_name().to_string(),
-            ),
+            ("ProjectName".to_string(), config.name.clone()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
             ("EifS3Key".to_string(), eif_label.clone()),

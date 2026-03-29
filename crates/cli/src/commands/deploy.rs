@@ -58,7 +58,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let bucket = cloud_stack.bucket_name();
     let retain_str = if args.retain { "true" } else { "false" };
     if !utils::confirm(&format!(
-        "Deploy CloudFormation stack `{stack_name}` (EnvironmentName={stack_name}, Retain={retain_str}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
+        "Deploy CloudFormation stack (ProjectName={stack_name}, Retain={retain_str}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
         config.scaling.min_replicas,
         config.scaling.max_replicas,
         config.scaling.desired_replicas,
