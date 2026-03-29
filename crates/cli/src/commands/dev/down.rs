@@ -3,7 +3,7 @@ use clap::Args;
 use shared::config::NitrumConfig;
 use std::env;
 
-use crate::{utils, local::EnclaveLocalStack};
+use crate::{local::EnclaveLocalStack, utils};
 
 #[derive(Args)]
 pub struct DownArgs {
@@ -18,7 +18,7 @@ pub async fn run(args: DownArgs) -> Result<()> {
         .root
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
     let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
-    
+
     // Stop local stack
     let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
     utils::with_spinner(

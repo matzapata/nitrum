@@ -3,7 +3,7 @@ use clap::Args;
 use shared::config::NitrumConfig;
 use std::env;
 
-use crate::{utils, local::EnclaveLocalStack};
+use crate::{local::EnclaveLocalStack, utils};
 
 #[derive(Args)]
 pub struct UpArgs {
@@ -38,6 +38,6 @@ pub async fn run(args: UpArgs) -> Result<()> {
     println!();
     println!("  If nitrum.local does not resolve, add to /etc/hosts: 127.0.0.1 nitrum.local");
     println!();
-    
+
     Ok(())
 }

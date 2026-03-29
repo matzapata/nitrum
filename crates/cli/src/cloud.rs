@@ -113,7 +113,9 @@ impl EnclaveCloudStack {
         }
         let s = format!("nitrum-{slug}");
         if !(3..=63).contains(&s.len()) {
-            bail!("derived S3 bucket name `{s}` is not 3-63 characters; shorten `name` in nitrum.toml");
+            bail!(
+                "derived S3 bucket name `{s}` is not 3-63 characters; shorten `name` in nitrum.toml"
+            );
         }
         Ok(s)
     }

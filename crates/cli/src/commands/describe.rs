@@ -33,6 +33,6 @@ pub async fn run(args: DescribeArgs) -> Result<()> {
     println!("PCR0: {}", artifact.pcr0);
     println!("PCR1: {}", artifact.pcr1);
     println!("PCR2: {}", artifact.pcr2);
-    
+
     Ok(())
 }

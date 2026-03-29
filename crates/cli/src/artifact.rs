@@ -36,7 +36,10 @@ impl EnclaveArtifact {
         } else if canonical.is_file() {
             canonical
         } else {
-            bail!("path is neither a directory nor a file: {}", canonical.display());
+            bail!(
+                "path is neither a directory nor a file: {}",
+                canonical.display()
+            );
         };
 
         let hash = sha256_file(&eif_path).await?;

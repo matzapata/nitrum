@@ -141,7 +141,9 @@ impl<'a> EnclaveLocalStack<'a> {
     /// Writes the local stack file from the bundled template if it is not already present.
     /// Returns the project-relative path ([`constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE`]).
     fn ensure_template(&self) -> Result<&'static str> {
-        let compose_path = self.project_root.join(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
+        let compose_path = self
+            .project_root
+            .join(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
         if compose_path.is_file() {
             return Ok(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
         }

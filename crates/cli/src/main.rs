@@ -4,9 +4,9 @@ use tracing_subscriber::EnvFilter;
 pub mod artifact;
 pub mod cloud;
 pub mod commands;
-pub mod utils;
 pub mod constants;
 pub mod local;
+pub mod utils;
 
 use commands::{build, deploy, describe, destroy, dev, init};
 

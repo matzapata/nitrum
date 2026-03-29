@@ -2,9 +2,9 @@
 
 use anyhow::Result;
 use clap::Args;
+use shared::config::NitrumConfig;
 use std::env;
 use std::path::PathBuf;
-use shared::config::NitrumConfig;
 
 use crate::{artifact::EnclaveArtifact, cloud::EnclaveCloudStack, utils};
 

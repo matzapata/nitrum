@@ -137,13 +137,7 @@ impl Bucket {
     pub async fn destroy(&self) -> Result<()> {
         let bucket = self.name.as_str();
 
-        match self
-            .client
-            .head_bucket()
-            .bucket(bucket)
-            .send()
-            .await
-        {
+        match self.client.head_bucket().bucket(bucket).send().await {
             Ok(_) => {}
             Err(e) => {
                 if head_bucket_is_not_found(&e) {
