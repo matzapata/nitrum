@@ -18,8 +18,8 @@ const ENCLAVE_IP: &str = "192.168.127.2";
 /// Timeout to wait for the socket to be created.
 const SOCKET_WAIT_TIMEOUT_SECS: u64 = 15;
 
-/// Port forwards: (host_port, enclave_port) (https and prometheus).
-const FORWARDS: &[(u16, u16)] = &[(443, 443)];
+/// Port forwards: (host_port, enclave_port) — HTTP for ACME HTTP-01, HTTPS for ingress.
+const FORWARDS: &[(u16, u16)] = &[(80, 80), (443, 443)];
 
 /// Env var for gvproxy binary path; default "gvproxy" (on PATH). Set to "/app/gvproxy" in container.
 const GVPROXY_BIN_ENV: &str = "GVPROXY_BIN";

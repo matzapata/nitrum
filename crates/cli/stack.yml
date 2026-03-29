@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 443), KMS, DynamoDB,
+  Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 80 and 443), KMS, DynamoDB,
   SSM parameters /nitrum/kms_key_id and /nitrum/dynamodb_table (data-plane defaults), and VPC endpoints.
   EnvironmentName is the slug for DynamoDB table, KMS alias, log group, tags, and launch template.
   Only one stack per account/region should manage those two SSM names. Retain defaults false.
@@ -309,9 +309,19 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub "${EnvironmentName} NLB"
-      GroupDescription: !Sub "Network Load Balancer - HTTPS from internet, egress to targets (${EnvironmentName})"
+      GroupDescription: !Sub "Network Load Balancer - HTTP/HTTPS from internet, egress to targets (${EnvironmentName})"
       VpcId: !Ref VPC
       SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from internet (IPv4, ACME HTTP-01)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: "::/0"
+          Description: HTTP from internet (IPv6, ACME HTTP-01)
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
@@ -333,7 +343,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub "${EnvironmentName} Nitro Instance"
-      GroupDescription: !Sub "Nitro Enclave EC2 instances - HTTPS, NLB, and VPC access (${EnvironmentName})"
+      GroupDescription: !Sub "Nitro Enclave EC2 instances - HTTP/HTTPS, NLB, and VPC access (${EnvironmentName})"
       VpcId: !Ref VPC
       SecurityGroupEgress:
         - IpProtocol: "-1"
@@ -391,6 +401,46 @@ Resources:
       ToPort: 443
       CidrIp: 0.0.0.0/0
       Description: HTTPS (optional direct / debugging)
+
+  NitroSGIngressVpc80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 10.0.0.0/16
+      Description: HTTP from within VPC (ACME HTTP-01)
+
+  NitroSGIngressNlb80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref NitroNLBSG
+      Description: HTTP from NLB (ACME HTTP-01)
+
+  NitroSGIngressSelfHttp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref NitroInstanceSG
+      Description: Intra-SG HTTP
+
+  NitroSGIngressDirect80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+      Description: HTTP (optional direct / debugging, ACME)
 
   # ── KMS Key ──────────────────────────────────────────────────────────────────
   EnclaveKey:
@@ -621,7 +671,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif matzapata/nitrum-control-plane:${ControlPlaneImageTag} /app/control-plane --debug-mode
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif matzapata/nitrum-control-plane:${ControlPlaneImageTag} /app/control-plane --debug-mode
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
@@ -650,7 +700,7 @@ Resources:
         LaunchTemplateId: !Ref NitroLaunchTemplate
         Version: !GetAtt NitroLaunchTemplate.LatestVersionNumber
       VPCZoneIdentifier: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      TargetGroupARNs: [!Ref NitroTargetGroup]
+      TargetGroupARNs: [!Ref NitroTargetGroup, !Ref NitroTargetGroupHttp]
       HealthCheckType: ELB
       HealthCheckGracePeriod: 300
       Tags:
@@ -690,6 +740,25 @@ Resources:
         - Key: Name
           Value: !Sub "${EnvironmentName}-tg"
 
+  # TCP 80 to instances for ACME HTTP-01. Health check uses 443 so targets stay healthy when ACME
+  # is disabled (nothing may listen on enclave :80 in that case).
+  NitroTargetGroupHttp:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: !Ref VPC
+      Protocol: TCP
+      Port: 80
+      TargetType: instance
+      HealthCheckProtocol: TCP
+      HealthCheckPort: "443"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-tg-http"
+
   NitroHTTPSListener:
     Type: 'AWS::ElasticLoadBalancingV2::Listener'
     Properties:
@@ -699,6 +768,16 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref NitroTargetGroup
+
+  NitroHTTPListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref NitroNLB
+      Protocol: TCP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref NitroTargetGroupHttp
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Outputs
@@ -715,7 +794,7 @@ Outputs:
 
   NLBDnsName:
     Description: >
-      Network Load Balancer DNS name (TCP 443 passthrough).
+      Network Load Balancer DNS name (TCP 80 and 443 passthrough to the enclave via gvproxy).
     Value: !GetAtt NitroNLB.DNSName
 
   KmsKeyId:

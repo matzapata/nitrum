@@ -69,42 +69,16 @@ Nitrum is **early-stage**. APIs, defaults, and CloudFormation resources may chan
 
 <!-- 
 TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-multi-party-crypto-wallet-with-aws-nitro-enclave/blob/main/README.md
-- [ ] Control plane resilience: watchdog, restart if killed, clearer logs
+- [ ] Control plane resilience: watchdog, restart if killed, clearer logs, health endpoints
 - [ ] Exercise TLS certificates with ACME in real deployments
 - [ ] test cert in attestation
 - [ ] Verify certs are stored encrypted at rest
 - [ ] Enclave / control-plane logs to CloudWatch
-- [ ] Egress allowlist enforced end-to-end (`[egress].destinations` in config today)
+- [ ] Instances config, ram, etc, look at config
 - [ ] CloudFormation: PCR0 / KMS policy alignment documented and verified
+- [ ] Env vars support (SSM params, rollout depl)
 - [ ] Js sdk?
-- [ ] Env vars support (e.g. POST bootstrap, authority public key baked into image, restart user app)
 - [ ] Reproducible builds
 - [ ] Add samples for MCP / MPC / etc
+- [ ] Egress allowlist enforced end-to-end (`[egress].destinations` in config today)
 -->
-
-
-<!-- 
-TODO: acme won't pass in prod
-
-For line 73 (ACME in real deployments)
-You currently won’t pass HTTP-01 in prod path because control-plane only forwards 443/9090:
-
-
-networking.rs
-Lines 21-23
-/// Port forwards: (host_port, enclave_port) (https and prometheus).
-const FORWARDS: &[(u16, u16)] = &[(443, 443), (9090, 9090)];
-But ACME HTTP-01 server in data-plane binds port 80 when enabled:
-
-
-ingress.rs
-Lines 65-68
-let acme_http_addr = state.config.acme_http01_listen_addr;
-info!(acme_http_addr = %acme_http_addr, "ACME HTTP-01 server listening");
-let challenge_server = bind(acme_http_addr).serve(acme_router.into_make_service());
-So to “exercise TLS certificates with ACME in real deployments”, you’ll need:
-
-host/control-plane forward for 80 -> 80,
-SG/NLB listener path for port 80 in stack.yml,
-public DNS for the configured domain pointing at the NLB.
-If you want, I can outline a concrete enforcement design that maps [egress].destinations to a robust runtime model (and avoids DNS pitfalls). -->

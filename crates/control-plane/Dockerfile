@@ -55,6 +55,6 @@ RUN chmod +x /app/control-plane /app/gvproxy
 
 ENV GVPROXY_BIN=/app/gvproxy
 
-EXPOSE 443
+EXPOSE 80 443
 
 CMD ["/app/control-plane"]
