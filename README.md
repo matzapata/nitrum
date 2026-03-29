@@ -70,7 +70,7 @@ Nitrum is **early-stage**. APIs, defaults, and CloudFormation resources may chan
 
 <!-- 
 TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-multi-party-crypto-wallet-with-aws-nitro-enclave/blob/main/README.md
-- [ ] Option to override project name in cli, so we can do deploy --proy-name ...-staging
+- [X] Option to override project name in cli, so we can do deploy --proy-name ...-staging
 - [ ] Control plane resilience: watchdog, restart if killed, clearer logs, health endpoints
 - [x] Env vars support (SSM params via `nitrum env`, data-plane startup load)
 - [ ] Enclave / control-plane logs to CloudWatch

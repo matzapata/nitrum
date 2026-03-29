@@ -8,6 +8,9 @@ use crate::local::EnclaveLocalStack;
 
 #[derive(Args)]
 pub struct LogsArgs {
+    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub root: Option<std::path::PathBuf>,
@@ -25,7 +28,8 @@ pub async fn run(args: LogsArgs) -> Result<()> {
         .root
         .clone()
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
+    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
+        .with_name(args.name.clone())?;
 
     // Tail logs
     let local_stack = EnclaveLocalStack::new(&root, &cfg);

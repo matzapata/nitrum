@@ -10,6 +10,9 @@ use crate::artifact::EnclaveArtifact;
 
 #[derive(Args)]
 pub struct DescribeArgs {
+    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
     /// Path to the enclave image file (default: enclave.eif in the current directory)
     #[arg(value_name = "EIF")]
     pub eif: Option<PathBuf>,
@@ -17,7 +20,8 @@ pub struct DescribeArgs {
 
 pub async fn run(args: DescribeArgs) -> Result<()> {
     let cwd = env::current_dir().expect("current directory");
-    let cfg = NitrumConfig::try_from(cwd.join("nitrum.toml").as_path())?;
+    let cfg = NitrumConfig::try_from(cwd.join("nitrum.toml").as_path())?
+        .with_name(args.name.clone())?;
 
     let eif_path = match &args.eif {
         Some(p) if p.is_absolute() => p.clone(),

@@ -10,6 +10,9 @@ use crate::{artifact::EnclaveArtifact, cloud::EnclaveCloudStack, utils};
 
 #[derive(Args)]
 pub struct DeployArgs {
+    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
@@ -25,7 +28,8 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let root = args
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
+    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
+        .with_name(args.name.clone())?;
 
     let artifact = if let Some(p) = &args.eif {
         let eif_path = if p.is_absolute() {

@@ -16,6 +16,8 @@ pub enum NitrumConfigError {
     },
     #[error("invalid config in {path}: {message}")]
     Invalid { path: PathBuf, message: String },
+    #[error("invalid `name` override: {message}")]
+    NameOverrideInvalid { message: String },
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -216,6 +218,18 @@ impl NitrumConfig {
         self.scaling.validate()?;
         self.tls_termination.validate()?;
         Ok(())
+    }
+
+    /// Replace [`Self::name`] when `override_name` is [`Some`], using the same rules as `name` in `nitrum.toml`.
+    pub fn with_name(mut self, override_name: Option<String>) -> Result<Self, NitrumConfigError> {
+        let Some(n) = override_name else {
+            return Ok(self);
+        };
+        validate_project_name(&n).map_err(|message| NitrumConfigError::NameOverrideInvalid {
+            message,
+        })?;
+        self.name = n;
+        Ok(self)
     }
 }
 
