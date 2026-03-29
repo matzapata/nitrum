@@ -21,7 +21,3 @@ ram_size_mib = 4320
 [tls_termination]
 acme = false
 domain = "nitrum.local"
-
-[egress]
-enabled = true
-destinations = ['httpbin.org']

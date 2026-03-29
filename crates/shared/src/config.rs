@@ -88,26 +88,6 @@ impl Default for TlsTermination {
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct Egress {
-    /// When false, all outbound traffic is allowed regardless of whitelist.
-    pub enabled: bool,
-
-    // TODO: implement this
-    /// Regex patterns for allowed destination hostnames.
-    /// Only evaluated when enabled = true. An empty list allows all DNS-resolved traffic.
-    pub destinations: Vec<String>,
-}
-
-impl Default for Egress {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            destinations: vec![],
-        }
-    }
-}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Service {
     /// Port to use for the service.
     pub port: u16,
@@ -126,7 +106,6 @@ pub struct NitrumConfig {
     pub health_check: HealthCheck,
     pub scaling: Scaling,
     pub tls_termination: TlsTermination,
-    pub egress: Egress,
 }
 
 impl TryFrom<&std::path::Path> for NitrumConfig {

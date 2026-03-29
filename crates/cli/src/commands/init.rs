@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
-use shared::config::{Egress, HealthCheck, NitrumConfig, Scaling, Service, TlsTermination};
+use shared::config::{HealthCheck, NitrumConfig, Scaling, Service, TlsTermination};
 use std::env;
 use std::fs;
 
@@ -63,10 +63,6 @@ fn sample_nitro_config(name: &str) -> String {
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),
         tls_termination: TlsTermination::default(),
-        egress: Egress {
-            enabled: true,
-            destinations: vec![r"httpbin\.org$".to_string()],
-        },
     };
     let body = toml::to_string_pretty(&config).expect("serialize nitrum.toml for init");
     format!(
