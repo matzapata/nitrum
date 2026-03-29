@@ -1,6 +1,7 @@
 //! Local development utilities
 
 use anyhow::{Context, Result, bail};
+use shared::config::NitrumConfig;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -10,13 +11,15 @@ use crate::constants;
 pub struct EnclaveLocalStack<'a> {
     project_root: &'a Path,
     enclave_image: String,
+    data_plane_image: String,
 }
 
 impl<'a> EnclaveLocalStack<'a> {
-    pub fn new(project_root: &'a Path, project_name: &str) -> Self {
+    pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Self {
         Self {
             project_root,
-            enclave_image: format!("nitrum-{project_name}:dev"),
+            enclave_image: format!("nitrum-{}:dev", cfg.name),
+            data_plane_image: cfg.data_plane.clone(),
         }
     }
 
@@ -26,7 +29,10 @@ impl<'a> EnclaveLocalStack<'a> {
         let output = Command::new("docker")
             .current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env("DATA_PLANE_IMAGE", constants::ENCLAVE_DEV_BASE_IMAGE)
+            .env(
+                "DATA_PLANE_IMAGE",
+                format!("{}-dev", &self.data_plane_image),
+            )
             .arg("compose")
             .arg("--progress")
             .arg("quiet")
@@ -66,7 +72,7 @@ impl<'a> EnclaveLocalStack<'a> {
         let output = Command::new("docker")
             .current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env("DATA_PLANE_IMAGE", constants::ENCLAVE_DEV_BASE_IMAGE)
+            .env("DATA_PLANE_IMAGE", &self.data_plane_image)
             .arg("compose")
             .arg("--progress")
             .arg("quiet")

@@ -30,7 +30,7 @@ impl EnclaveArtifact {
 
         let eif_path = if canonical.is_dir() {
             let image_tag = format!("nitrum-{}:latest", cfg.name);
-            build_enclave_image(&canonical, constants::ENCLAVE_PROD_BASE_IMAGE, &image_tag).await?;
+            build_enclave_image(&canonical, cfg.data_plane.as_str(), &image_tag).await?;
             build_enclave_eif(&canonical, &image_tag).await?;
             canonical.join("enclave.eif")
         } else if canonical.is_file() {

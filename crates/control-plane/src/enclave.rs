@@ -9,11 +9,7 @@ use tracing::info;
 
 const NITRO_CLI: &str = "nitro-cli";
 const EIF_PATH: &str = "/app/enclave.eif";
-
-// TODO: config, this should come from app args, which cli will load to cloudformation stack
 const ENCLAVE_CID: &str = "16";
-const NUM_CPUS: &str = "2";
-const RAM_SIZE_MIB: &str = "4320";
 
 #[derive(Error, Debug)]
 pub enum EnclaveError {
@@ -56,7 +52,11 @@ impl NitroCommand {
 pub struct Enclave;
 
 impl Enclave {
-    pub async fn run(debug_mode: bool) -> Result<(), EnclaveError> {
+    pub async fn run(
+        debug_mode: bool,
+        cpu_count: u32,
+        memory_mib: u32,
+    ) -> Result<(), EnclaveError> {
         let running_enclaves =
             Self::run_command_capture_stdout(&[NITRO_CLI, NitroCommand::DescribeEnclaves.as_str()])
                 .await?;
@@ -72,14 +72,16 @@ impl Enclave {
             info!("No enclaves currently running on this host.");
         }
 
-        info!("Starting new enclave...");
-        let mut run_args = vec![
+        let cpu = cpu_count.to_string();
+        let memory = memory_mib.to_string();
+        info!(cpu_count = %cpu, memory_mib = %memory, "Starting new enclave...");
+        let mut run_args: Vec<&str> = vec![
             NITRO_CLI,
             NitroCommand::RunEnclave.as_str(),
             "--cpu-count",
-            NUM_CPUS,
+            cpu.as_str(),
             "--memory",
-            RAM_SIZE_MIB,
+            memory.as_str(),
             "--enclave-cid",
             ENCLAVE_CID,
             "--eif-path",

@@ -28,6 +28,6 @@ pub async fn run(args: LogsArgs) -> Result<()> {
     let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
     // Tail logs
-    let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
+    let local_stack = EnclaveLocalStack::new(&root, &cfg);
     local_stack.logs(args.tail, args.follow).await
 }

@@ -1,11 +1,12 @@
 //! CloudFormation stack and EIF S3 bucket helpers.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::collections::BTreeMap;
 
 use crate::artifact::EnclaveArtifact;
 use crate::utils::bucket::Bucket;
 use crate::utils::cloudformation::CloudFormation;
+use shared::config::{NitrumConfig, Scaling};
 
 pub struct EnclaveCloudStack {
     bucket: Bucket,
@@ -14,8 +15,9 @@ pub struct EnclaveCloudStack {
 
 impl EnclaveCloudStack {
     /// Loads AWS configuration and returns the stack handle.
-    pub async fn new(stack_name: String) -> Result<Self> {
-        let bucket_name = Self::derived_eif_bucket_name(&stack_name)?;
+    pub async fn new(config: &NitrumConfig) -> Result<Self> {
+        let bucket_name = format!("nitrum-{}", config.name);
+        let stack_name = format!("nitrum-{}", config.name);
         let aws_sdk_config = aws_config::load_from_env().await;
         Ok(Self {
             bucket: Bucket::new(&aws_sdk_config, bucket_name),
@@ -50,9 +52,10 @@ impl EnclaveCloudStack {
         &self,
         artifact: &EnclaveArtifact,
         retain: bool,
-        control_plane_image_tag: &str,
+        config: &NitrumConfig,
     ) -> Result<BTreeMap<String, String>> {
-        let eif_label = artifact.hash.chars().take(12).collect();
+        let scaling: &Scaling = &config.scaling;
+        let eif_label: String = artifact.hash.chars().take(12).collect();
         let retain_str = if retain { "true" } else { "false" };
         let params = vec![
             (
@@ -63,12 +66,20 @@ impl EnclaveCloudStack {
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
             ("EifS3Key".to_string(), eif_label.clone()),
             ("EifVersionLabel".to_string(), eif_label.clone()),
-            ("AsgMinSize".to_string(), "1".to_string()),
-            ("AsgMaxSize".to_string(), "1".to_string()),
-            ("AsgDesiredCapacity".to_string(), "1".to_string()),
+            ("AsgMinSize".to_string(), scaling.min_replicas.to_string()),
+            ("AsgMaxSize".to_string(), scaling.max_replicas.to_string()),
             (
-                "ControlPlaneImageTag".to_string(),
-                control_plane_image_tag.to_string(),
+                "AsgDesiredCapacity".to_string(),
+                scaling.desired_replicas.to_string(),
+            ),
+            ("EnclaveCpuCount".to_string(), scaling.num_cpus.to_string()),
+            (
+                "EnclaveMemoryMib".to_string(),
+                scaling.ram_size_mib.to_string(),
+            ),
+            (
+                "ControlPlaneImage".to_string(),
+                config.control_plane.clone(),
             ),
         ];
 
@@ -91,32 +102,5 @@ impl EnclaveCloudStack {
 
     fn cloud_stack_template() -> &'static str {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stack.yml"))
-    }
-
-    fn sanitize_bucket_label(s: &str) -> String {
-        s.trim()
-            .trim_matches(|c| c == '.' || c == '-')
-            .chars()
-            .map(|c| match c {
-                'A'..='Z' => c.to_ascii_lowercase(),
-                'a'..='z' | '0'..='9' | '-' | '.' => c,
-                _ => '-',
-            })
-            .collect()
-    }
-
-    /// Default EIF bucket: `nitrum-{project-name}` (S3 label rules, ≤63 chars).
-    fn derived_eif_bucket_name(project_name: &str) -> Result<String> {
-        let slug = Self::sanitize_bucket_label(project_name);
-        if slug.is_empty() {
-            bail!("`name` in nitrum.toml is empty after sanitization; set a valid project slug");
-        }
-        let s = format!("nitrum-{slug}");
-        if !(3..=63).contains(&s.len()) {
-            bail!(
-                "derived S3 bucket name `{s}` is not 3-63 characters; shorten `name` in nitrum.toml"
-            );
-        }
-        Ok(s)
     }
 }

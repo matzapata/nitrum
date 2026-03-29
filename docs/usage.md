@@ -48,12 +48,12 @@ Local development via Docker Compose:
 
 ### `nitrum deploy`
 
-Uploads the EIF (default: `./enclave.eif`) and creates or updates the **CloudFormation** stack using the bundled template and your `nitrum.toml`. Useful flags (see `nitrum deploy --help`):
+Uploads the EIF (built from source if omitted) and creates or updates the **CloudFormation** stack using the bundled template and your `nitrum.toml`. Useful flags (see `nitrum deploy --help`):
 
-- **`--eif`** — path to the EIF file.
-- **`--region`** — AWS region (overrides environment).
-- **`--control-plane-image-tag`** — Docker tag for the control-plane image on instances.
+- **`--eif`** — path to an existing EIF file.
 - **`--retain`** — retain selected resources on stack delete.
+
+The **`control_plane`** field in `nitrum.toml` is the full Docker image reference (for example `my-registry/nitrum-control-plane:v1`) passed to CloudFormation for the EC2 control-plane service.
 
 ### `nitrum destroy`
 
@@ -67,7 +67,9 @@ Runs **`nitro-cli describe-eif`** in Docker against an EIF path (wrapper for ins
 
 Options are defined in the `shared` crate; the sample project comments point to the source. Common sections:
 
-- **`name`** — project identifier; used for derived resource names (for example S3 bucket naming).
+- **`name`** — project identifier; used for stack name, S3 bucket, and local image tags.
+- **`data_plane`** — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for **`nitrum build`** and **`nitrum dev`** (base containing the in-enclave data-plane).
+- **`control_plane`** — full image ref for the host control-plane on **`nitrum deploy`** (CloudFormation).
 - **`[service]`** — listen port for your app.
 - **`[health_check]`** — path, port, and interval for health checks.
 - **`[scaling]`** — replica hints and enclave CPU/RAM (used in deployment templates).

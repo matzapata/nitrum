@@ -38,17 +38,23 @@ push-control-plane tag="latest":
 build-data-plane tag="latest" no_cache="":
     docker build \
         --platform linux/amd64 \
-        {{ if tag == "dev" { "-f infra/docker/data-plane.dockerfile --build-arg FEATURES=pebble" } else { "-f infra/docker/data-plane.dockerfile --build-arg FEATURES=enclave" } }} \
+        -f infra/docker/data-plane.dockerfile \
+        --build-arg FEATURES=enclave \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}} \
         .
 
+build-dev-data-plane no_cache="":
+    docker build \
+        --platform linux/amd64 \
+        -f infra/docker/data-plane.dockerfile \
+        --build-arg FEATURES=pebble \
+        {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
+        -t {{ dockerhub_user }}/nitrum-data-plane:dev \
+        .
+
 push-data-plane tag="latest":
     docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}
-
-build tag="latest" no_cache="":
-    just build-control-plane {{tag}} {{no_cache}}
-    just build-data-plane {{tag}} {{no_cache}}
 
 # ── Push ──────────────────────────────────────────────
 

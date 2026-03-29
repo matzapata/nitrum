@@ -73,6 +73,7 @@ TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-
 - [ ] Exercise TLS certificates with ACME in real deployments
 - [ ] test cert in attestation
 - [ ] Verify certs are stored encrypted at rest
+- [ ] Networking cleanup
 - [ ] Enclave / control-plane logs to CloudWatch
 - [ ] Instances config, ram, etc, look at config
 - [ ] CloudFormation: PCR0 / KMS policy alignment documented and verified

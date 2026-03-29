@@ -20,7 +20,7 @@ pub async fn run(args: DownArgs) -> Result<()> {
     let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
     // Stop local stack
-    let local_stack = EnclaveLocalStack::new(&root, &cfg.name);
+    let local_stack = EnclaveLocalStack::new(&root, &cfg);
     utils::with_spinner(
         "Stopping local stack…",
         "Local stack stopped.",

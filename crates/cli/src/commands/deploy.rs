@@ -19,9 +19,6 @@ pub struct DeployArgs {
     /// Path to EIF file to deploy (default: `enclave.eif` in project directory)
     #[arg(long, value_name = "PATH")]
     pub eif: Option<PathBuf>,
-    /// Docker tag for `matzapata/nitrum-control-plane` on instances
-    #[arg(long, default_value = "latest")]
-    pub control_plane_image_tag: String,
 }
 
 pub async fn run(args: DeployArgs) -> Result<()> {
@@ -54,14 +51,19 @@ pub async fn run(args: DeployArgs) -> Result<()> {
 
     // Create CloudFormation stack
     let stack_name = config.name.clone();
-    let cloud_stack = EnclaveCloudStack::new(stack_name.clone()).await?;
+    let cloud_stack = EnclaveCloudStack::new(&config).await?;
 
     // Confirm deployment
     let region_display = cloud_stack.region_display();
     let bucket = cloud_stack.bucket_name();
     let retain_str = if args.retain { "true" } else { "false" };
     if !utils::confirm(&format!(
-        "Deploy CloudFormation stack `{stack_name}` (EnvironmentName={stack_name}, Retain={retain_str}, region {region_display}, S3 `s3://{bucket}`)?"
+        "Deploy CloudFormation stack `{stack_name}` (EnvironmentName={stack_name}, Retain={retain_str}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
+        config.scaling.min_replicas,
+        config.scaling.max_replicas,
+        config.scaling.desired_replicas,
+        config.scaling.num_cpus,
+        config.scaling.ram_size_mib,
     )) {
         return Ok(());
     }
@@ -71,7 +73,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let outputs = utils::with_spinner(
         "Deploying artifact and CloudFormation stack…",
         &deploy_success,
-        cloud_stack.deploy(&artifact, args.retain, &args.control_plane_image_tag),
+        cloud_stack.deploy(&artifact, args.retain, &config),
     )
     .await?;
 

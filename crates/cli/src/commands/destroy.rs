@@ -25,11 +25,11 @@ pub async fn run(args: DestroyArgs) -> Result<()> {
     let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?;
 
     // Create CloudFormation stack
-    let stack_name = config.name;
-    let cloud_stack = EnclaveCloudStack::new(stack_name.clone()).await?;
+    let cloud_stack = EnclaveCloudStack::new(&config).await?;
 
     // Confirm deletion
-    let bucket = cloud_stack.bucket_name().to_string();
+    let stack_name = cloud_stack.stack_name();
+    let bucket = cloud_stack.bucket_name();
     let region_display = cloud_stack.region_display();
     if !args.force
         && !utils::confirm(&format!(

@@ -3,7 +3,9 @@ use anyhow::{Context, Result, bail};
 use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
-use shared::config::{HealthCheck, NitrumConfig, Scaling, Service, TlsTermination};
+use shared::config::{
+    HealthCheck, NitrumConfig, Scaling, Service, TlsTermination, validate_project_name,
+};
 use std::env;
 use std::fs;
 
@@ -15,9 +17,14 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
+    validate_project_name(&args.name).map_err(|msg| {
+        anyhow::anyhow!(
+            "{msg} (project directory name is used as `name` in nitrum.toml for `nitrum deploy`)"
+        )
+    })?;
+
     let cwd = env::current_dir().expect("current directory");
     let directory = cwd.join(&args.name);
-
     if directory.exists()
         && directory
             .read_dir()
@@ -59,11 +66,16 @@ pub async fn run(args: InitArgs) -> Result<()> {
 fn sample_nitro_config(name: &str) -> String {
     let config = NitrumConfig {
         name: name.to_string(),
+        data_plane: "matzapata/nitrum-data-plane:dev".to_string(),
+        control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
         service: Service::default(),
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),
         tls_termination: TlsTermination::default(),
     };
+    config
+        .validate()
+        .expect("init template must satisfy NitrumConfig::validate");
     let body = toml::to_string_pretty(&config).expect("serialize nitrum.toml for init");
     format!(
         "# Default template generated with `nitrum init`\n\

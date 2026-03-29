@@ -81,16 +81,34 @@ Parameters:
     MinValue: 0
     Description: Auto Scaling group desired capacity (must be between min and max).
 
+  EnclaveCpuCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 8
+    Description: >
+      vCPUs per Nitro Enclave (nitro-cli --cpu-count). Must fit the EC2 instance type and match
+      nitro_enclaves allocator cpu_count set in UserData.
+
+  EnclaveMemoryMib:
+    Type: Number
+    Default: 4320
+    MinValue: 64
+    MaxValue: 61440
+    Description: >
+      Enclave memory in MiB (nitro-cli --memory). Must fit the instance and match allocator memory_mib.
+
   LatestAmazonLinux2023Ami:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: >
       Amazon Linux 2023 AMI id (resolved from SSM at deploy time).
 
-  ControlPlaneImageTag:
+  ControlPlaneImage:
     Type: String
-    Default: latest
-    Description: Docker image tag for matzapata/nitrum-control-plane (pulled on instance boot).
+    Default: matzapata/nitrum-control-plane:latest
+    Description: >
+      Full Docker image reference for the Nitrum control-plane on EC2 (registry/repo:tag), e.g. from nitrum.toml control_plane.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
@@ -643,10 +661,10 @@ Resources:
               usermod -aG docker ec2-user
               usermod -aG ne ec2-user
 
-              # Nitro enclaves allocator
+              # Nitro enclaves allocator (must align with EnclaveCpuCount / EnclaveMemoryMib)
               ALLOCATOR_YAML=/etc/nitro_enclaves/allocator.yaml
-              sed -r "s/^(\s*memory_mib\s*:\s*).*/\16144/" -i "$ALLOCATOR_YAML"
-              sed -r "s/^(\s*cpu_count\s*:\s*).*/\12/" -i "$ALLOCATOR_YAML"
+              sed -r "s/^(\s*memory_mib\s*:\s*).*/\1 ${EnclaveMemoryMib}/" -i "$ALLOCATOR_YAML"
+              sed -r "s/^(\s*cpu_count\s*:\s*).*/\1 ${EnclaveCpuCount}/" -i "$ALLOCATOR_YAML"
 
               # Enable services
               systemctl enable --now docker
@@ -655,7 +673,7 @@ Resources:
 
               sleep 5
 
-              CONTROL_PLANE_IMAGE="matzapata/nitrum-control-plane:${ControlPlaneImageTag}"
+              CONTROL_PLANE_IMAGE="${ControlPlaneImage}"
               EIF_ASSET_HASH="${EifVersionLabel}"
 
               docker pull "$CONTROL_PLANE_IMAGE"
@@ -671,7 +689,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif matzapata/nitrum-control-plane:${ControlPlaneImageTag} /app/control-plane --debug-mode
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} --debug-mode
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
