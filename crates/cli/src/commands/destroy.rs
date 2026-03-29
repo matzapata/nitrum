@@ -15,9 +15,6 @@ pub struct DestroyArgs {
     /// Skip the confirmation prompt (for scripts)
     #[arg(long)]
     pub force: bool,
-    /// AWS region (overrides `AWS_REGION` / `AWS_DEFAULT_REGION`)
-    #[arg(long, value_name = "REGION")]
-    pub region: Option<String>,
 }
 
 pub async fn run(args: DestroyArgs) -> Result<()> {
@@ -29,12 +26,7 @@ pub async fn run(args: DestroyArgs) -> Result<()> {
     
     // Create CloudFormation stack
     let stack_name = config.name;
-    let cloud_stack = EnclaveCloudStack::new(
-        root.clone(),
-        stack_name.clone(),
-        args.region.clone(),
-    )
-    .await?;
+    let cloud_stack = EnclaveCloudStack::new(stack_name.clone()).await?;
 
     // Confirm deletion
     let bucket = cloud_stack.bucket_name().to_string();

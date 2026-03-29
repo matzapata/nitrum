@@ -5,6 +5,7 @@ use std::future::Future;
 use std::path::Path;
 use std::time::Duration;
 
+/// Sets up a spinner with the given message and returns it.
 pub fn style_spinner(spinner: ProgressBar, message: &str) -> ProgressBar {
     spinner.set_style(
         ProgressStyle::with_template("{spinner:.blue} {msg}")
@@ -18,6 +19,7 @@ pub fn style_spinner(spinner: ProgressBar, message: &str) -> ProgressBar {
     spinner
 }
 
+/// Runs `fut` with a spinner and returns the result.
 pub async fn with_spinner<T, E, Fut>(message: &str, success_message: &str, fut: Fut) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
@@ -45,6 +47,7 @@ pub fn write_json_value_pretty(path: impl AsRef<Path>, value: &serde_json::Value
     Ok(())
 }
 
+/// Prompts the user for input and returns the result.
 pub fn prompt(message: &str) -> String {
     dialoguer::Input::with_theme(&ColorfulTheme::default())
         .with_prompt(message)
@@ -52,6 +55,7 @@ pub fn prompt(message: &str) -> String {
         .expect("Failed to prompt")
 }
 
+/// Prompts the user for confirmation and returns the result.
 pub fn confirm(message: &str) -> bool {
     dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(message)

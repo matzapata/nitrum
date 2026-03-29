@@ -134,9 +134,12 @@ impl<'a> EnclaveLocalStack<'a> {
         Ok(())
     }
 
+    fn local_stack_template() -> &'static str {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docker-compose.yml"))
+    }
 
     /// Writes the local stack file from the bundled template if it is not already present.
-    /// Returns the project-relative path (`constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE`).
+    /// Returns the project-relative path ([`constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE`]).
     fn ensure_template(&self) -> Result<&'static str> {
         let compose_path = self.project_root.join(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
         if compose_path.is_file() {
@@ -146,7 +149,7 @@ impl<'a> EnclaveLocalStack<'a> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create {}", parent.display()))?;
         }
-        std::fs::write(&compose_path, constants::local_stack_template())
+        std::fs::write(&compose_path, Self::local_stack_template())
             .with_context(|| format!("write {}", compose_path.display()))?;
         Ok(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE)
     }

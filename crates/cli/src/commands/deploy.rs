@@ -54,7 +54,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
 
     // Create CloudFormation stack
     let stack_name = config.name.clone();
-    let cloud_stack = EnclaveCloudStack::new(root.clone(), stack_name.clone(), None).await?;
+    let cloud_stack = EnclaveCloudStack::new(stack_name.clone()).await?;
 
     // Confirm deployment
     let region_display = cloud_stack.region_display();
