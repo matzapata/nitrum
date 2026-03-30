@@ -10,16 +10,16 @@ use crate::{artifact::EnclaveArtifact, cloud::EnclaveCloudStack, utils};
 
 #[derive(Args)]
 pub struct DeployArgs {
-    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
-    #[arg(long, value_name = "NAME")]
-    pub name: Option<String>,
+    /// Use this project name instead of `project.name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long = "as", value_name = "NAME")]
+    pub as_name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
     /// Retain KMS, DynamoDB, logs, and SSM on stack delete (`Retain=true` in CloudFormation)
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub retain: bool,
-    /// Path to EIF file to deploy (default: `enclave.eif` in project directory)
+    /// Path to EIF file to deploy (default: `.nitrum/artifacts/{name}.eif` in project directory)
     #[arg(long, value_name = "PATH")]
     pub eif: Option<PathBuf>,
 }
@@ -29,7 +29,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
     let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.name.clone())?;
+        .with_name(args.as_name.clone())?;
 
     let artifact = if let Some(p) = &args.eif {
         let eif_path = if p.is_absolute() {
@@ -54,7 +54,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     };
 
     // Create CloudFormation stack
-    let stack_name = config.name.clone();
+    let stack_name = config.project.name.clone();
     let cloud_stack = EnclaveCloudStack::new(&config).await?;
 
     // Confirm deployment

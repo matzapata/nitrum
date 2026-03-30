@@ -21,7 +21,7 @@
 # Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
 #   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 #
-# Optional: create `.env.local` in the project root. On `nitrum dev up`, each `KEY=value` is written to
+# Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
 # LocalStack SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
 # `.nitrum/local-stack.yml` to refresh this template after upgrading the CLI.
 

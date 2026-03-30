@@ -8,7 +8,7 @@ pub mod constants;
 pub mod local;
 pub mod utils;
 
-use commands::{build, deploy, describe, destroy, dev, env, init};
+use commands::{build, cloud as cloud_cmd, describe, init, local as local_cmd};
 
 #[derive(Parser)]
 #[command(name = "nitrum")]
@@ -25,15 +25,11 @@ enum Commands {
     /// Build an enclave image
     Build(build::BuildArgs),
     /// Local development (docker compose)
-    Dev(dev::DevArgs),
-    /// Deploy to AWS (CloudFormation)
-    Deploy(deploy::DeployArgs),
+    Local(local_cmd::LocalArgs),
+    /// AWS: deploy, destroy, env, logs
+    Cloud(cloud_cmd::CloudArgs),
     /// Describe an EIF (`nitro-cli describe-eif` in Docker)
     Describe(describe::DescribeArgs),
-    /// Destroy resources
-    Destroy(destroy::DestroyArgs),
-    /// App environment variables in SSM
-    Env(env::EnvArgs),
 }
 
 #[tokio::main]
@@ -48,11 +44,9 @@ async fn main() {
     let result = match cli.command {
         Commands::Init(args) => init::run(args).await,
         Commands::Build(args) => build::run(args).await,
-        Commands::Dev(args) => dev::run(args).await,
-        Commands::Deploy(args) => deploy::run(args).await,
+        Commands::Local(args) => local_cmd::run(args).await,
+        Commands::Cloud(args) => cloud_cmd::run(args).await,
         Commands::Describe(args) => describe::run(args).await,
-        Commands::Destroy(args) => destroy::run(args).await,
-        Commands::Env(args) => env::run(args).await,
     };
 
     if let Err(e) = result {

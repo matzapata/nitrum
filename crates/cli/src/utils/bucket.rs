@@ -79,7 +79,7 @@ impl Bucket {
                     Ok(())
                 } else if msg.contains("BucketAlreadyExists") {
                     bail!(
-                        "S3 bucket `{bucket}` already exists in another account; use a different `name` in nitrum.toml"
+                        "S3 bucket `{bucket}` already exists in another account; use a different `project.name` in nitrum.toml"
                     );
                 } else {
                     Err(e.into())

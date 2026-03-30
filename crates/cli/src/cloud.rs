@@ -16,8 +16,8 @@ pub struct EnclaveCloudStack {
 impl EnclaveCloudStack {
     /// Loads AWS configuration and returns the stack handle.
     pub async fn new(config: &NitrumConfig) -> Result<Self> {
-        let bucket_name = format!("nitrum-{}", config.name);
-        let stack_name = format!("nitrum-{}", config.name);
+        let bucket_name = format!("nitrum-{}", config.project.name);
+        let stack_name = format!("nitrum-{}", config.project.name);
         let aws_sdk_config = aws_config::load_from_env().await;
         Ok(Self {
             bucket: Bucket::new(&aws_sdk_config, bucket_name),
@@ -58,7 +58,7 @@ impl EnclaveCloudStack {
         let eif_label: String = artifact.hash.chars().take(12).collect();
         let retain_str = if retain { "true" } else { "false" };
         let params = vec![
-            ("ProjectName".to_string(), config.name.clone()),
+            ("ProjectName".to_string(), config.project.name.clone()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
             ("EifS3Key".to_string(), eif_label.clone()),
@@ -76,7 +76,7 @@ impl EnclaveCloudStack {
             ),
             (
                 "ControlPlaneImage".to_string(),
-                config.control_plane.clone(),
+                config.runtime.control_plane.clone(),
             ),
         ];
 

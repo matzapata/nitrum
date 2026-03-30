@@ -6,13 +6,13 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 #[derive(Args)]
-pub struct DevArgs {
+pub struct LocalArgs {
     #[command(subcommand)]
-    pub command: DevCommand,
+    pub command: LocalCommand,
 }
 
 #[derive(Subcommand)]
-pub enum DevCommand {
+pub enum LocalCommand {
     /// Start local stack (docker compose up -d)
     Up(up::UpArgs),
     /// Stop local stack (docker compose down)
@@ -21,10 +21,10 @@ pub enum DevCommand {
     Logs(logs::LogsArgs),
 }
 
-pub async fn run(args: DevArgs) -> Result<()> {
+pub async fn run(args: LocalArgs) -> Result<()> {
     match args.command {
-        DevCommand::Up(a) => up::run(a).await,
-        DevCommand::Down(a) => down::run(a).await,
-        DevCommand::Logs(a) => logs::run(a).await,
+        LocalCommand::Up(a) => up::run(a).await,
+        LocalCommand::Down(a) => down::run(a).await,
+        LocalCommand::Logs(a) => logs::run(a).await,
     }
 }

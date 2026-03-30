@@ -1,4 +1,4 @@
-//! Delete the CloudFormation stack and EIF S3 bucket created by `nitrum deploy`.
+//! Delete the CloudFormation stack and EIF S3 bucket created by `nitrum cloud deploy`.
 
 use crate::{cloud::EnclaveCloudStack, utils};
 use anyhow::Result;
@@ -9,10 +9,10 @@ use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct DestroyArgs {
-    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
-    #[arg(long, value_name = "NAME")]
-    pub name: Option<String>,
-    /// Project directory (default: current directory); used to read `nitrum.toml` for stack name (`name`)
+    /// Use this project name instead of `project.name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long = "as", value_name = "NAME")]
+    pub as_name: Option<String>,
+    /// Project directory (default: current directory); used to read `nitrum.toml` for stack name (`project.name`)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
     /// Skip the confirmation prompt (for scripts)
@@ -26,7 +26,7 @@ pub async fn run(args: DestroyArgs) -> Result<()> {
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
     let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.name.clone())?;
+        .with_name(args.as_name.clone())?;
 
     // Create CloudFormation stack
     let cloud_stack = EnclaveCloudStack::new(&config).await?;

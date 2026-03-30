@@ -7,8 +7,6 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::{fs, io::AsyncWriteExt};
 
-use crate::constants;
-
 #[derive(Debug, Clone)]
 pub struct EnclaveArtifact {
     pub eif_path: PathBuf,
@@ -29,10 +27,17 @@ impl EnclaveArtifact {
             .with_context(|| format!("path not found or not readable: {}", path.display()))?;
 
         let eif_path = if canonical.is_dir() {
-            let image_tag = format!("nitrum-{}:latest", cfg.name);
-            build_enclave_image(&canonical, cfg.data_plane.as_str(), &image_tag).await?;
-            build_enclave_eif(&canonical, &image_tag).await?;
-            canonical.join("enclave.eif")
+            let image_tag = format!("nitrum-{}:latest", cfg.project.name);
+            let eif_path = project_eif_path(&canonical, &cfg.project.name);
+            build_enclave_image(&canonical, cfg.runtime.data_plane.as_str(), &image_tag).await?;
+            build_enclave_eif(
+                &canonical,
+                &image_tag,
+                &eif_path,
+                cfg.runtime.nitro_cli.as_str(),
+            )
+            .await?;
+            eif_path
         } else if canonical.is_file() {
             canonical
         } else {
@@ -43,7 +48,7 @@ impl EnclaveArtifact {
         };
 
         let hash = sha256_file(&eif_path).await?;
-        let describe_json = describe_eif_json(&eif_path).await?;
+        let describe_json = describe_eif_json(cfg, &eif_path).await?;
         let pcr0 = extract_pcr(&describe_json, "PCR0")?;
         let pcr1 = extract_pcr(&describe_json, "PCR1")?;
         let pcr2 = extract_pcr(&describe_json, "PCR2")?;
@@ -58,9 +63,17 @@ impl EnclaveArtifact {
     }
 }
 
+/// Default EIF output path for a Nitrum project: `.nitrum/artifacts/{project_name}.eif`.
+pub fn project_eif_path(project_root: &Path, project_name: &str) -> PathBuf {
+    project_root
+        .join(".nitrum")
+        .join("artifacts")
+        .join(format!("{project_name}.eif"))
+}
+
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 ///
-/// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `nitrum.toml` `name` (see `crates/data-plane/src/utils/ssm.rs`).
+/// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name` (see `crates/data-plane/src/utils/ssm.rs`).
 pub async fn build_enclave_image(
     root: &Path,
     data_plane_image: &str,
@@ -115,17 +128,43 @@ pub async fn build_enclave_image(
     );
 }
 
-/// Run `nitro-cli build-enclave` inside [`constants::NITRO_CLI_DOCKER_IMAGE`], writing `enclave.eif` under `project_root`.
+/// Run `nitro-cli build-enclave` inside `nitro_cli_image`, writing the EIF to `eif_path`.
 ///
 /// Requires a Docker socket mount (same pattern as the Nitrum README): the CLI container talks to the host daemon,
 /// so `docker_uri` must be an image available there (e.g. `nitrum-{name}:latest` from [`build_enclave_image`]).
-pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<()> {
+pub async fn build_enclave_eif(
+    project_root: &Path,
+    docker_uri: &str,
+    eif_path: &Path,
+    nitro_cli_image: &str,
+) -> Result<()> {
     let host_dir = project_root.canonicalize().with_context(|| {
         format!(
             "could not resolve project directory {}",
             project_root.display()
         )
     })?;
+    let output_path = if eif_path.is_absolute() {
+        eif_path.to_path_buf()
+    } else {
+        host_dir.join(eif_path)
+    };
+    let output_dir = output_path.parent().with_context(|| {
+        format!(
+            "EIF output path must have a parent directory: {}",
+            output_path.display()
+        )
+    })?;
+    fs::create_dir_all(output_dir).await.with_context(|| {
+        format!(
+            "failed to create EIF artifact directory {}",
+            output_dir.display()
+        )
+    })?;
+    let output_file_name = output_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("EIF output path must end with a file name")?;
 
     let output = Command::new("docker")
         .arg("run")
@@ -135,13 +174,13 @@ pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<
         .arg("-v")
         .arg("/var/run/docker.sock:/var/run/docker.sock")
         .arg("-v")
-        .arg(format!("{}:/output", host_dir.display()))
-        .arg(constants::NITRO_CLI_DOCKER_IMAGE)
+        .arg(format!("{}:/output", output_dir.display()))
+        .arg(nitro_cli_image)
         .arg("build-enclave")
         .arg("--docker-uri")
         .arg(docker_uri)
         .arg("--output-file")
-        .arg("/output/enclave.eif")
+        .arg(format!("/output/{output_file_name}"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -169,9 +208,9 @@ pub async fn build_enclave_eif(project_root: &Path, docker_uri: &str) -> Result<
     );
 }
 
-/// Run `nitro-cli describe-eif` in [`constants::NITRO_CLI_DOCKER_IMAGE`]; prints JSON to stdout.
-pub async fn describe_eif(eif_path: &Path) -> Result<()> {
-    let describe_json = describe_eif_json(eif_path).await?;
+/// Run `nitro-cli describe-eif` using the configured Nitro CLI image; prints JSON to stdout.
+pub async fn describe_eif(cfg: &NitrumConfig, eif_path: &Path) -> Result<()> {
+    let describe_json = describe_eif_json(cfg, eif_path).await?;
     let mut stdout = tokio::io::stdout();
     let mut rendered = serde_json::to_vec_pretty(&describe_json)
         .context("failed to format describe-eif output")?;
@@ -183,7 +222,7 @@ pub async fn describe_eif(eif_path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn describe_eif_json(eif_path: &Path) -> Result<Value> {
+async fn describe_eif_json(cfg: &NitrumConfig, eif_path: &Path) -> Result<Value> {
     let eif_path = eif_path
         .canonicalize()
         .with_context(|| format!("EIF not found or path not readable: {}", eif_path.display()))?;
@@ -212,7 +251,7 @@ async fn describe_eif_json(eif_path: &Path) -> Result<Value> {
         .arg("linux/amd64")
         .arg("-v")
         .arg(format!("{}:/nitrum-eif:ro", parent.display()))
-        .arg(constants::NITRO_CLI_DOCKER_IMAGE)
+        .arg(cfg.runtime.nitro_cli.as_str())
         .arg("describe-eif")
         .arg("--eif-path")
         .arg(&container_path)

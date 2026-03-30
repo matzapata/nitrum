@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 80 and 443), KMS, DynamoDB,
   SSM parameters under /nitrum/{ProjectName}/data-plane/ (KMS key id + DynamoDB table) and /nitrum/{ProjectName}/env/ (app secrets), plus VPC endpoints.
-  ProjectName: stack name, DynamoDB table, KMS alias, log group, tags, launch template, and SSM layout.
+  ProjectName: stack name, DynamoDB table, KMS alias, log groups, tags, launch template, and SSM layout.
   Retain defaults false.
   Upload the EIF to S3; set EifVersionLabel when you publish a new EIF to refresh instances.
   Two AZs, single NAT, NLB security group and cross-zone load balancing enabled.
@@ -42,7 +42,7 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'false'
     Description: >
-      When true, retain KMS key, DynamoDB table, CloudWatch log group, and SSM parameters on stack
+      When true, retain KMS key, DynamoDB table, CloudWatch log groups, and SSM parameters on stack
       delete (typical production). When false (default), delete them with the stack (typical dev).
 
   EifS3Bucket:
@@ -528,13 +528,21 @@ Resources:
       Value: !Ref EnclaveTable
       Description: !Sub "DynamoDB table name for Nitrum data-plane (${ProjectName})"
 
-  # ── CloudWatch Log Group ─────────────────────────────────────────────────────
-  EnclaveLogGroup:
+  # ── CloudWatch Log Groups ────────────────────────────────────────────────────
+  DataPlaneLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: !If [RetainData, Retain, Delete]
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
-      LogGroupName: !Sub "/nitrum/${ProjectName}/enclave"
+      LogGroupName: !Sub "/nitrum/${ProjectName}/data-plane"
+      RetentionInDays: 7
+
+  ControlPlaneLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      LogGroupName: !Sub "/nitrum/${ProjectName}/control-plane"
       RetentionInDays: 7
 
   # ── IAM (CloudFormation-generated physical names) ────────────────────────────
@@ -588,7 +596,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                   - logs:DescribeLogStreams
-                Resource: !GetAtt EnclaveLogGroup.Arn
+                Resource:
+                  - !GetAtt DataPlaneLogGroup.Arn
+                  - !Sub "${DataPlaneLogGroup.Arn}:*"
+                  - !GetAtt ControlPlaneLogGroup.Arn
+                  - !Sub "${ControlPlaneLogGroup.Arn}:*"
 
               - Sid: SsmParams
                 Effect: Allow
@@ -694,7 +706,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} --debug-mode
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=/nitrum/${ProjectName}/control-plane --log-opt awslogs-create-group=false -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} --debug-mode
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]

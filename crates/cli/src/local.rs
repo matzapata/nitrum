@@ -18,8 +18,8 @@ impl<'a> EnclaveLocalStack<'a> {
     pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Self {
         Self {
             project_root,
-            enclave_image: format!("nitrum-{}:dev", cfg.name),
-            data_plane_image: cfg.data_plane.clone(),
+            enclave_image: format!("nitrum-{}:dev", cfg.project.name),
+            data_plane_image: cfg.runtime.data_plane.clone(),
         }
     }
 

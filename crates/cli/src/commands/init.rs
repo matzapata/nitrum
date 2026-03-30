@@ -4,7 +4,8 @@ use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
 use shared::config::{
-    HealthCheck, NitrumConfig, Scaling, Service, TlsTermination, validate_project_name,
+    HealthCheck, NitrumConfig, Project, Runtime, Scaling, Service, TlsTermination,
+    validate_project_name,
 };
 use std::env;
 use std::fs;
@@ -19,7 +20,7 @@ pub struct InitArgs {
 pub async fn run(args: InitArgs) -> Result<()> {
     validate_project_name(&args.name).map_err(|msg| {
         anyhow::anyhow!(
-            "{msg} (project directory name is used as `name` in nitrum.toml for `nitrum deploy`)"
+            "{msg} (project directory name is used as `project.name` in nitrum.toml for `nitrum cloud deploy`)"
         )
     })?;
 
@@ -65,9 +66,14 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
 fn sample_nitro_config(name: &str) -> String {
     let config = NitrumConfig {
-        name: name.to_string(),
-        data_plane: "matzapata/nitrum-data-plane:dev".to_string(),
-        control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
+        project: Project {
+            name: name.to_string(),
+        },
+        runtime: Runtime {
+            data_plane: "matzapata/nitrum-data-plane:latest".to_string(),
+            control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
+            nitro_cli: "matzapata/nitrum-nitro-cli:latest".to_string(),
+        },
         service: Service::default(),
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),

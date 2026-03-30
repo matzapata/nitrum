@@ -1,4 +1,4 @@
-//! Manage application environment variables in SSM Parameter Store (`nitrum env set|get|delete`).
+//! Manage application environment variables in SSM Parameter Store (`nitrum cloud env set|get|delete`).
 
 use anyhow::{Result, bail};
 use clap::Args;
@@ -11,9 +11,9 @@ use crate::utils::{self, Ssm};
 
 #[derive(Args)]
 pub struct EnvArgs {
-    /// Use this project `name` instead of `name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
-    #[arg(long, value_name = "NAME")]
-    pub name: Option<String>,
+    /// Use this project name instead of `project.name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
+    #[arg(long = "as", value_name = "NAME")]
+    pub as_name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
@@ -42,19 +42,19 @@ pub async fn run(args: EnvArgs) -> Result<()> {
         .path
         .unwrap_or_else(|| env::current_dir().expect("current directory"));
     let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.name.clone())?;
+        .with_name(args.as_name.clone())?;
 
     let ssm = Ssm::new().await?;
 
     match args.command {
         EnvCommand::Set { key, value } => {
             validate_env_key(&key)?;
-            let name = app_env_parameter_name(&config.name, &key);
+            let name = app_env_parameter_name(&config.project.name, &key);
             ssm.set(&name, value).await?;
             println!("Set {key} in SSM ({name})");
         }
         EnvCommand::Get => {
-            let path = app_env_ssm_path_prefix(&config.name);
+            let path = app_env_ssm_path_prefix(&config.project.name);
             let rows = ssm.list(&path).await?;
             if rows.is_empty() {
                 println!("(no parameters under {path}/)");
@@ -66,7 +66,7 @@ pub async fn run(args: EnvArgs) -> Result<()> {
         }
         EnvCommand::Delete { key } => {
             validate_env_key(&key)?;
-            let name = app_env_parameter_name(&config.name, &key);
+            let name = app_env_parameter_name(&config.project.name, &key);
             if !utils::confirm(&format!("Delete `{key}` from SSM ({name})?")) {
                 return Ok(());
             }
