@@ -66,8 +66,6 @@ pub async fn init() {
     info!("frame forwarding started (TAP ↔ VSOCK)");
 }
 
-// ── SockAddrVm ──────────────────────────────────────────────────────────
-
 #[repr(C)]
 struct SockAddrVm {
     svm_family: u16,
@@ -76,8 +74,6 @@ struct SockAddrVm {
     svm_cid: u32,
     svm_zero: [u8; 4],
 }
-
-// ── TAP device ──────────────────────────────────────────────────────────
 
 fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
     assert!(
@@ -146,15 +142,11 @@ fn bring_loopback_up() {
     run_ip(&["link", "set", "dev", "lo", "up"]);
 }
 
-// ── resolv.conf ─────────────────────────────────────────────────────────
-
 fn write_resolv_conf() {
     std::fs::create_dir_all("/run/resolvconf").expect("failed to create /run/resolvconf");
     std::fs::write("/run/resolvconf/resolv.conf", "nameserver 192.168.127.1\n")
         .expect("failed to write /run/resolvconf/resolv.conf");
 }
-
-// ── VSOCK connection ────────────────────────────────────────────────────
 
 fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
     let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
@@ -189,13 +181,9 @@ fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
     Ok(fd)
 }
 
-// ── Handshake ───────────────────────────────────────────────────────────
-
 fn send_handshake(fd: libc::c_int) -> std::io::Result<()> {
     write_all_raw(fd, b"POST /connect HTTP/1.1\r\nHost: \r\n\r\n")
 }
-
-// ── Raw fd I/O helpers ──────────────────────────────────────────────────
 
 fn read_exact_raw(fd: libc::c_int, buf: &mut [u8]) -> std::io::Result<()> {
     let mut pos = 0;
@@ -238,8 +226,6 @@ fn write_all_raw(fd: libc::c_int, buf: &[u8]) -> std::io::Result<()> {
     }
     Ok(())
 }
-
-// ── Frame forwarding ────────────────────────────────────────────────────
 
 /// TAP → VSOCK: read raw Ethernet frames from the TAP device, prepend a
 /// 2-byte LE length header, and write to the VSOCK stream.

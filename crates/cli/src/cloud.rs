@@ -52,11 +52,13 @@ impl EnclaveCloudStack {
         &self,
         artifact: &EnclaveArtifact,
         retain: bool,
+        debug_mode: bool,
         config: &NitrumConfig,
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
         let eif_label: String = artifact.hash.chars().take(12).collect();
         let retain_str = if retain { "true" } else { "false" };
+        let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
         let params = vec![
             ("ProjectName".to_string(), config.project.name.clone()),
             ("Retain".to_string(), retain_str.to_string()),
@@ -77,6 +79,10 @@ impl EnclaveCloudStack {
             (
                 "ControlPlaneImage".to_string(),
                 config.runtime.control_plane.clone(),
+            ),
+            (
+                "ControlPlaneDebugArg".to_string(),
+                control_plane_debug_arg.to_string(),
             ),
         ];
 

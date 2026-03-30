@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Args;
-use clap::ValueEnum;
 use shared::config::NitrumConfig;
 use std::collections::HashSet;
 use std::env;
@@ -27,15 +26,6 @@ pub struct LogsArgs {
     /// Optional CloudWatch Logs filter pattern
     #[arg(long)]
     pub filter: Option<String>,
-    /// Which deployed service logs to read
-    #[arg(long, value_enum, default_value_t = LogService::DataPlane)]
-    pub service: LogService,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum LogService {
-    DataPlane,
-    ControlPlane,
 }
 
 pub async fn run(args: LogsArgs) -> Result<()> {
@@ -47,10 +37,7 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 
     let aws_sdk_config = aws_config::load_from_env().await;
     let client = aws_sdk_cloudwatchlogs::Client::new(&aws_sdk_config);
-    let log_group = match args.service {
-        LogService::DataPlane => format!("/nitrum/{}/data-plane", config.project.name),
-        LogService::ControlPlane => format!("/nitrum/{}/control-plane", config.project.name),
-    };
+    let log_group = format!("/nitrum/{}/control-plane", config.project.name);
 
     let now_ms = now_epoch_millis();
     let lookback_ms = (args.since_minutes.saturating_mul(60).saturating_mul(1000)) as i64;

@@ -15,7 +15,7 @@ RUN cd gvisor-tap-vsock && CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldfla
 # control-plane builder
 ################################################################################
 
-FROM rust:1.88-slim AS control-plane-builder
+FROM rust:1.92-slim AS control-plane-builder
 
 WORKDIR /build
 

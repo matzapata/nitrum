@@ -109,6 +109,11 @@ Parameters:
     Description: >
       Full Docker image reference for the Nitrum control-plane on EC2 (registry/repo:tag), e.g. from nitrum.toml control_plane.
 
+  ControlPlaneDebugArg:
+    Type: String
+    Default: ""
+    Description: Optional control-plane debug CLI arg (`--debug-mode` or empty).
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -706,7 +711,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=/nitrum/${ProjectName}/control-plane --log-opt awslogs-create-group=false -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} --debug-mode
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]

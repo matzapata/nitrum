@@ -22,6 +22,9 @@ pub struct DeployArgs {
     /// Path to EIF file to deploy (default: `.nitrum/artifacts/{name}.eif` in project directory)
     #[arg(long, value_name = "PATH")]
     pub eif: Option<PathBuf>,
+    /// Pass `--debug-mode` to control-plane runtime
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub debug_mode: bool,
 }
 
 pub async fn run(args: DeployArgs) -> Result<()> {
@@ -62,7 +65,8 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let bucket = cloud_stack.bucket_name();
     let retain_str = if args.retain { "true" } else { "false" };
     if !utils::confirm(&format!(
-        "Deploy CloudFormation stack (ProjectName={stack_name}, Retain={retain_str}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
+        "Deploy CloudFormation stack (ProjectName={stack_name}, Retain={retain_str}, DebugMode={}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
+        args.debug_mode,
         config.scaling.min_replicas,
         config.scaling.max_replicas,
         config.scaling.desired_replicas,
@@ -77,7 +81,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let outputs = utils::with_spinner(
         "Deploying artifact and CloudFormation stack…",
         &deploy_success,
-        cloud_stack.deploy(&artifact, args.retain, &config),
+        cloud_stack.deploy(&artifact, args.retain, args.debug_mode, &config),
     )
     .await?;
 

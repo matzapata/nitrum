@@ -1,15 +1,14 @@
+use crate::constants::{EIF_PATH, ENCLAVE_CID, ENCLAVE_HEALTH_POLL, MAX_BACKOFF_SECS, NITRO_CLI};
 use serde_json::Value;
 use std::process::Stdio;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::Command,
+    process::Command as TokioCommand,
+    task::JoinHandle,
 };
-use tracing::info;
-
-const NITRO_CLI: &str = "nitro-cli";
-const EIF_PATH: &str = "/app/enclave.eif";
-const ENCLAVE_CID: &str = "16";
+use tracing::{error, info, warn};
 
 #[derive(Error, Debug)]
 pub enum EnclaveError {
@@ -49,32 +48,125 @@ impl NitroCommand {
     }
 }
 
-pub struct Enclave;
+pub struct Enclave {
+    debug_mode: bool,
+    cpu_count: u32,
+    memory_mib: u32,
+    supervisor: Option<JoinHandle<()>>,
+}
 
 impl Enclave {
-    pub async fn run(
+    #[must_use]
+    pub fn new(debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
+        Self {
+            debug_mode,
+            cpu_count,
+            memory_mib,
+            supervisor: None,
+        }
+    }
+
+    /// Starts a supervisor task that keeps the Nitro enclave running.
+    pub fn run(&mut self) {
+        if self.supervisor.is_some() {
+            return;
+        }
+        let debug_mode = self.debug_mode;
+        let cpu_count = self.cpu_count;
+        let memory_mib = self.memory_mib;
+        self.supervisor = Some(tokio::spawn(async move {
+            if let Err(e) = Self::run_loop(debug_mode, cpu_count, memory_mib).await {
+                error!(error = %e, "enclave supervisor exited with error");
+            }
+        }));
+    }
+
+    async fn run_loop(
         debug_mode: bool,
         cpu_count: u32,
         memory_mib: u32,
     ) -> Result<(), EnclaveError> {
-        let running_enclaves =
-            Self::run_command_capture_stdout(&[NITRO_CLI, NitroCommand::DescribeEnclaves.as_str()])
-                .await?;
-        let enclaves: Value = serde_json::from_str(&running_enclaves)?;
-        let empty: Vec<Value> = vec![];
-        let enclaves_array = enclaves.as_array().unwrap_or(&empty);
-        if !enclaves_array.is_empty() {
-            info!("There's an enclave already running on this host. Terminating it...");
-            Self::shutdown_all_enclaves().await?;
-            info!("Enclave terminated. Waiting 10s...");
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        } else {
-            info!("No enclaves currently running on this host.");
-        }
+        let mut backoff_secs: u64 = 0;
 
+        loop {
+            match Self::describe_enclaves_stdout().await {
+                Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                    Ok(enclaves) => {
+                        let empty: Vec<Value> = vec![];
+                        let enclaves_array = enclaves.as_array().unwrap_or(&empty);
+                        if !enclaves_array.is_empty() {
+                            backoff_secs = 1;
+                            tokio::time::sleep(ENCLAVE_HEALTH_POLL).await;
+                            continue;
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "describe-enclaves returned invalid JSON; backing off");
+                        Self::sleep_backoff(&mut backoff_secs).await;
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    warn!(error = %e, "describe-enclaves failed; backing off");
+                    Self::sleep_backoff(&mut backoff_secs).await;
+                    continue;
+                }
+            }
+
+            if backoff_secs > 0 {
+                info!(
+                    seconds = backoff_secs.min(MAX_BACKOFF_SECS),
+                    "waiting before enclave (re)start"
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs.min(MAX_BACKOFF_SECS))).await;
+            }
+
+            match Self::run_enclave_once(debug_mode, cpu_count, memory_mib).await {
+                Ok(()) => {
+                    info!("Enclave started... Waiting 5 seconds for warmup.");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    if debug_mode {
+                        if let Err(e) = Self::send_debug_logs_to_stdout().await {
+                            warn!(error = %e, "debug log attach failed; continuing supervision");
+                        }
+                    }
+                    backoff_secs = 1;
+                }
+                Err(e) => {
+                    warn!(error = %e, "run-enclave failed");
+                    Self::advance_backoff(&mut backoff_secs);
+                }
+            }
+        }
+    }
+
+    async fn sleep_backoff(backoff_secs: &mut u64) {
+        let wait = (*backoff_secs).max(1).min(MAX_BACKOFF_SECS);
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+        Self::advance_backoff(backoff_secs);
+    }
+
+    fn advance_backoff(backoff_secs: &mut u64) {
+        *backoff_secs = if *backoff_secs == 0 {
+            1
+        } else {
+            (*backoff_secs * 2).min(MAX_BACKOFF_SECS)
+        };
+    }
+
+    async fn describe_enclaves_stdout() -> Result<String, EnclaveError> {
+        Self::run_command_capture_stdout(&[NITRO_CLI, NitroCommand::DescribeEnclaves.as_str()])
+            .await
+    }
+
+    async fn run_enclave_once(
+        debug_mode: bool,
+        cpu_count: u32,
+        memory_mib: u32,
+    ) -> Result<(), EnclaveError> {
         let cpu = cpu_count.to_string();
         let memory = memory_mib.to_string();
-        info!(cpu_count = %cpu, memory_mib = %memory, "Starting new enclave...");
+        info!(cpu_count = %cpu, memory_mib = %memory, "Starting enclave...");
         let mut run_args: Vec<&str> = vec![
             NITRO_CLI,
             NitroCommand::RunEnclave.as_str(),
@@ -95,14 +187,6 @@ impl Enclave {
         }
 
         Self::run_command_capture_stdout(&run_args).await?;
-
-        info!("Enclave started... Waiting 5 seconds for warmup.");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-
-        if debug_mode {
-            Self::send_debug_logs_to_stdout().await?;
-        }
-
         Ok(())
     }
 
@@ -125,7 +209,7 @@ impl Enclave {
         let enclaves_array = enclaves.as_array().unwrap_or(&empty).clone();
         for enclave in enclaves_array {
             if let Some(id) = enclave["EnclaveID"].as_str() {
-                let mut child = Command::new(NITRO_CLI)
+                let mut child = TokioCommand::new(NITRO_CLI)
                     .args([NitroCommand::Console.as_str(), "--enclave-id", id])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -145,7 +229,7 @@ impl Enclave {
     }
 
     async fn run_command_capture_stdout(args: &[&str]) -> Result<String, EnclaveError> {
-        let output = Command::new(args[0])
+        let output = TokioCommand::new(args[0])
             .args(&args[1..])
             .stderr(Stdio::inherit())
             .output()
@@ -159,5 +243,26 @@ impl Enclave {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+impl Drop for Enclave {
+    fn drop(&mut self) {
+        if let Some(handle) = self.supervisor.take() {
+            handle.abort();
+        }
+
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async {
+                if let Err(e) = Enclave::shutdown_all_enclaves().await {
+                    warn!(error = %e, "failed to terminate enclaves on shutdown");
+                }
+            });
+        } else {
+            let _ = std::process::Command::new(NITRO_CLI)
+                .args([NitroCommand::TerminateEnclave.as_str(), "--all"])
+                .stderr(Stdio::inherit())
+                .output();
+        }
     }
 }

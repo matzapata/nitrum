@@ -16,7 +16,7 @@ pub enum NitrumConfigError {
     },
     #[error("invalid config in {path}: {message}")]
     Invalid { path: PathBuf, message: String },
-    #[error("invalid `name` override: {message}")]
+    #[error("invalid `project.name` override: {message}")]
     NameOverrideInvalid { message: String },
 }
 
@@ -186,21 +186,52 @@ impl Service {
     }
 }
 
-fn default_data_plane_image() -> String {
-    "matzapata/nitrum-data-plane:latest".to_string()
+/// `[project]` in `nitrum.toml`.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Project {
+    pub name: String,
 }
 
-fn default_control_plane_image() -> String {
-    "matzapata/nitrum-control-plane:latest".to_string()
+impl Project {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_project_name(&self.name)
+    }
+}
+
+/// `[runtime]` in `nitrum.toml`: Docker images for Nitrum platform components.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Runtime {
+    pub data_plane: String,
+
+    pub control_plane: String,
+    /// Docker image for `nitro-cli` (used by `nitrum build` / `nitrum describe` for EIF tooling).
+    pub nitro_cli: String,
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self {
+            data_plane: "matzapata/nitrum-data-plane:latest".to_string(),
+            control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
+            nitro_cli: "matzapata/nitrum-nitro-cli:latest".to_string(),
+        }
+    }
+}
+
+impl Runtime {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_docker_image_ref(&self.data_plane, "runtime.data_plane")?;
+        validate_docker_image_ref(&self.control_plane, "runtime.control_plane")?;
+        validate_docker_image_ref(&self.nitro_cli, "runtime.nitro_cli")?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct NitrumConfig {
-    pub name: String,
-    #[serde(default = "default_data_plane_image")]
-    pub data_plane: String,
-    #[serde(default = "default_control_plane_image")]
-    pub control_plane: String,
+    pub project: Project,
+    #[serde(default)]
+    pub runtime: Runtime,
     pub service: Service,
     pub health_check: HealthCheck,
     pub scaling: Scaling,
@@ -210,9 +241,8 @@ pub struct NitrumConfig {
 impl NitrumConfig {
     /// Validates semantic constraints beyond TOML shape.
     pub fn validate(&self) -> Result<(), String> {
-        validate_project_name(&self.name)?;
-        validate_docker_image_ref(&self.data_plane, "data_plane")?;
-        validate_docker_image_ref(&self.control_plane, "control_plane")?;
+        self.project.validate()?;
+        self.runtime.validate()?;
         self.service.validate()?;
         self.health_check.validate()?;
         self.scaling.validate()?;
@@ -220,15 +250,14 @@ impl NitrumConfig {
         Ok(())
     }
 
-    /// Replace [`Self::name`] when `override_name` is [`Some`], using the same rules as `name` in `nitrum.toml`.
+    /// Replace [`Project::name`] when `override_name` is [`Some`], using the same rules as `project.name` in `nitrum.toml`.
     pub fn with_name(mut self, override_name: Option<String>) -> Result<Self, NitrumConfigError> {
         let Some(n) = override_name else {
             return Ok(self);
         };
-        validate_project_name(&n).map_err(|message| NitrumConfigError::NameOverrideInvalid {
-            message,
-        })?;
-        self.name = n;
+        validate_project_name(&n)
+            .map_err(|message| NitrumConfigError::NameOverrideInvalid { message })?;
+        self.project.name = n;
         Ok(self)
     }
 }
@@ -256,21 +285,21 @@ fn validate_docker_image_ref(value: &str, key: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Rules for [`NitrumConfig::name`]: Must be compatible with CloudFormation, SSM, Docker and S3
+/// Rules for [`Project::name`]: Must be compatible with CloudFormation, SSM, Docker and S3
 pub fn validate_project_name(name: &str) -> Result<(), String> {
     if name != name.trim() {
-        return Err("`name` must not have leading or trailing whitespace".to_string());
+        return Err("`project.name` must not have leading or trailing whitespace".to_string());
     }
     if name.is_empty() {
-        return Err("`name` must not be empty".to_string());
+        return Err("`project.name` must not be empty".to_string());
     }
 
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
-        return Err("`name` must not be empty".to_string());
+        return Err("`project.name` must not be empty".to_string());
     };
     if !matches!(first, 'a'..='z') {
-        return Err("`name` must start with a lowercase letter (a-z)".to_string());
+        return Err("`project.name` must start with a lowercase letter (a-z)".to_string());
     }
 
     let mut rest_len = 0usize;
@@ -278,13 +307,13 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
         rest_len += 1;
         if !matches!(c, 'a'..='z' | '0'..='9' | '-') {
             return Err(format!(
-                "`name` after the first character must use only lowercase letters, digits, or hyphens (invalid character {c:?})"
+                "`project.name` after the first character must use only lowercase letters, digits, or hyphens (invalid character {c:?})"
             ));
         }
     }
     if !(2..=127).contains(&rest_len) {
         return Err(format!(
-            "`name` must be 3-128 characters (one leading letter plus 2-127 more); got {} character(s) after the first",
+            "`project.name` must be 3-128 characters (one leading letter plus 2-127 more); got {} character(s) after the first",
             rest_len
         ));
     }

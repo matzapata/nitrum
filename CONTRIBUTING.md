@@ -5,7 +5,7 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 ## Development setup
 
 - **Rust**: A recent stable toolchain ([rustup](https://rustup.rs/)).
-- **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum dev` (Compose).
+- **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum local` (Compose).
 - **just** (optional): Recipes in the [`justfile`](justfile) mirror common commands (`check`, `lint`, `format`, Docker image builds).
 
 Clone the repo and run from the workspace root:

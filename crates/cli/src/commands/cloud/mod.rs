@@ -20,7 +20,7 @@ pub enum CloudCommand {
     Destroy(destroy::DestroyArgs),
     /// Application environment variables in SSM Parameter Store
     Env(env::EnvArgs),
-    /// Read deployed CloudWatch logs (control-plane + enclave console)
+    /// Read deployed control-plane CloudWatch logs
     Logs(logs::LogsArgs),
 }
 

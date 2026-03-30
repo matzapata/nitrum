@@ -61,7 +61,7 @@ impl Deref for RuntimeConfig {
 
 impl RuntimeConfig {
     /// Load infra: [`ImdsClient`] for region, instance id, and SDK credentials; [`SsmParameters`]
-    /// for `kms_key_id` and `dynamodb_table` at fixed paths `/nitrum/{nitrum.toml name}/data-plane/…`.
+    /// for `kms_key_id` and `dynamodb_table` at fixed paths `/nitrum/{project.name}/data-plane/…`.
     ///
     /// There is no generic egress probe here: on Nitro, API traffic uses the TAP↔gvproxy path;
     /// probing arbitrary hosts such as `httpbin.org` fails in many setups and would block startup for no benefit.
@@ -104,7 +104,7 @@ impl RuntimeConfig {
 
         info!("loading DynamoDB config");
         let dynamodb_endpoint = std::env::var("NITRUM_DYNAMODB_ENDPOINT_URL").ok();
-        let dynamodb_path = data_plane_dynamodb_parameter_name(&nitrum.name);
+        let dynamodb_path = data_plane_dynamodb_parameter_name(&nitrum.project.name);
         let dynamodb_table = ssm
             .get_parameter(&dynamodb_path)
             .await
@@ -116,7 +116,7 @@ impl RuntimeConfig {
 
         info!("loading KMS config");
         let kms_endpoint = std::env::var("NITRUM_KMS_ENDPOINT_URL").ok();
-        let kms_path = data_plane_kms_parameter_name(&nitrum.name);
+        let kms_path = data_plane_kms_parameter_name(&nitrum.project.name);
         let kms_key_id = ssm.get_parameter(&kms_path).await.with_context(|| {
             format!(
                 "SSM kms_key_id (expected {kms_path}, e.g. /nitrum/myapp/data-plane/kms_key_id)"
@@ -124,7 +124,7 @@ impl RuntimeConfig {
         })?;
 
         info!("loading app env from SSM");
-        let app_env_path = app_env_parameter_name(&nitrum.name);
+        let app_env_path = app_env_parameter_name(&nitrum.project.name);
         let user_env = ssm
             .get_parameters_by_path_recursive(&app_env_path)
             .await

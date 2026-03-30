@@ -104,7 +104,7 @@ async fn ingress_status() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        r#"{"status":"ok"}"#, 
+        r#"{"status":"ok"}"#,
     )
 }
 

@@ -1,8 +1,11 @@
+mod constants;
 mod enclave;
+mod monitoring;
 mod networking;
 
 use clap::Parser;
 use enclave::Enclave;
+use monitoring::Monitoring;
 use networking::Networking;
 use tracing::info;
 
@@ -24,29 +27,25 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let monitoring = Monitoring::init().await;
 
-    let _networking = Networking::run().await.unwrap_or_else(|e| {
+    info!("starting networking");
+    let mut networking = Networking::new();
+    if let Err(e) = networking.run().await {
         tracing::error!(error = %e, "failed to start networking");
         std::process::exit(1);
-    });
-    info!("networking up, waiting for shutdown signal");
+    }
 
-    // TODO: tokio spawn, also restart on crash
-    let _enclave = Enclave::run(args.debug_mode, args.cpu_count, args.memory_mib)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!(error = %e, "failed to start enclave");
-        });
+    info!("starting enclave");
+    let mut enclave = Enclave::new(args.debug_mode, args.cpu_count, args.memory_mib);
+    enclave.run();
+    info!("enclave started");
 
-    info!("enclave started, waiting for shutdown signal");
+    info!("waiting for shutdown signal");
     tokio::signal::ctrl_c()
         .await
         .expect("failed to listen for ctrl_c");
     info!("received SIGINT, shutting down");
+
+    monitoring.shutdown().await;
 }

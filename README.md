@@ -27,10 +27,11 @@ On the **parent EC2 instance**, the **control-plane** starts **gvproxy** (listen
 ## CLI and workflow
 
 - **`nitrum init`** — Sample app, `Dockerfile`, and `nitrum.toml`.
-- **`nitrum build`** — Enclave image and **`enclave.eif`** via Docker and **nitro-cli**.
-- **`nitrum dev`** — Local **Docker Compose** stack.
-- **`nitrum deploy` / `nitrum destroy`** — **S3** EIF artifact and **CloudFormation** stack.
-- **`nitrum env set|get|delete`** — Application secrets in **SSM** (`SecureString` under `/nitrum/{name}/env/` for `nitrum.toml` **`name`**); the **data-plane** loads them at startup and injects them into the **user process** environment (overlay on the parent env).
+- **`nitrum build`** — Enclave image and **`.nitrum/artifacts/{name}.eif`** via Docker and **nitro-cli**.
+- **`nitrum local`** — Local **Docker Compose** stack (`up`, `down`, `logs`).
+- **`nitrum cloud deploy` / `nitrum cloud destroy`** — **S3** EIF artifact and **CloudFormation** stack.
+- **`nitrum cloud env set|get|delete`** — Application secrets in **SSM** (`SecureString` under `/nitrum/{name}/env/` for `nitrum.toml` **`project.name`**); the **data-plane** loads them at startup and injects them into the **user process** environment (overlay on the parent env).
+- **`nitrum cloud logs`** — **CloudWatch** logs for deployed control-plane and data-plane.
 - **`nitrum describe`** — **EIF** measurements/metadata via **nitro-cli** in Docker.
 
 Install from the repo: `cargo install --path crates/cli` (binary **`nitrum`**; Cargo package name is still **`cli`** — use `cargo run -p cli -- …` without installing). Command reference: [docs/usage.md](docs/usage.md).
@@ -59,8 +60,8 @@ Install from the repo: `cargo install --path crates/cli` (binary **`nitrum`**; C
 cargo install --path crates/cli
 nitrum init my-app
 cd my-app
-nitrum dev up
-# nitrum build && nitrum deploy   # AWS: credentials + EIF when ready
+nitrum local up
+# nitrum build && nitrum cloud deploy   # AWS: credentials + EIF when ready
 ```
 
 ## Status
@@ -69,20 +70,21 @@ Nitrum is **early-stage**. APIs, defaults, and CloudFormation resources may chan
 
 
 <!-- 
-TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-multi-party-crypto-wallet-with-aws-nitro-enclave/blob/main/README.md
-- [X] Option to override project name in cli, so we can do deploy --proy-name ...-staging
-- [ ] Control plane resilience: watchdog, restart if killed, clearer logs, health endpoints
-- [x] Env vars support (SSM params via `nitrum env`, data-plane startup load)
-- [ ] Enclave / control-plane logs to CloudWatch
-- [ ] Networking cleanup
-- [ ] CloudFormation: PCR0 / KMS policy alignment documented and verified
-- [ ] Reproducible builds
-- [ ] Js sdk?
+Docs
+- [ ] Reproducible builds (add docs on this, it's achieved by fixing with sha the artifacts images and then user docker image)
+- [] TODO: docs with diagrams like https://github.com/aws-samples/custom-attestation-multi-party-crypto-wallet-with-aws-nitro-enclave/blob/main/README.md
+- [ ] Js sample
 - [ ] Add samples for MCP / MPC / etc
-- [ ] Egress allowlist enforced end-to-end (`[egress].destinations` in config today)
 
 Testing
+- [ ] Some automated tests
+- [ ] TODO: add but after testing the rest. CloudFormation: PCR0 / KMS policy alignment documented and verified
 - [ ] Exercise TLS certificates with ACME in real deployments
 - [ ] test cert in attestation
 - [ ] Verify certs are stored encrypted at rest
+
+
+Release
+- [ ] Pipeline
+- [ ] tags, images, etc
 -->

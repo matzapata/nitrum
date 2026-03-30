@@ -194,7 +194,7 @@ sequenceDiagram
 
 ### Local development
 
-`nitrum dev` brings up a Docker Compose stack so you can iterate without launching a full AWS deployment. The exact topology is defined in the bundled Compose template the CLI materializes under your project.
+`nitrum local` brings up a Docker Compose stack so you can iterate without launching a full AWS deployment. The exact topology is defined in the bundled Compose template the CLI materializes under your project.
 
 ```mermaid
 sequenceDiagram
@@ -202,16 +202,16 @@ sequenceDiagram
     participant CLI as nitrum
     participant DC as Docker Compose
 
-    Dev->>CLI: nitrum dev up
+    Dev->>CLI: nitrum local up
     CLI->>DC: up -d
     DC-->>Dev: services running
-    Dev->>CLI: nitrum dev logs
+    Dev->>CLI: nitrum local logs
     CLI->>DC: logs -f
 ```
 
 ### Build and deploy
 
-`nitrum build` produces a Docker image and an **`enclave.eif`** using **nitro-cli** in Docker. `nitrum deploy` reads `nitrum.toml`, uploads the EIF, and drives **CloudFormation** so instances can run the new image.
+`nitrum build` produces a Docker image and an **`.nitrum/artifacts/{project.name}.eif`** artifact using **nitro-cli** in Docker. `nitrum cloud deploy` reads `nitrum.toml`, uploads the EIF, and drives **CloudFormation** so instances can run the new image.
 
 ```mermaid
 sequenceDiagram
@@ -223,9 +223,9 @@ sequenceDiagram
 
     Dev->>CLI: nitrum build
     CLI->>Docker: build image + create EIF
-    Docker-->>CLI: enclave.eif
+    Docker-->>CLI: .nitrum/artifacts/{name}.eif
 
-    Dev->>CLI: nitrum deploy
+    Dev->>CLI: nitrum cloud deploy
     CLI->>S3: upload EIF
     CLI->>CF: create/update stack
     CF-->>Dev: stack events / outputs
@@ -233,7 +233,7 @@ sequenceDiagram
 
 ## Configuration
 
-Runtime and deployment parameters live in **`nitrum.toml`** at the project root (name, service port, health checks, scaling hints, TLS, egress options). The `shared` crate defines the schema; see [usage.md](usage.md) for a short reference.
+Runtime and deployment parameters live in **`nitrum.toml`** at the project root (`[project]`, `[runtime]`, service port, health checks, scaling hints, TLS, egress options). The `shared` crate defines the schema; see [usage.md](usage.md) for a short reference.
 
 ## Further reading
 

@@ -19,7 +19,7 @@ impl<'a> EnclaveLocalStack<'a> {
         Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: cfg.runtime.data_plane.clone(),
+            data_plane_image: "matzapata/nitrum-data-plane:latest-dev".to_string(),
         }
     }
 
@@ -31,7 +31,7 @@ impl<'a> EnclaveLocalStack<'a> {
             .env("ENCLAVE_IMAGE", &self.enclave_image)
             .env(
                 "DATA_PLANE_IMAGE",
-                format!("{}-dev", &self.data_plane_image),
+                self.data_plane_image.clone(),
             )
             .arg("compose")
             .arg("--progress")

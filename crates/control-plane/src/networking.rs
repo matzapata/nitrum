@@ -1,29 +1,14 @@
 //! Start gvproxy (kill any existing one first), wait for API socket, set up port forwards, kill on drop.
 
+use crate::constants::{
+    ENCLAVE_IP, FORWARDS, GVPROXY_BIN_DEFAULT, GVPROXY_BIN_ENV, SOCKET_PATH,
+    SOCKET_WAIT_TIMEOUT_SECS, VSOCK_LISTEN,
+};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
-
-/// Path to the socket file.
-const SOCKET_PATH: &str = "/tmp/network.sock";
-
-/// VSOCK listen address.
-const VSOCK_LISTEN: &str = ":1024";
-
-/// Enclave IP address.
-const ENCLAVE_IP: &str = "192.168.127.2";
-
-/// Timeout to wait for the socket to be created.
-const SOCKET_WAIT_TIMEOUT_SECS: u64 = 15;
-
-/// Port forwards: (host_port, enclave_port) — HTTP for ACME HTTP-01, HTTPS for ingress.
-const FORWARDS: &[(u16, u16)] = &[(80, 80), (443, 443)];
-
-/// Env var for gvproxy binary path; default "gvproxy" (on PATH). Set to "/app/gvproxy" in container.
-const GVPROXY_BIN_ENV: &str = "GVPROXY_BIN";
-const GVPROXY_BIN_DEFAULT: &str = "gvproxy";
 
 /// Holds the gvproxy child process. Kills it on drop.
 pub struct Networking {
@@ -31,8 +16,13 @@ pub struct Networking {
 }
 
 impl Networking {
+    #[must_use]
+    pub fn new() -> Self {
+        Self { child: None }
+    }
+
     /// Kill existing gvproxy, start a new one, wait for socket, set up forwards.
-    pub async fn run() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Self::terminate_existing().await;
 
         info!(
@@ -61,7 +51,8 @@ impl Networking {
             setup_forward(*local, *remote).await?;
         }
 
-        Ok(Self { child: Some(child) })
+        self.child = Some(child);
+        Ok(())
     }
 
     /// Kill any running gvproxy, then remove stale socket.
@@ -69,6 +60,7 @@ impl Networking {
         info!("terminating any existing gvproxy");
         let _ = Command::new("pkill").arg("gvproxy").status();
         tokio::time::sleep(Duration::from_millis(500)).await;
+
         if Path::new(SOCKET_PATH).exists() {
             info!(path = SOCKET_PATH, "removing stale socket");
             let _ = tokio::fs::remove_file(SOCKET_PATH).await;
@@ -124,7 +116,6 @@ async fn setup_forward(
 }
 
 /// POST `/services/forwarder/expose` on gvproxy's Unix socket. Returns response status, or I/O error.
-#[cfg(unix)] // TODO: remove this, allways unix
 async fn post_forwarder_expose(socket_path: &str, body: &str) -> std::io::Result<Option<u16>> {
     const EXPOSE_PATH: &str = "/services/forwarder/expose";
     const IO_TIMEOUT: Duration = Duration::from_secs(15);
@@ -160,19 +151,10 @@ async fn post_forwarder_expose(socket_path: &str, body: &str) -> std::io::Result
     Ok(parse_http_status_line(&response))
 }
 
-#[cfg(unix)]
 fn parse_http_status_line(raw: &[u8]) -> Option<u16> {
     let line_end = raw.windows(2).position(|w| w == b"\r\n")?;
     let line = std::str::from_utf8(&raw[..line_end]).ok()?;
     let mut parts = line.split_whitespace();
     parts.next()?; // HTTP/x.y
     parts.next()?.parse().ok()
-}
-
-#[cfg(not(unix))]
-async fn post_forwarder_expose(_socket_path: &str, _body: &str) -> std::io::Result<Option<u16>> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "gvproxy Unix socket API requires a Unix host",
-    ))
 }

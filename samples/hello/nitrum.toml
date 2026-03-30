@@ -1,9 +1,13 @@
 # Default template generated with `nitrum init`
 # For details check https://github.com/matzapata/nitrum/blob/develop/crates/shared/src/config.rs
 
+[project]
 name = "nitrum-hello"
+
+[runtime]
 data_plane = "matzapata/nitrum-data-plane:v0.1.0"
 control_plane = "matzapata/nitrum-control-plane:v0.1.0"
+nitro_cli = "matzapata/nitrum-nitro-cli:v0.1.0"
 
 [service]
 port = 8080
