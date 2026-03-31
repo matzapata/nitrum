@@ -7,6 +7,7 @@
 //!     -> Responds with 200 {"status":"ok"}
 //!   - GET /.well-known/enclave/attestation
 //!     -> Responds with 200 and base64-encoded attestation document
+//!     Optional query: `nonce` — standard base64 of raw nonce bytes (same encoding as the crypto API)
 //!   - GET /.well-known/acme-challenge/*
 //!     -> Responds with 200 and the ACME HTTP-01 key authorization string
 //!
@@ -22,11 +23,12 @@ use anyhow::Context;
 use axum::{
     Router,
     body::{Body, to_bytes},
-    extract::State,
+    extract::{Query, State},
     http::{Request, StatusCode},
     response::IntoResponse,
     routing::get,
 };
+use serde::Deserialize;
 use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
@@ -108,7 +110,15 @@ async fn ingress_status() -> impl IntoResponse {
     )
 }
 
-async fn ingress_attestation(State(state): State<Arc<DataPlaneState>>) -> impl IntoResponse {
+#[derive(Deserialize)]
+struct IngressAttestationQuery {
+    nonce: Option<String>,
+}
+
+async fn ingress_attestation(
+    State(state): State<Arc<DataPlaneState>>,
+    Query(q): Query<IngressAttestationQuery>,
+) -> impl IntoResponse {
     let cert_hash = state.tls_cert_hash.read().unwrap().clone();
     let public_key = match cert_hash {
         Some(h) => Some(h),
@@ -122,7 +132,9 @@ async fn ingress_attestation(State(state): State<Arc<DataPlaneState>>) -> impl I
         }
     };
 
-    match get_attestation_doc(None, public_key, None) {
+    let nonce = q.nonce.as_deref().and_then(|s| B64.decode(s).ok());
+
+    match get_attestation_doc(nonce, public_key, None) {
         Ok(doc) => (
             StatusCode::OK,
             [("content-type", "application/json")],
