@@ -6,3 +6,4 @@
 .nitrum
 node_modules/
 dist
+.cursor

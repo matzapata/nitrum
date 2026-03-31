@@ -10,7 +10,7 @@
     "attest": "yarn build && node dist/index.js"
   },
   "dependencies": {
-    "nitro-attestation": "1.0.0"
+    "nitrum-node": "1.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -1,7 +1,7 @@
 {
-  "name": "nitro-attestation",
+  "name": "nitrum-node",
   "version": "1.0.0",
-  "description": "Verify AWS Nitro Enclave attestation documents. Web-compatible — works in browsers, Node.js ≥ 18, Cloudflare Workers, and Deno.",
+  "description": "Verify AWS Nitro Enclave attestation documents using Node.js >= 18.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -20,7 +20,10 @@
     "build": "tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "aws",
@@ -34,12 +37,12 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@peculiar/webcrypto": "^1.4.6",
     "@peculiar/x509": "^1.12.3",
     "cbor-x": "^1.6.0",
     "cose-js": "0.8.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.10",
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.0.0"

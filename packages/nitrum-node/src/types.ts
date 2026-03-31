@@ -34,7 +34,8 @@ export interface AttestationDocument {
 }
 
 /** Parsed, validated attestation document with hex-encoded PCRs */
-export interface ParsedAttestation extends Omit<AttestationDocument, 'pcrs' | 'certificate' | 'cabundle'> {
+export interface ParsedAttestation
+  extends Omit<AttestationDocument, "pcrs" | "certificate" | "cabundle"> {
   /** Hex-encoded PCR values, keyed by PCR index (e.g. "pcr0", "pcr1", ...) */
   pcrs: Record<string, string>;
 }
@@ -76,4 +77,15 @@ export interface VerifyOptions {
    * Nitrum attestation API, not a base64 string.
    */
   nonce?: Uint8Array | Buffer;
+  /**
+   * When set, the attestation document timestamp (milliseconds since UNIX epoch) must not
+   * be older than this many milliseconds relative to the verifier's current time.
+   * This is an additional freshness bound on top of nonce-based replay protection.
+   */
+  maxAgeMs?: number;
+  /**
+   * When set, each key (e.g. `pcr0`, `pcr1`) must be present on the document and match the
+   * given hex string (case-insensitive). Unlisted PCRs are not checked.
+   */
+  expectedPcrs?: Record<string, string>;
 }

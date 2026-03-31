@@ -1,19 +1,19 @@
-# nitro-attestation
+# nitrum-node
 
 Verify [AWS Nitro Enclave](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclaves-concepts.html) attestation documents in TypeScript.
 
-**Web-compatible** — works in browsers, Node.js ≥ 18, Cloudflare Workers, and Deno. Uses the platform's native `SubtleCrypto` API with no Node.js-specific crypto modules.
+**Node.js-focused** — supports Node.js >= 18 and uses Node's native `crypto` module.
 
 ## Installation
 
 ```bash
-npm install nitro-attestation
+npm install nitrum-node
 ```
 
 ## Usage
 
 ```ts
-import { verifyAttestation } from 'nitro-attestation';
+import { verifyAttestation } from 'nitrum-node';
 
 // `document` is the raw binary attestation document from the enclave
 const result = await verifyAttestation(document);
@@ -49,7 +49,7 @@ if (!result.valid) {
 By default the official [AWS Nitro root CA](https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip) is used. You can supply your own (PEM string or DER bytes):
 
 ```ts
-import { verifyAttestation, AWS_NITRO_ROOT_CA } from 'nitro-attestation';
+import { verifyAttestation, AWS_NITRO_ROOT_CA } from 'nitrum-node';
 
 const result = await verifyAttestation(document, {
   trustedRoot: myCustomRootPem, // string | Uint8Array
