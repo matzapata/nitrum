@@ -3,5 +3,6 @@
 *.eif
 .env
 .DS_Store
-
 .nitrum
+node_modules/
+dist

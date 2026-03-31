@@ -54,6 +54,7 @@ Uploads the EIF (built from source if omitted) and creates or updates the **Clou
 
 - **`--eif`** — path to an existing EIF file.
 - **`--retain`** — retain selected resources on stack delete.
+- **`--kms-administrator-role-arn`** — optional full IAM role or user ARN passed through as CloudFormation **`KmsAdministratorRoleArn`**. If you omit the flag, that parameter is not supplied and the template default applies. To look up your **account ID** when building ARNs, run: `aws sts get-caller-identity | jq -r '.Account'`.
 
 The **`runtime.control_plane`** field in `nitrum.toml` is the full Docker image reference (for example `my-registry/nitrum-control-plane:v1`) passed to CloudFormation for the EC2 control-plane service.
 

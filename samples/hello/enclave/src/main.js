@@ -22,9 +22,9 @@ app.get("/egress", async (req, res) => {
   }
 });
 
-app.post("/attestation", async (req, res) => {
+app.get("/attestation", async (req, res) => {
   try {
-    const { data } = await axios.post("http://localhost:3000/attestation", req.body);
+    const { data } = await axios.get("http://localhost:3000/attestation", { params: req.query });
     res.json(data);
   } catch (err) {
     console.error(`[server] attestation error: ${err.message}`);
