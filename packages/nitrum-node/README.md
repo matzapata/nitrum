@@ -4,6 +4,8 @@ Verify [AWS Nitro Enclave](https://docs.aws.amazon.com/enclaves/latest/user/nitr
 
 **Node.js-focused** — supports Node.js >= 18 and uses Node's native `crypto` module.
 
+This package is part of the **Nitrum** project, which provides a Rust data-plane, control-plane, and CLI for running applications inside Nitro Enclaves. See the repository’s `README.md` and `docs/architecture.md` for a broader overview of how attestation fits into the system.
+
 ## Installation
 
 ```bash
@@ -110,6 +112,11 @@ Returns `Promise<AttestationResult>` — a discriminated union:
 | PCR3 | IAM role assigned to the parent EC2 instance |
 | PCR4 | Instance ID of the parent EC2 instance |
 | PCR8 | Signing certificate (if EIF was signed) |
+
+## More documentation
+
+- High‑level Nitrum architecture and how attestation is used end‑to‑end: see `docs/architecture.md` at the root of the Nitrum repository.
+- CLI and enclave workflow documentation: see `docs/usage.md`.
 
 ## License
 
