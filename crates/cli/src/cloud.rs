@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::artifact::EnclaveArtifact;
 use crate::utils::bucket::Bucket;
 use crate::utils::cloudformation::CloudFormation;
-use shared::config::{NitrumConfig, Scaling};
+use config::{NitrumConfig, Scaling};
 
 pub struct EnclaveCloudStack {
     bucket: Bucket,

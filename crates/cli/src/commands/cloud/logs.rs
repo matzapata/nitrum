@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Args;
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;

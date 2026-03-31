@@ -22,16 +22,16 @@ FROM chef AS planner
 
 COPY Cargo.toml Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
-COPY crates/shared/Cargo.toml         crates/shared/Cargo.toml
+COPY crates/config/Cargo.toml         crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml     crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml            crates/cli/Cargo.toml
 
 # Stub all workspace members so `cargo chef prepare` can resolve the full graph
-RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/shared/src \
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/config/src \
     && echo 'fn main() {}' > crates/cli/src/main.rs \
     && echo 'fn main() {}' > crates/control-plane/src/main.rs \
     && echo 'fn main() {}' > crates/data-plane/src/main.rs \
-    && touch crates/shared/src/lib.rs
+    && touch crates/config/src/lib.rs
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -53,8 +53,8 @@ RUN if [ -n "$FEATURES" ]; then \
     fi
 
 COPY Cargo.toml Cargo.toml
-COPY crates/shared/src      crates/shared/src
-COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+COPY crates/config/src      crates/config/src
+COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/src  crates/data-plane/src
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml

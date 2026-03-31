@@ -3,7 +3,7 @@
 use crate::{cloud::EnclaveCloudStack, utils};
 use anyhow::Result;
 use clap::Args;
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::env;
 use std::path::PathBuf;
 

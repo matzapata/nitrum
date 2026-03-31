@@ -15,7 +15,7 @@ enclave = [
 ]
 
 [dependencies]
-shared = { path = "../shared" }
+config = { path = "../config" }
 axum = "0.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"

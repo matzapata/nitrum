@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use clap::Args;
 use indicatif::ProgressBar;
 use serde_json::Value;
-use shared::config::{
+use config::{
     HealthCheck, NitrumConfig, Project, Runtime, Scaling, Service, TlsTermination,
     validate_project_name,
 };
@@ -85,7 +85,7 @@ fn sample_nitro_config(name: &str) -> String {
     let body = toml::to_string_pretty(&config).expect("serialize nitrum.toml for init");
     format!(
         "# Default template generated with `nitrum init`\n\
-         # For details check https://github.com/matzapata/nitrum/blob/develop/crates/shared/src/config.rs\n\
+         # For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/lib.rs\n\
          \n\
          {body}"
     )

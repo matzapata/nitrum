@@ -1,7 +1,7 @@
 //! Local development utilities
 
 use anyhow::{Context, Result, bail};
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;

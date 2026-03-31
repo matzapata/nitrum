@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use aws_credential_types::provider::SharedCredentialsProvider;
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Deref;

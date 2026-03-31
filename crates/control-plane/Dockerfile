@@ -24,17 +24,17 @@ RUN apt-get update && apt-get install -y musl-tools \
 
 COPY Cargo.toml Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
-COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
 
-# Stub sources so workspace members parse (control-plane depends on shared; cli/data-plane are workspace members).
+# Stub sources so workspace members parse (control-plane depends on config; cli/data-plane are workspace members).
 RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src \
 && echo 'fn main() {}' > crates/cli/src/main.rs \
 && echo 'fn main() {}' > crates/data-plane/src/main.rs \
 && echo 'fn main() {}' > crates/control-plane/src/main.rs
 
-COPY crates/shared/src crates/shared/src
+COPY crates/config/src crates/config/src
 COPY crates/control-plane/src crates/control-plane/src
 
 RUN cargo build --release -p control-plane --target x86_64-unknown-linux-musl

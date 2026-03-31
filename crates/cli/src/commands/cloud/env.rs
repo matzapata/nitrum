@@ -3,7 +3,7 @@
 use anyhow::{Result, bail};
 use clap::Args;
 use clap::Subcommand;
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::env;
 use std::path::PathBuf;
 

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;

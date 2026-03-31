@@ -20,7 +20,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-shared = { path = "../shared" }
+config = { path = "../config" }
 clap = { version = "4", features = ["derive", "env"] }
 bollard = "0.20.2"
 bytes = "1"

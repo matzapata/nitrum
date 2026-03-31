@@ -2,7 +2,7 @@ use clap::Args;
 use std::env;
 
 use anyhow::Result;
-use shared::config::NitrumConfig;
+use config::NitrumConfig;
 
 use crate::local::EnclaveLocalStack;
 
