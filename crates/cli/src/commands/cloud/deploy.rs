@@ -25,6 +25,10 @@ pub struct DeployArgs {
     /// Pass `--debug-mode` to control-plane runtime
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub debug_mode: bool,
+    /// Optional full IAM principal ARN (role or user) for KMS key administration in the stack key policy.
+    /// When omitted, the parameter is not sent and CloudFormation uses the template default.
+    #[arg(long = "kms-administrator-role-arn", value_name = "ARN")]
+    pub kms_administrator_role_arn: Option<String>,
 }
 
 pub async fn run(args: DeployArgs) -> Result<()> {
@@ -76,12 +80,24 @@ pub async fn run(args: DeployArgs) -> Result<()> {
         return Ok(());
     }
 
+    let kms_administrator_role_arn = args
+        .kms_administrator_role_arn
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
     // Deploy artifact and CloudFormation stack
     let deploy_success = format!("Stack `{stack_name}` deployed.");
     let outputs = utils::with_spinner(
         "Deploying artifact and CloudFormation stack…",
         &deploy_success,
-        cloud_stack.deploy(&artifact, args.retain, args.debug_mode, &config),
+        cloud_stack.deploy(
+            &artifact,
+            args.retain,
+            args.debug_mode,
+            &config,
+            kms_administrator_role_arn,
+        ),
     )
     .await?;
 

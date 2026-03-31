@@ -95,7 +95,7 @@ fn sample_main_js() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/src/main.js"
+        "samples/hello/enclave/src/main.js"
     ))
 }
 
@@ -112,7 +112,7 @@ fn sample_package_json_template() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/package.json"
+        "samples/hello/enclave/package.json"
     ))
 }
 
@@ -120,6 +120,6 @@ fn sample_dockerfile() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/Dockerfile"
+        "samples/hello/enclave/Dockerfile"
     ))
 }

@@ -114,11 +114,26 @@ Parameters:
     Default: ""
     Description: Optional control-plane debug CLI arg (`--debug-mode` or empty).
 
+  EifImageSha384:
+    Type: String
+    Description: >
+      PCR0 / enclave image SHA-384 (hex, from `nitro-cli describe-eif`) used in the KMS key policy
+      with kms:RecipientAttestation:ImageSha384 so attested Decrypt only succeeds for this EIF build.
+      The deploy CLI sets this from the EIF unless overridden.
+
+  KmsAdministratorRoleArn:
+    Type: String
+    Default: AWS_ACCOUNT_ROOT
+    Description: >
+      Principal allowed to administer this KMS key (Create*, Describe*, etc.). Use the default
+      AWS_ACCOUNT_ROOT to allow the owning AWS account root ARN (typical). Otherwise pass a full IAM ARN.
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
 Conditions:
   RetainData: !Equals [!Ref Retain, 'true']
+  KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -472,17 +487,55 @@ Resources:
     Properties:
       Description: !Sub "${ProjectName} | enclave CMK (GenerateDataKey + attested Decrypt)"
       EnableKeyRotation: !If [RetainData, true, false]
-      # Account root in the key policy lets this account use IAM policies to grant principals
-      # (e.g. InstanceRole) access to the key — no per-role statement needed, which avoids a
-      # CloudFormation cycle with InstanceRole's inline policy referencing this key.
+      # Enclave crypto: Principal is the account root so IAM (InstanceRole inline policy) controls
+      # which identities may call KMS, without a CloudFormation cycle (role policy references this key ARN).
+      # Decrypt is further restricted to attested calls matching this EIF's PCR0 (ImageSha384).
+      # GenerateDataKey* is issued without Recipient today; see crates/data-plane crypto/kms.rs.
       KeyPolicy:
         Version: "2012-10-17"
         Statement:
-          - Sid: EnableRootAccess
+          - Sid: EnableDecryptFromEnclave
             Effect: Allow
             Principal:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: "kms:*"
+            Action: "kms:Decrypt"
+            Resource: "*"
+            Condition:
+              StringEqualsIgnoreCase:
+                kms:RecipientAttestation:ImageSha384: !Ref EifImageSha384
+
+          - Sid: EnclaveGenerateDataKey
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: "*"
+
+          - Sid: KmsAdministrator
+            Effect: Allow
+            Principal:
+              AWS: !If
+                - KmsAdminIsAccountRoot
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                - !Ref KmsAdministratorRoleArn
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:GenerateDataKey
+              - kms:TagResource
+              - kms:UntagResource
             Resource: "*"
 
   # Friendly alias for console, CLI, and docs (SSM still stores raw key id for the data-plane)

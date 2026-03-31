@@ -54,12 +54,21 @@ impl EnclaveCloudStack {
         retain: bool,
         debug_mode: bool,
         config: &NitrumConfig,
+        kms_administrator_role_arn: Option<&str>,
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
         let eif_label: String = artifact.hash.chars().take(12).collect();
         let retain_str = if retain { "true" } else { "false" };
         let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
-        let params = vec![
+
+        let pcr0 = if debug_mode { "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" } else { artifact.pcr0.trim() };
+        if pcr0.is_empty() {
+            anyhow::bail!(
+                "EnclaveArtifact.pcr0 is empty; rebuild the EIF or run `nitrum describe` on it"
+            );
+        }
+
+        let mut params = vec![
             ("ProjectName".to_string(), config.project.name.clone()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
@@ -84,7 +93,14 @@ impl EnclaveCloudStack {
                 "ControlPlaneDebugArg".to_string(),
                 control_plane_debug_arg.to_string(),
             ),
+            ("EifImageSha384".to_string(), pcr0.to_string()),
         ];
+        if let Some(arn) = kms_administrator_role_arn {
+            params.push((
+                "KmsAdministratorRoleArn".to_string(),
+                arn.to_string(),
+            ));
+        }
 
         self.bucket.create_if_non_existent().await?;
         self.bucket.upload(&eif_label, &artifact.eif_path).await?;
