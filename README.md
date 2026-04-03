@@ -45,6 +45,7 @@ TODO:
 - [] Doc on A alias for domain
 - [] Acme wait for domain to be available?
 - [x] More samples, gmail mcp? blockchain wallet?
+- [] Control plane pulls s3 file
 - [] Release pipeline, images, binary, etc 
 - [] Verify cert is store enc and leader lock
 - [] Add some unit tests and e2e

@@ -2,7 +2,23 @@
 members = ["crates/cli", "crates/control-plane", "crates/data-plane", "crates/config"]
 resolver = "2"
 
+[workspace.lints.rust]
+# Public API helpers and feature-gated code trip this under `-D warnings`.
+dead_code = "allow"
+
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow noisy or low-signal lints that `-D warnings` would fail CI on.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+doc_markdown = "allow"
+large_futures = "allow"
+match_same_arms = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+needless_pass_by_value = "allow"
+struct_field_names = "allow"
+unnecessary_wraps = "allow"
+unused_self = "allow"

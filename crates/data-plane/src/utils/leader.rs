@@ -55,10 +55,7 @@ pub struct LeaderGuard {
 
 impl LeaderGuard {
     /// Release the lock immediately so another instance can become leader.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the underlying storage lock release fails.
+    #[allow(dead_code)]
     pub async fn release(self) -> Result<()> {
         self.storage.release_lock(&self.key, &self.owner).await
     }

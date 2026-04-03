@@ -1,14 +1,19 @@
 //! Utils for ACME (Let's Encrypt / Pebble).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use hyper_util::rt::TokioExecutor;
 use instant_acme::BodyWrapper;
-use rustls::RootCertStore;
-use std::io::{BufReader, Cursor};
 use std::sync::Arc;
+
+#[cfg(feature = "pebble")]
+use anyhow::Context;
+#[cfg(feature = "pebble")]
+use rustls::RootCertStore;
+#[cfg(feature = "pebble")]
+use std::io::{BufReader, Cursor};
 
 #[cfg(feature = "pebble")]
 pub fn pebble_client_tls_config() -> Result<Arc<rustls::ClientConfig>> {

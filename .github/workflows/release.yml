@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infra/docker/control-plane.dockerfile
+          file: crates/control-plane/Dockerfile
           platforms: linux/amd64
           push: true
           build-args: |
@@ -40,7 +40,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infra/docker/data-plane.dockerfile
+          file: crates/data-plane/Dockerfile
           platforms: linux/amd64
           push: true
           build-args: |
@@ -53,7 +53,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infra/docker/nitro-cli.dockerfile
+          file: crates/cli/Dockerfile
           platforms: linux/amd64
           push: true
           tags: |

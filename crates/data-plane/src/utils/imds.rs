@@ -229,6 +229,7 @@ pub struct EnclaveProvider {
 
 impl EnclaveProvider {
     /// Create a provider with a new [`ImdsClient`] for `latest_base` (same rules as [`ImdsClient::new`]).
+    #[allow(dead_code)]
     pub fn new(latest_base: impl AsRef<str>) -> Result<Self> {
         Ok(Self::with_imds(Arc::new(ImdsClient::new(latest_base)?)))
     }
