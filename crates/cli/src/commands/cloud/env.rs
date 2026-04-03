@@ -24,9 +24,9 @@ pub struct EnvArgs {
 
 #[derive(Subcommand)]
 pub enum EnvCommand {
-    /// Store a value as a SecureString parameter (overwrites if present)
+    /// Store a value as a `SecureString` parameter (overwrites if present)
     Set {
-        /// Environment variable name (e.g. DATABASE_URL)
+        /// Environment variable name (e.g. `DATABASE_URL`)
         key: String,
         /// Value to store
         value: String,

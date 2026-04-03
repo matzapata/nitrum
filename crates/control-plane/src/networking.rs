@@ -17,7 +17,7 @@ pub struct Networking {
 
 impl Networking {
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { child: None }
     }
 
@@ -34,9 +34,9 @@ impl Networking {
         let bin = std::env::var(GVPROXY_BIN_ENV).unwrap_or_else(|_| GVPROXY_BIN_DEFAULT.into());
         let child = Command::new(&bin)
             .arg("-listen")
-            .arg(format!("vsock://{}", VSOCK_LISTEN))
+            .arg(format!("vsock://{VSOCK_LISTEN}"))
             .arg("-listen")
-            .arg(format!("unix://{}", SOCKET_PATH))
+            .arg(format!("unix://{SOCKET_PATH}"))
             .arg("-ec2-metadata-access=true")
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -85,10 +85,7 @@ async fn setup_forward(
     local_port: u16,
     remote_port: u16,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let body = format!(
-        r#"{{"local":":{}","remote":"{}:{}"}}"#,
-        local_port, ENCLAVE_IP, remote_port
-    );
+    let body = format!(r#"{{"local":":{local_port}","remote":"{ENCLAVE_IP}:{remote_port}"}}"#);
 
     let status_code = post_forwarder_expose(SOCKET_PATH, &body).await?;
 

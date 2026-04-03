@@ -9,6 +9,11 @@ pub struct Ssm {
 }
 
 impl Ssm {
+    /// Build an SSM client from the default AWS configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `aws_config::load_from_env` fails.
     pub async fn new() -> Result<Self> {
         let aws_sdk_config = aws_config::load_from_env().await;
         Ok(Self {
@@ -17,6 +22,10 @@ impl Ssm {
     }
 
     /// `PutParameter` as `SecureString` with overwrite.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the SSM `PutParameter` call fails.
     pub async fn set(&self, name: &str, value: impl Into<String>) -> Result<()> {
         self.client
             .put_parameter()
@@ -31,6 +40,10 @@ impl Ssm {
     }
 
     /// `GetParameter` with decryption. Returns `None` if the parameter does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the SSM `GetParameter` call fails.
     pub async fn get(&self, name: &str) -> Result<Option<String>> {
         let out = self
             .client
@@ -46,6 +59,10 @@ impl Ssm {
     }
 
     /// `GetParametersByPath` with recursion and decryption. Each item is `(last_path_segment, value)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the SSM `GetParametersByPath` call fails.
     pub async fn list(&self, path: &str) -> Result<Vec<(String, String)>> {
         let path = path.trim_end_matches('/');
         let mut rows = Vec::new();
@@ -83,6 +100,10 @@ impl Ssm {
     }
 
     /// `DeleteParameter`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the SSM `DeleteParameter` call fails.
     pub async fn delete(&self, name: &str) -> Result<()> {
         self.client
             .delete_parameter()

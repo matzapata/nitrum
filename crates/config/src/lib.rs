@@ -43,6 +43,12 @@ impl Default for HealthCheck {
 }
 
 impl HealthCheck {
+    /// Validates semantic constraints for `[health_check]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when any field is invalid
+    /// (for example an empty path or zero interval).
     pub fn validate(&self) -> Result<(), String> {
         let path = self.path.trim();
         if path.is_empty() {
@@ -97,6 +103,10 @@ impl Default for Scaling {
 }
 
 impl Scaling {
+    /// Validates semantic constraints for `[scaling]`.
+    ///
+    /// # Errors
+    ///
     /// Returns `Err` with a human-readable message when `[scaling]` constraints are violated.
     pub fn validate(&self) -> Result<(), String> {
         if self.min_replicas > self.max_replicas {
@@ -140,6 +150,12 @@ impl Default for TlsTermination {
 }
 
 impl TlsTermination {
+    /// Validates semantic constraints for `[tls_termination]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when the domain or ACME
+    /// settings are invalid (for example an empty domain or ACME with `.local`).
     pub fn validate(&self) -> Result<(), String> {
         let domain = self.domain.trim();
         if domain.is_empty() {
@@ -150,16 +166,18 @@ impl TlsTermination {
                 "`tls_termination.domain` must not have leading or trailing whitespace".to_string(),
             );
         }
-        if domain.chars().any(|c| c.is_whitespace()) {
+        if domain.chars().any(char::is_whitespace) {
             return Err("`tls_termination.domain` must not contain whitespace".to_string());
         }
         if domain.len() > 253 {
             return Err("`tls_termination.domain` exceeds 253 characters (DNS limit)".to_string());
         }
-        if self.acme && domain.ends_with(".local") {
-            return Err(
-                "`tls_termination.domain` cannot end with `.local` when `tls_termination.acme` is true; public CAs do not issue for private-use names".to_string(),
-            );
+        if self.acme
+            && std::path::Path::new(domain)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("local"))
+        {
+            return Err("`tls_termination.domain` cannot end with `.local` when `tls_termination.acme` is true; public CAs do not issue for private-use names".to_string());
         }
         Ok(())
     }
@@ -178,6 +196,12 @@ impl Default for Service {
 }
 
 impl Service {
+    /// Validates semantic constraints for `[service]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when the service
+    /// configuration is invalid (for example a zero port).
     pub fn validate(&self) -> Result<(), String> {
         if self.port == 0 {
             return Err("`service.port` must not be 0".to_string());
@@ -193,6 +217,12 @@ pub struct Project {
 }
 
 impl Project {
+    /// Validates semantic constraints for `[project]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when the project name is
+    /// invalid according to [`validate_project_name`].
     pub fn validate(&self) -> Result<(), String> {
         validate_project_name(&self.name)
     }
@@ -219,6 +249,12 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /// Validates semantic constraints for `[runtime]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when any image reference is
+    /// empty, contains whitespace, or is otherwise malformed.
     pub fn validate(&self) -> Result<(), String> {
         validate_docker_image_ref(&self.data_plane, "runtime.data_plane")?;
         validate_docker_image_ref(&self.control_plane, "runtime.control_plane")?;
@@ -240,6 +276,11 @@ pub struct NitrumConfig {
 
 impl NitrumConfig {
     /// Validates semantic constraints beyond TOML shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when any nested section
+    /// contains invalid values.
     pub fn validate(&self) -> Result<(), String> {
         self.project.validate()?;
         self.runtime.validate()?;
@@ -250,7 +291,13 @@ impl NitrumConfig {
         Ok(())
     }
 
-    /// Replace [`Project::name`] when `override_name` is [`Some`], using the same rules as `project.name` in `nitrum.toml`.
+    /// Replace [`Project::name`] when `override_name` is [`Some`], using the same
+    /// rules as `project.name` in `nitrum.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NitrumConfigError::NameOverrideInvalid`] when the provided name
+    /// does not satisfy [`validate_project_name`].
     pub fn with_name(mut self, override_name: Option<String>) -> Result<Self, NitrumConfigError> {
         let Some(n) = override_name else {
             return Ok(self);
@@ -285,7 +332,12 @@ fn validate_docker_image_ref(value: &str, key: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Rules for [`Project::name`]: Must be compatible with CloudFormation, SSM, Docker and S3
+/// Rules for [`Project::name`]: Must be compatible with `CloudFormation`, SSM, Docker and S3
+///
+/// # Errors
+///
+/// Returns `Err` with a human-readable message when `name` does not satisfy
+/// Nitrum project naming rules.
 pub fn validate_project_name(name: &str) -> Result<(), String> {
     if name != name.trim() {
         return Err("`project.name` must not have leading or trailing whitespace".to_string());
@@ -298,7 +350,7 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
     let Some(first) = chars.next() else {
         return Err("`project.name` must not be empty".to_string());
     };
-    if !matches!(first, 'a'..='z') {
+    if !first.is_ascii_lowercase() {
         return Err("`project.name` must start with a lowercase letter (a-z)".to_string());
     }
 
@@ -313,8 +365,7 @@ pub fn validate_project_name(name: &str) -> Result<(), String> {
     }
     if !(2..=127).contains(&rest_len) {
         return Err(format!(
-            "`project.name` must be 3-128 characters (one leading letter plus 2-127 more); got {} character(s) after the first",
-            rest_len
+            "`project.name` must be 3-128 characters (one leading letter plus 2-127 more); got {rest_len} character(s) after the first",
         ));
     }
 
@@ -330,11 +381,10 @@ impl TryFrom<&std::path::Path> for NitrumConfig {
             path: path_buf.clone(),
             source,
         })?;
-        let cfg: NitrumConfig =
-            toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
-                path: path_buf.clone(),
-                source,
-            })?;
+        let cfg: Self = toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
+            path: path_buf.clone(),
+            source,
+        })?;
         cfg.validate()
             .map_err(|message| NitrumConfigError::Invalid {
                 path: path_buf,

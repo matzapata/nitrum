@@ -1,4 +1,4 @@
-//! Random bytes and DEK generation. Uses the rand crate (via crate::rand_crate to avoid name shadow).
+//! Random bytes and DEK generation. Uses the rand crate (via `crate::rand_crate` to avoid name shadow).
 
 use anyhow::Result;
 

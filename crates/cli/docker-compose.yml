@@ -200,7 +200,6 @@ services:
     pull_policy: never
     build:
       context: ..
-      dockerfile: ../Dockerfile
       args:
         DATA_PLANE_IMAGE: ${DATA_PLANE_IMAGE}
     hostname: nitrum.local

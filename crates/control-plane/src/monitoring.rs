@@ -5,7 +5,7 @@ use tracing_cloudwatch::CloudWatchWorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// CloudWatch tracing export; owns the worker guard so drop triggers flush (see `CloudWatchWorkerGuard`).
+/// `CloudWatch` tracing export; owns the worker guard so drop triggers flush (see `CloudWatchWorkerGuard`).
 pub struct Monitoring {
     guard: Option<CloudWatchWorkerGuard>,
 }
@@ -57,7 +57,7 @@ impl Monitoring {
         Self { guard: Some(guard) }
     }
 
-    /// Graceful shutdown: wait for the CloudWatch worker to drain.
+    /// Graceful shutdown: wait for the `CloudWatch` worker to drain.
     /// If this is never called, dropping `Monitoring` still runs `CloudWatchWorkerGuard`'s destructor (best-effort flush signal).
     pub async fn shutdown(mut self) {
         if let Some(g) = self.guard.take() {

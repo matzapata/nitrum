@@ -38,6 +38,38 @@ The repository includes a reference project under **`samples/hello`** which show
 
 Use that sample as a concrete reference when wiring your own projects.
 
+### Built-in crypto and randomness endpoints
+
+When you run `nitrum local up` or deploy with `nitrum cloud deploy`, the Nitrum **control-plane** exposes helper endpoints that your enclave code can call over the local bridge:
+
+- **`POST http://localhost:3000/encrypt`** — body `{ "plaintext": "<string>" }`, returns an opaque JSON object you can later pass to `/decrypt`.
+- **`POST http://localhost:3000/decrypt`** — body = the JSON you received from `/encrypt`, returns `{ "plaintext": "<original string>" }`.
+- **`POST http://localhost:3000/random`** — body `{ "length": <number> }`, returns `{ "bytes": "<base64>" }` with cryptographically secure random bytes.
+
+The `samples/hello/enclave/src/main.js` file demonstrates these patterns:
+
+- Encrypt/decrypt round‑trip:
+
+```js
+const body = req.body && req.body.plaintext != null ? req.body : { plaintext: "" };
+const { data: encrypted } = await axios.post("http://localhost:3000/encrypt", body, {
+  headers: { "Content-Type": "application/json" },
+});
+const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", encrypted, {
+  headers: { "Content-Type": "application/json" },
+});
+```
+
+- Random‑bytes generation:
+
+```js
+const { data } = await axios.post("http://localhost:3000/random", req.body, {
+  headers: { "Content-Type": "application/json" },
+});
+```
+
+The `samples/blockchain-wallet/enclave/src/main.js` sample builds on the same primitives to encrypt a wallet key and use it for signing without ever exposing the raw private key to the client.
+
 ## Commands
 
 ### `nitrum init [NAME]`

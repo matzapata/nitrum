@@ -16,14 +16,14 @@ use std::time::Duration;
 use tracing::{debug, info};
 use x509_parser::parse_x509_certificate;
 
-pub(crate) struct AcmeClient {
+pub struct AcmeClient {
     storage: Arc<StorageClient>,
     directory_url: String,
     client_tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl AcmeClient {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         storage: Arc<StorageClient>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
@@ -123,7 +123,7 @@ impl AcmeClient {
             AuthorizationStatus::Valid => {
                 info!("authorization already valid, skipping challenge");
             }
-            other => bail!("unexpected authorization status: {:?}", other),
+            other => bail!("unexpected authorization status: {other:?}"),
         }
 
         let status = order
@@ -131,7 +131,7 @@ impl AcmeClient {
             .await
             .context("poll order ready")?;
         if status != OrderStatus::Ready {
-            bail!("unexpected order status: {:?}", status);
+            bail!("unexpected order status: {status:?}");
         }
 
         let mut params = CertificateParams::new(vec![domain.to_owned()])?;
@@ -158,11 +158,13 @@ impl AcmeClient {
         let validity = cert.validity();
         let not_before = validity.not_before.timestamp();
         let not_after = validity.not_after.timestamp();
+        let lifetime = not_after - not_before;
         let renew_at =
-            not_before + ((not_after - not_before) as f64 * CERTIFICATE_RENEWAL_FRACTION) as i64;
+            not_before + ((lifetime as f64) * CERTIFICATE_RENEWAL_FRACTION).round() as i64;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-        Ok(Duration::from_secs((renew_at - now).max(0) as u64))
+            .as_secs()
+            .cast_signed();
+        Ok(Duration::from_secs((renew_at - now).max(0).cast_unsigned()))
     }
 }

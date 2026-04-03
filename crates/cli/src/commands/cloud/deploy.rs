@@ -1,4 +1,4 @@
-//! Deploy with AWS CloudFormation (bundled `samples/hello` template) and S3 EIF upload.
+//! Deploy with AWS `CloudFormation` (bundled `samples/hello` template) and S3 EIF upload.
 
 use anyhow::Result;
 use clap::Args;
@@ -16,7 +16,7 @@ pub struct DeployArgs {
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
-    /// Retain KMS, DynamoDB, logs, and SSM on stack delete (`Retain=true` in CloudFormation)
+    /// Retain KMS, `DynamoDB`, logs, and SSM on stack delete (`Retain=true` in `CloudFormation`)
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub retain: bool,
     /// Path to EIF file to deploy (default: `.nitrum/artifacts/{name}.eif` in project directory)
@@ -26,7 +26,7 @@ pub struct DeployArgs {
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub debug_mode: bool,
     /// Optional full IAM principal ARN (role or user) for KMS key administration in the stack key policy.
-    /// When omitted, the parameter is not sent and CloudFormation uses the template default.
+    /// When omitted, the parameter is not sent and `CloudFormation` uses the template default.
     #[arg(long = "kms-administrator-role-arn", value_name = "ARN")]
     pub kms_administrator_role_arn: Option<String>,
 }

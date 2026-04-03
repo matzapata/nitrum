@@ -2,7 +2,7 @@
 //! and [`GetParametersByPath`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParametersByPath.html).
 //!
 //! [`SsmParameters`] holds an [`Arc<ImdsClient>`](crate::utils::imds::ImdsClient): region and
-//! SigV4 credentials for SSM come from the same IMDS-backed [`EnclaveProvider`] as the rest of the app.
+//! `SigV4` credentials for SSM come from the same IMDS-backed [`EnclaveProvider`] as the rest of the app.
 
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ pub struct SsmParameters {
 }
 
 impl SsmParameters {
-    pub fn new(imds: Arc<ImdsClient>) -> Self {
+    pub const fn new(imds: Arc<ImdsClient>) -> Self {
         Self { imds }
     }
 

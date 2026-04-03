@@ -6,6 +6,11 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Sets up a spinner with the given message and returns it.
+///
+/// # Panics
+///
+/// Panics if the underlying `indicatif::ProgressStyle` template is invalid.
+#[must_use]
 pub fn style_spinner(spinner: ProgressBar, message: &str) -> ProgressBar {
     spinner.set_style(
         ProgressStyle::with_template("{spinner:.blue} {msg}")
@@ -20,6 +25,10 @@ pub fn style_spinner(spinner: ProgressBar, message: &str) -> ProgressBar {
 }
 
 /// Runs `fut` with a spinner and returns the result.
+///
+/// # Errors
+///
+/// Propagates any error returned by `fut` unchanged.
 pub async fn with_spinner<T, E, Fut>(message: &str, success_message: &str, fut: Fut) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
@@ -38,6 +47,10 @@ where
 }
 
 /// Writes `value` as pretty-printed JSON to `path` (overwrites if present).
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be created or written.
 pub fn write_json_value_pretty(path: impl AsRef<Path>, value: &serde_json::Value) -> Result<()> {
     let path = path.as_ref();
     let out_file =
@@ -48,6 +61,11 @@ pub fn write_json_value_pretty(path: impl AsRef<Path>, value: &serde_json::Value
 }
 
 /// Prompts the user for input and returns the result.
+///
+/// # Panics
+///
+/// Panics if the underlying dialoguer input interaction fails.
+#[must_use]
 pub fn prompt(message: &str) -> String {
     dialoguer::Input::with_theme(&ColorfulTheme::default())
         .with_prompt(message)
@@ -56,6 +74,11 @@ pub fn prompt(message: &str) -> String {
 }
 
 /// Prompts the user for confirmation and returns the result.
+///
+/// # Panics
+///
+/// Panics if the underlying dialoguer confirmation interaction fails.
+#[must_use]
 pub fn confirm(message: &str) -> bool {
     dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(message)

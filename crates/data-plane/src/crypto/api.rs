@@ -12,6 +12,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use tracing::info;
 
@@ -45,21 +46,20 @@ async fn health() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
+        json!({ "status": "ok" }).to_string(),
     )
 }
 
 // ── Random ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RandomRequest {
     /// Number of random bytes to generate (default 32, max 1024).
-    pub byte_length: Option<usize>,
+    pub length: Option<usize>,
 }
 
 async fn random(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
-    let len = req.and_then(|r| r.byte_length).unwrap_or(32).min(1024);
+    let len = req.and_then(|r| r.length).unwrap_or(32).min(1024);
 
     let bytes = match super::random::rand_bytes(len) {
         Ok(b) => b,
@@ -67,7 +67,8 @@ async fn random(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"failed to generate random bytes: {e}"}}"#),
+                json!({ "data": null, "error": format!("failed to generate random bytes: {e}") })
+                    .to_string(),
             )
                 .into_response();
         }
@@ -76,7 +77,7 @@ async fn random(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        format!(r#"{{"random":"{}"}}"#, B64.encode(&bytes)),
+        json!({ "data": B64.encode(&bytes), "error": null }).to_string(),
     )
         .into_response()
 }
@@ -103,7 +104,7 @@ async fn attestation(Json(req): Json<AttestationRequest>) -> impl IntoResponse {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"attestation failed: {e}"}}"#),
+                json!({ "data": null, "error": format!("attestation failed: {e}") }).to_string(),
             )
                 .into_response();
         }
@@ -112,7 +113,7 @@ async fn attestation(Json(req): Json<AttestationRequest>) -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        format!(r#"{{"document":"{}"}}"#, B64.encode(&raw)),
+        json!({ "data": B64.encode(&raw), "error": null }).to_string(),
     )
         .into_response()
 }
@@ -135,7 +136,7 @@ async fn encrypt(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"encrypt error: {e}"}}"#),
+                json!({ "data": null, "error": format!("encrypt error: {e}") }).to_string(),
             )
                 .into_response();
         }
@@ -144,7 +145,7 @@ async fn encrypt(
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        format!(r#"{{"ciphertext":"{}"}}"#, B64.encode(&ciphertext)),
+        json!({ "data": B64.encode(&ciphertext), "error": null }).to_string(),
     )
         .into_response()
 }
@@ -166,7 +167,8 @@ async fn decrypt(
             return (
                 StatusCode::BAD_REQUEST,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"invalid base64 ciphertext: {e}"}}"#),
+                json!({ "data": null, "error": format!("invalid base64 ciphertext: {e}") })
+                    .to_string(),
             )
                 .into_response();
         }
@@ -177,7 +179,7 @@ async fn decrypt(
             return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"decrypt error: {e}"}}"#),
+                json!({ "data": null, "error": format!("decrypt error: {e}") }).to_string(),
             )
                 .into_response();
         }
@@ -188,7 +190,8 @@ async fn decrypt(
             return (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"decrypted bytes not valid UTF-8: {e}"}}"#),
+                json!({ "data": null, "error": format!("decrypted bytes not valid UTF-8: {e}") })
+                    .to_string(),
             )
                 .into_response();
         }
@@ -197,7 +200,7 @@ async fn decrypt(
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        format!(r#"{{"plaintext":"{}"}}"#, plaintext),
+        json!({ "data": plaintext, "error": null }).to_string(),
     )
         .into_response()
 }

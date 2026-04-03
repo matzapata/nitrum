@@ -1,4 +1,4 @@
-//! CloudFormation stack and EIF S3 bucket helpers.
+//! `CloudFormation` stack and EIF S3 bucket helpers.
 
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -15,6 +15,10 @@ pub struct EnclaveCloudStack {
 
 impl EnclaveCloudStack {
     /// Loads AWS configuration and returns the stack handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the AWS configuration cannot be loaded.
     pub async fn new(config: &NitrumConfig) -> Result<Self> {
         let bucket_name = format!("nitrum-{}", config.project.name);
         let stack_name = format!("nitrum-{}", config.project.name);
@@ -48,6 +52,11 @@ impl EnclaveCloudStack {
     }
 
     /// Upload EIF artifact and create/update the stack, then return stack outputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when S3 bucket creation/upload or CloudFormation
+    /// operations fail.
     pub async fn deploy(
         &self,
         artifact: &EnclaveArtifact,
@@ -61,7 +70,11 @@ impl EnclaveCloudStack {
         let retain_str = if retain { "true" } else { "false" };
         let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
 
-        let pcr0 = if debug_mode { "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" } else { artifact.pcr0.trim() };
+        let pcr0 = if debug_mode {
+            "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        } else {
+            artifact.pcr0.trim()
+        };
         if pcr0.is_empty() {
             anyhow::bail!(
                 "EnclaveArtifact.pcr0 is empty; rebuild the EIF or run `nitrum describe` on it"
@@ -96,10 +109,7 @@ impl EnclaveCloudStack {
             ("EifImageSha384".to_string(), pcr0.to_string()),
         ];
         if let Some(arn) = kms_administrator_role_arn {
-            params.push((
-                "KmsAdministratorRoleArn".to_string(),
-                arn.to_string(),
-            ));
+            params.push(("KmsAdministratorRoleArn".to_string(), arn.to_string()));
         }
 
         self.bucket.create_if_non_existent().await?;
@@ -114,12 +124,17 @@ impl EnclaveCloudStack {
     }
 
     /// Delete this stack and wait until deletion finishes, then empty and delete the EIF bucket.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when CloudFormation stack deletion or bucket teardown
+    /// fail.
     pub async fn destroy(&self) -> Result<()> {
         self.cloudformation.destroy().await?;
         self.bucket.destroy().await
     }
 
-    fn cloud_stack_template() -> &'static str {
+    const fn cloud_stack_template() -> &'static str {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stack.yml"))
     }
 }

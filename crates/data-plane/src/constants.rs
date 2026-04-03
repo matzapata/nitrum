@@ -12,7 +12,7 @@ pub const ENV_ACME_DIRECTORY_URL: &str = "NITRUM_ACME_DIRECTORY_URL";
 
 /// Default IMDS base URL when `NITRUM_IMDS_BASE_URL` is unset (includes `/latest`, no trailing slash).
 ///
-/// **Nitro enclave:** with gvproxy started using `-ec2-metadata-access`, IMDSv2 is reached over the
+/// **Nitro enclave:** with gvproxy started using `-ec2-metadata-access`, `IMDSv2` is reached over the
 /// TAP path at the standard link-local address (same as on the parent). ACME HTTP-01 still uses
 /// `0.0.0.0:80` on the data-plane; IMDS is HTTP to port 80 on `169.254.169.254`, not the ACME listener.
 ///
@@ -24,7 +24,7 @@ pub fn data_plane_kms_parameter_name(project_name: &str) -> String {
     format!("/nitrum/{project_name}/data-plane/kms_key_id")
 }
 
-/// SSM path for DynamoDB table name under `/nitrum/{project name}/data-plane/dynamodb_table`.
+/// SSM path for `DynamoDB` table name under `/nitrum/{project name}/data-plane/dynamodb_table`.
 pub fn data_plane_dynamodb_parameter_name(project_name: &str) -> String {
     format!("/nitrum/{project_name}/data-plane/dynamodb_table")
 }

@@ -1,12 +1,12 @@
 use crate::utils;
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use indicatif::ProgressBar;
-use serde_json::Value;
 use config::{
     HealthCheck, NitrumConfig, Project, Runtime, Scaling, Service, TlsTermination,
     validate_project_name,
 };
+use indicatif::ProgressBar;
+use serde_json::Value;
 use std::env;
 use std::fs;
 
@@ -17,7 +17,7 @@ pub struct InitArgs {
     pub name: String,
 }
 
-pub async fn run(args: InitArgs) -> Result<()> {
+pub fn run(args: InitArgs) -> Result<()> {
     validate_project_name(&args.name).map_err(|msg| {
         anyhow::anyhow!(
             "{msg} (project directory name is used as `project.name` in nitrum.toml for `nitrum cloud deploy`)"
@@ -57,7 +57,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        fs::write(dest, contents).with_context(|| format!("write {}", relative_path))?;
+        fs::write(dest, contents).with_context(|| format!("write {relative_path}"))?;
     }
     spinner.finish_with_message("Project initialized.");
 
@@ -91,7 +91,7 @@ fn sample_nitro_config(name: &str) -> String {
     )
 }
 
-fn sample_main_js() -> &'static str {
+const fn sample_main_js() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
@@ -108,7 +108,7 @@ fn sample_package_json(name: &str) -> Result<String> {
     serde_json::to_string_pretty(&value).context("serialize package.json")
 }
 
-fn sample_package_json_template() -> &'static str {
+const fn sample_package_json_template() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
@@ -116,7 +116,7 @@ fn sample_package_json_template() -> &'static str {
     ))
 }
 
-fn sample_dockerfile() -> &'static str {
+const fn sample_dockerfile() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",

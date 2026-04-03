@@ -22,7 +22,7 @@ pub struct CryptoClient {
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
     pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
-        let kms = Kms::new(&config).await;
+        let kms = Kms::new(&config);
 
         let leader = Leader::new(
             storage.clone(),
@@ -113,12 +113,13 @@ impl CryptoClient {
     }
 
     /// Get an attestation document for the current enclave.
+    ///
+    /// This is a thin wrapper over [`crate::crypto::attest::get_attestation_doc`].
     pub fn get_attestation_doc(
-        &self,
         nonce: Option<Vec<u8>>,
         public_key: Option<Vec<u8>>,
         user_data: Option<Vec<u8>>,
     ) -> Result<Vec<u8>> {
-        get_attestation_doc(nonce, public_key, user_data).map_err(|e| anyhow::anyhow!("{}", e))
+        get_attestation_doc(nonce, public_key, user_data).map_err(|e| anyhow::anyhow!("{e}"))
     }
 }

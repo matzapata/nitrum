@@ -23,7 +23,7 @@ pub struct LogsArgs {
     /// Initial lookback window (minutes) before tailing/following
     #[arg(long, default_value_t = 15)]
     pub since_minutes: u64,
-    /// Optional CloudWatch Logs filter pattern
+    /// Optional `CloudWatch` Logs filter pattern
     #[arg(long)]
     pub filter: Option<String>,
 }
@@ -40,7 +40,7 @@ pub async fn run(args: LogsArgs) -> Result<()> {
     let log_group = format!("/nitrum/{}/control-plane", config.project.name);
 
     let now_ms = now_epoch_millis();
-    let lookback_ms = (args.since_minutes.saturating_mul(60).saturating_mul(1000)) as i64;
+    let lookback_ms = (args.since_minutes.saturating_mul(60).saturating_mul(1000)).cast_signed();
     let mut cursor_ms = now_ms.saturating_sub(lookback_ms);
     let mut seen_ids_at_cursor = HashSet::new();
 
@@ -92,8 +92,10 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 }
 
 fn now_epoch_millis() -> i64 {
-    SystemTime::now()
+    let millis: i128 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map(|d| d.as_millis().cast_signed())
+        .unwrap_or(0);
+
+    millis.try_into().unwrap_or(i64::MAX)
 }

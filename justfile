@@ -1,5 +1,5 @@
 dockerhub_user := "matzapata"
-tag := "v0.1.0"
+tag := "v0.1.1"
 
 # ── dev tools ─────────────────────────────────────────
 

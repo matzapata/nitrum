@@ -1,4 +1,4 @@
-//! KMS-backed DEK lifecycle: only **GenerateDataKeyWithoutPlaintext** (AES-256) and **Decrypt**.
+//! KMS-backed DEK lifecycle: only **`GenerateDataKeyWithoutPlaintext`** (AES-256) and **Decrypt**.
 //!
 //! **Enclave:** `Decrypt` uses a Nitro [`Recipient`](https://docs.aws.amazon.com/kms/latest/developerguide/cryptographic-attestation.html)
 //! attestation. KMS returns `CiphertextForRecipient` as **RFC 5652 CMS**; OpenSSL unwraps it. The ephemeral key pair for the
@@ -20,7 +20,7 @@ pub struct Kms {
 }
 
 impl Kms {
-    pub async fn new(config: &RuntimeConfig) -> Self {
+    pub fn new(config: &RuntimeConfig) -> Self {
         let mut builder = aws_sdk_kms::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.kms_endpoint {
             builder = builder.endpoint_url(endpoint);

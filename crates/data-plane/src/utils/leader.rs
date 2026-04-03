@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 // ── Leader ───────────────────────────────────────────────────────────────────
 
-/// Leader election backed by a DynamoDB lock key. Create one per critical section.
+/// Leader election backed by a `DynamoDB` lock key. Create one per critical section.
 pub struct Leader {
     storage: Arc<StorageClient>,
     owner: String,
@@ -18,7 +18,7 @@ pub struct Leader {
 }
 
 impl Leader {
-    pub fn new(storage: Arc<StorageClient>, owner: String, key: String) -> Self {
+    pub const fn new(storage: Arc<StorageClient>, owner: String, key: String) -> Self {
         Self {
             storage,
             owner,
@@ -55,6 +55,10 @@ pub struct LeaderGuard {
 
 impl LeaderGuard {
     /// Release the lock immediately so another instance can become leader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the underlying storage lock release fails.
     pub async fn release(self) -> Result<()> {
         self.storage.release_lock(&self.key, &self.owner).await
     }

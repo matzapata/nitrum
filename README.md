@@ -38,3 +38,17 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 ### License
 
 Nitrum is released under the **MIT** license. See `LICENSE` for details.
+
+<!-- 
+TODO:
+- [] Review all docs
+- [] Doc on A alias for domain
+- [] Acme wait for domain to be available?
+- [x] More samples, gmail mcp? blockchain wallet?
+- [] Verify cert is store enc and leader lock
+- [] Add some unit tests and e2e
+- [] Release pipeline, images, binary, etc 
+- [] Prometheus / grafana
+- [] cors
+- [] add nitrum.local to be used inside enclave?
+ -->

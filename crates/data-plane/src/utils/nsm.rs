@@ -19,7 +19,7 @@ impl NsmConnection {
         Ok(Self(nsm_fd))
     }
 
-    pub fn fd(&self) -> i32 {
+    pub const fn fd(&self) -> i32 {
         self.0
     }
 }

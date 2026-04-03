@@ -32,17 +32,20 @@ impl Bucket {
     }
 
     /// Ensures the bucket exists in this account (head, then create if needed).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `HeadBucket`/`CreateBucket` fail with an
+    /// unrecoverable error or when the region cannot be derived.
     pub async fn create_if_non_existent(&self) -> Result<()> {
-        let region = self
-            .client
-            .config()
-            .region()
-            .map(|r| r.as_ref().to_string())
-            .unwrap_or_else(|| {
+        let region = self.client.config().region().map_or_else(
+            || {
                 std::env::var("AWS_REGION")
                     .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
                     .unwrap_or_else(|_| "us-east-1".to_string())
-            });
+            },
+            |r| r.as_ref().to_string(),
+        );
 
         let bucket = self.name.as_str();
         info!(%bucket, %region, "S3 HeadBucket (check if bucket exists)");
@@ -89,6 +92,10 @@ impl Bucket {
     }
 
     /// Uploads a file unless an object with the same key already exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `HeadObject`/`PutObject` or local file reads fail.
     pub async fn upload(&self, key: &str, path: &Path) -> Result<()> {
         let bucket = self.name.as_str();
         match self
@@ -134,6 +141,11 @@ impl Bucket {
     }
 
     /// Deletes all objects and then the bucket. No-op if the bucket does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when listing, deleting objects, or deleting the bucket
+    /// fails with an unrecoverable error.
     pub async fn destroy(&self) -> Result<()> {
         let bucket = self.name.as_str();
 

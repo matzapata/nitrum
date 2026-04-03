@@ -21,15 +21,15 @@ const LOCK_TTL_SECS: u64 = 60;
 
 // ── StorageClient ────────────────────────────────────────────────────────────
 
-/// Client for the shared object storage table. Holds table name and DynamoDB client.
+/// Client for the shared object storage table. Holds table name and `DynamoDB` client.
 pub struct StorageClient {
     client: Client,
     table: String,
 }
 
 impl StorageClient {
-    /// Build from runtime config and shared SDK config (DynamoDB encapsulated in storage).
-    pub async fn new(config: &RuntimeConfig) -> Self {
+    /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
+    pub fn new(config: &RuntimeConfig) -> Self {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);
@@ -44,7 +44,7 @@ impl StorageClient {
     /// Try to acquire a distributed lock identified by `key`.
     ///
     /// Returns `true` if the lock was obtained, `false` if another instance holds it.
-    /// The lock auto-expires after `LOCK_TTL_SECS` seconds via DynamoDB TTL.
+    /// The lock auto-expires after `LOCK_TTL_SECS` seconds via `DynamoDB` TTL.
     pub async fn try_acquire_lock(&self, key: &str, owner: &str) -> Result<bool> {
         let now = time::unix_now();
         let expiry = (now + LOCK_TTL_SECS).to_string();

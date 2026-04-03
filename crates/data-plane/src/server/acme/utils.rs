@@ -11,7 +11,7 @@ use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 
 #[cfg(feature = "pebble")]
-pub(crate) fn pebble_client_tls_config() -> Result<Arc<rustls::ClientConfig>> {
+pub fn pebble_client_tls_config() -> Result<Arc<rustls::ClientConfig>> {
     let value = std::env::var("PEBBLE_MINICA_CERT")
         .context("PEBBLE_MINICA_CERT not set (required when using pebble feature)")?;
     let certs = rustls_pemfile::certs(&mut BufReader::new(Cursor::new(value.as_bytes())))
@@ -27,7 +27,11 @@ pub(crate) fn pebble_client_tls_config() -> Result<Arc<rustls::ClientConfig>> {
 }
 
 /// Hyper HTTPS client for ACME directory (e.g. Pebble with custom CA).
-pub(crate) fn acme_https_client(
+///
+/// # Errors
+///
+/// Returns an error when the HTTPS connector or client cannot be constructed.
+pub fn acme_https_client(
     tls_config: Arc<rustls::ClientConfig>,
 ) -> Result<Box<Client<hyper_rustls::HttpsConnector<HttpConnector>, BodyWrapper<Bytes>>>> {
     let https = HttpsConnectorBuilder::new()

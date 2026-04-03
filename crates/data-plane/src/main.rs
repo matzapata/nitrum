@@ -63,7 +63,7 @@ async fn main() {
     });
 
     // Create storage client
-    let storage = Arc::new(StorageClient::new(&runtime_config).await);
+    let storage: Arc<StorageClient> = Arc::new(StorageClient::new(&runtime_config));
 
     // Create crypto client
     let crypto = Arc::new(

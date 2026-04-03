@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
+use config::NitrumConfig;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use config::NitrumConfig;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
@@ -21,6 +21,11 @@ impl EnclaveArtifact {
     ///
     /// - If `path` is a directory: build enclave image + EIF from project source, then resolve hash and PCRs.
     /// - If `path` is a file: treat it as an existing EIF and resolve hash and PCRs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the path cannot be read, Docker image or EIF
+    /// builds fail, or `nitro-cli describe-eif` cannot be executed or parsed.
     pub async fn try_from(path: &Path, cfg: &NitrumConfig) -> Result<Self> {
         let canonical = path
             .canonicalize()
@@ -64,6 +69,7 @@ impl EnclaveArtifact {
 }
 
 /// Default EIF output path for a Nitrum project: `.nitrum/artifacts/{project_name}.eif`.
+#[must_use]
 pub fn project_eif_path(project_root: &Path, project_name: &str) -> PathBuf {
     project_root
         .join(".nitrum")
@@ -74,6 +80,11 @@ pub fn project_eif_path(project_root: &Path, project_name: &str) -> PathBuf {
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 ///
 /// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name` (see `crates/data-plane/src/utils/ssm.rs`).
+///
+/// # Errors
+///
+/// Returns an error when `docker build` fails to start or exits with a
+/// non-success status.
 pub async fn build_enclave_image(
     root: &Path,
     data_plane_image: &str,
@@ -132,6 +143,11 @@ pub async fn build_enclave_image(
 ///
 /// Requires a Docker socket mount (same pattern as the Nitrum README): the CLI container talks to the host daemon,
 /// so `docker_uri` must be an image available there (e.g. `nitrum-{name}:latest` from [`build_enclave_image`]).
+///
+/// # Errors
+///
+/// Returns an error when the host or container paths cannot be resolved,
+/// directories cannot be created, or the `docker run` for `nitro-cli` fails.
 pub async fn build_enclave_eif(
     project_root: &Path,
     docker_uri: &str,
@@ -209,6 +225,11 @@ pub async fn build_enclave_eif(
 }
 
 /// Run `nitro-cli describe-eif` using the configured Nitro CLI image; prints JSON to stdout.
+///
+/// # Errors
+///
+/// Returns an error when the EIF cannot be resolved, `nitro-cli describe-eif`
+/// fails, or the JSON output cannot be formatted or written to stdout.
 pub async fn describe_eif(cfg: &NitrumConfig, eif_path: &Path) -> Result<()> {
     let describe_json = describe_eif_json(cfg, eif_path).await?;
     let mut stdout = tokio::io::stdout();

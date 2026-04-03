@@ -5,12 +5,12 @@ use crate::storage::keys;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
-pub(crate) struct AcmeStorage {
+pub struct AcmeStorage {
     client: Arc<StorageClient>,
 }
 
 impl AcmeStorage {
-    pub(crate) fn new(client: Arc<StorageClient>) -> Self {
+    pub(crate) const fn new(client: Arc<StorageClient>) -> Self {
         Self { client }
     }
 

@@ -68,11 +68,11 @@ pub async fn init() {
 
 #[repr(C)]
 struct SockAddrVm {
-    svm_family: u16,
-    svm_reserved1: u16,
-    svm_port: u32,
-    svm_cid: u32,
-    svm_zero: [u8; 4],
+    family: u16,
+    reserved1: u16,
+    port: u32,
+    cid: u32,
+    zero: [u8; 4],
 }
 
 fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
@@ -90,7 +90,7 @@ fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
     unsafe {
         std::ptr::copy_nonoverlapping(
             name.as_ptr(),
-            ifr.ifr_name.as_mut_ptr() as *mut u8,
+            ifr.ifr_name.as_mut_ptr().cast::<u8>(),
             name.len(),
         );
         ifr.ifr_ifru.ifru_flags = IFF_TAP | IFF_NO_PI;
@@ -155,18 +155,28 @@ fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
     }
 
     let addr = SockAddrVm {
-        svm_family: AF_VSOCK as u16,
-        svm_reserved1: 0,
-        svm_port: port,
-        svm_cid: PARENT_CID,
-        svm_zero: [0; 4],
+        family: u16::try_from(AF_VSOCK).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "AF_VSOCK constant does not fit in u16",
+            )
+        })?,
+        reserved1: 0,
+        port,
+        cid: PARENT_CID,
+        zero: [0; 4],
     };
 
     let rc = unsafe {
         libc::connect(
             fd,
-            &addr as *const _ as *const libc::sockaddr,
-            std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
+            (&raw const addr).cast::<libc::sockaddr>(),
+            libc::socklen_t::try_from(std::mem::size_of::<SockAddrVm>()).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "SockAddrVm size does not fit in socklen_t",
+                )
+            })?,
         )
     };
 
@@ -191,7 +201,7 @@ fn read_exact_raw(fd: libc::c_int, buf: &mut [u8]) -> std::io::Result<()> {
         let n = unsafe {
             libc::read(
                 fd,
-                buf[pos..].as_mut_ptr() as *mut libc::c_void,
+                buf[pos..].as_mut_ptr().cast::<libc::c_void>(),
                 buf.len() - pos,
             )
         };
@@ -204,7 +214,12 @@ fn read_exact_raw(fd: libc::c_int, buf: &mut [u8]) -> std::io::Result<()> {
                 "connection closed",
             ));
         }
-        pos += n as usize;
+        pos += usize::try_from(n).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "negative read size encountered",
+            )
+        })?;
     }
     Ok(())
 }
@@ -215,31 +230,44 @@ fn write_all_raw(fd: libc::c_int, buf: &[u8]) -> std::io::Result<()> {
         let n = unsafe {
             libc::write(
                 fd,
-                buf[pos..].as_ptr() as *const libc::c_void,
+                buf[pos..].as_ptr().cast::<libc::c_void>(),
                 buf.len() - pos,
             )
         };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }
-        pos += n as usize;
+        pos += usize::try_from(n).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "negative write size encountered",
+            )
+        })?;
     }
     Ok(())
 }
 
 /// TAP → VSOCK: read raw Ethernet frames from the TAP device, prepend a
 /// 2-byte LE length header, and write to the VSOCK stream.
-fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: Arc<AtomicBool>) {
+fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: &Arc<AtomicBool>) {
     let mut buf = vec![0u8; MAX_FRAME_SIZE];
     while running.load(Ordering::Relaxed) {
-        let n = unsafe { libc::read(tap_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        let n = unsafe { libc::read(tap_fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
         if n <= 0 {
             error!("TAP read error or EOF (n={n})");
             break;
         }
-        let len = (n as u16).to_le_bytes();
+        let len = u16::try_from(n)
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "frame length larger than u16",
+                )
+            })
+            .unwrap()
+            .to_le_bytes();
         if write_all_raw(vsock_fd, &len).is_err()
-            || write_all_raw(vsock_fd, &buf[..n as usize]).is_err()
+            || write_all_raw(vsock_fd, &buf[..n.cast_unsigned()]).is_err()
         {
             error!("VSOCK write error");
             break;
@@ -250,7 +278,7 @@ fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: Arc<AtomicBool>)
 
 /// VSOCK → TAP: read a 2-byte LE length header from the VSOCK stream,
 /// then the frame payload, and write the raw frame to the TAP device.
-fn tx_loop(vsock_fd: libc::c_int, tap_fd: libc::c_int, running: Arc<AtomicBool>) {
+fn tx_loop(vsock_fd: libc::c_int, tap_fd: libc::c_int, running: &Arc<AtomicBool>) {
     let mut len_buf = [0u8; FRAME_LEN_SIZE];
     let mut frame_buf = vec![0u8; MAX_FRAME_SIZE];
 
@@ -283,8 +311,8 @@ fn start_forwarding(tap_fd: libc::c_int, vsock_fd: libc::c_int) {
     let running = Arc::new(AtomicBool::new(true));
 
     let r1 = Arc::clone(&running);
-    std::thread::spawn(move || rx_loop(tap_fd, vsock_fd, r1));
+    std::thread::spawn(move || rx_loop(tap_fd, vsock_fd, &r1));
 
     let r2 = Arc::clone(&running);
-    std::thread::spawn(move || tx_loop(vsock_fd, tap_fd, r2));
+    std::thread::spawn(move || tx_loop(vsock_fd, tap_fd, &r2));
 }

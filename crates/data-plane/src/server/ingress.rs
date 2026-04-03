@@ -28,10 +28,10 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use serde::Deserialize;
 use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -106,7 +106,7 @@ async fn ingress_status() -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
+        r#"{"data":"{\"status\":\"ok\"}"#,
     )
 }
 
@@ -138,7 +138,7 @@ async fn ingress_attestation(
         Ok(doc) => (
             StatusCode::OK,
             [("content-type", "application/json")],
-            format!(r#"{{"document":"{}"}}"#, B64.encode(&doc)),
+            format!(r#"{{"data":"{}"}}"#, B64.encode(&doc)),
         )
             .into_response(),
         Err(e) => {
@@ -146,7 +146,7 @@ async fn ingress_attestation(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [("content-type", "application/json")],
-                format!(r#"{{"error":"attestation failed: {}"}}"#, e),
+                format!(r#"{{"error":"attestation failed: {e}"}}"#),
             )
                 .into_response()
         }
@@ -160,10 +160,9 @@ async fn ingress_proxy(
     let path_and_query = req
         .uri()
         .path_and_query()
-        .map(|p| p.as_str())
-        .unwrap_or("/");
+        .map_or("/", axum::http::uri::PathAndQuery::as_str);
     let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
-    let url = format!("http://{}{}", forward_to, path_and_query);
+    let url = format!("http://{forward_to}{path_and_query}");
     info!(url = %url, "ingress: proxying to app");
 
     let client = match reqwest::Client::builder().build() {
@@ -186,7 +185,7 @@ async fn ingress_proxy(
     let mut backend_req = client
         .request(parts.method.clone(), &url)
         .body(body_bytes.to_vec());
-    for (name, value) in parts.headers.iter() {
+    for (name, value) in &parts.headers {
         let name_str = name.as_str();
         if name_str.eq_ignore_ascii_case("connection")
             || name_str.eq_ignore_ascii_case("keep-alive")
@@ -218,7 +217,7 @@ async fn ingress_proxy(
     };
 
     let mut resp = (status, body).into_response();
-    for (name, value) in headers.iter() {
+    for (name, value) in &headers {
         resp.headers_mut().insert(name.clone(), value.clone());
     }
 

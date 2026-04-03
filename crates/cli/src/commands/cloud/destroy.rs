@@ -1,4 +1,4 @@
-//! Delete the CloudFormation stack and EIF S3 bucket created by `nitrum cloud deploy`.
+//! Delete the `CloudFormation` stack and EIF S3 bucket created by `nitrum cloud deploy`.
 
 use crate::{cloud::EnclaveCloudStack, utils};
 use anyhow::Result;

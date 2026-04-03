@@ -15,24 +15,23 @@ pub struct EnclaveLocalStack<'a> {
 }
 
 impl<'a> EnclaveLocalStack<'a> {
+    #[must_use]
     pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Self {
         Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: "matzapata/nitrum-data-plane:latest-dev".to_string(),
+            data_plane_image: "matzapata/nitrum-data-plane:v0.1.1-dev".to_string(),
         }
     }
 
+    /// Start the local stack (equivalent to `docker compose up` with the Nitrum template).
     pub async fn up(&self) -> Result<()> {
         let compose_file = self.ensure_template()?;
 
         let output = Command::new("docker")
             .current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env(
-                "DATA_PLANE_IMAGE",
-                self.data_plane_image.clone(),
-            )
+            .env("DATA_PLANE_IMAGE", self.data_plane_image.clone())
             .arg("compose")
             .arg("--progress")
             .arg("quiet")
@@ -66,6 +65,7 @@ impl<'a> EnclaveLocalStack<'a> {
         );
     }
 
+    /// Stop the local stack (equivalent to `docker compose down` with the Nitrum template).
     pub async fn down(&self) -> Result<()> {
         let compose_file = self.ensure_template()?;
 
@@ -106,6 +106,7 @@ impl<'a> EnclaveLocalStack<'a> {
         );
     }
 
+    /// Tail local enclave logs using `docker compose logs`.
     pub async fn logs(&self, tail: Option<u32>, follow: bool) -> Result<()> {
         let compose_file = self.ensure_template()?;
 
@@ -140,7 +141,8 @@ impl<'a> EnclaveLocalStack<'a> {
         Ok(())
     }
 
-    fn local_stack_template() -> &'static str {
+    /// The local stack template file.
+    const fn local_stack_template() -> &'static str {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docker-compose.yml"))
     }
 

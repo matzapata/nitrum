@@ -14,13 +14,13 @@ pub struct CloudArgs {
 
 #[derive(Subcommand)]
 pub enum CloudCommand {
-    /// Deploy to AWS (CloudFormation + S3 EIF upload)
+    /// Deploy to AWS (`CloudFormation` + S3 EIF upload)
     Deploy(deploy::DeployArgs),
-    /// Delete the CloudFormation stack and EIF S3 bucket
+    /// Delete the `CloudFormation` stack and EIF S3 bucket
     Destroy(destroy::DestroyArgs),
     /// Application environment variables in SSM Parameter Store
     Env(env::EnvArgs),
-    /// Read deployed control-plane CloudWatch logs
+    /// Read deployed control-plane `CloudWatch` logs
     Logs(logs::LogsArgs),
 }
 

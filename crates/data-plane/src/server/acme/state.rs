@@ -52,11 +52,11 @@ impl AcmeState {
     }
 
     /// Return an existing cert from storage or provision one (under leader lock).
-    pub async fn get_or_provision(&mut self) -> Result<(String, String)> {
-        if let Some(pair) = self.cert_storage.read_cert_pair().await? {
-            if self.current_chain.as_deref() != Some(&pair.0) {
-                return Ok(pair);
-            }
+    pub async fn get_or_provision(&self) -> Result<(String, String)> {
+        if let Some(pair) = self.cert_storage.read_cert_pair().await?
+            && self.current_chain.as_deref() != Some(&pair.0)
+        {
+            return Ok(pair);
         }
 
         let guard = loop {
@@ -66,10 +66,10 @@ impl AcmeState {
             tokio::time::sleep(Duration::from_secs(2)).await;
         };
 
-        if let Some(pair) = self.cert_storage.read_cert_pair().await? {
-            if self.current_chain.as_deref() != Some(&pair.0) {
-                return Ok(pair);
-            }
+        if let Some(pair) = self.cert_storage.read_cert_pair().await?
+            && self.current_chain.as_deref() != Some(&pair.0)
+        {
+            return Ok(pair);
         }
 
         let (account, credentials) = self.inner.load_or_create_account().await?;

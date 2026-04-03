@@ -1,4 +1,4 @@
-//! CloudFormation stack helpers.
+//! `CloudFormation` stack helpers.
 
 use anyhow::{Context, Result, bail};
 use aws_sdk_cloudformation::error::SdkError as CfSdkError;
@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-/// CloudFormation stack scoped to a client, stack name, and template body.
+/// `CloudFormation` stack scoped to a client, stack name, and template body.
 pub struct CloudFormation {
     client: aws_sdk_cloudformation::Client,
     stack_name: String,
@@ -37,6 +37,11 @@ impl CloudFormation {
     }
 
     /// Returns whether the stack exists and is not `DELETE_COMPLETE`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `DescribeStacks` fails for reasons other than a
+    /// missing stack.
     pub async fn exists(&self) -> Result<bool> {
         let stack_name = self.stack_name.as_str();
         let describe = self
@@ -73,6 +78,11 @@ impl CloudFormation {
 
     /// Creates the stack if missing; otherwise runs `UpdateStack` and treats “no updates” as success.
     /// Returns `true` when the caller should [`Self::wait_until_stable`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `CreateStack`/`UpdateStack` or `DescribeStacks`
+    /// fail in a way that cannot be recovered automatically.
     pub async fn update_if_needed(&self, params: &[(String, String)]) -> Result<bool> {
         let stack_name = self.stack_name.as_str();
         let parameters = stack_parameters(params);
@@ -129,11 +139,21 @@ impl CloudFormation {
     }
 
     /// Polls until `CREATE_COMPLETE` or `UPDATE_COMPLETE`, or returns an error on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the stack enters a terminal failure state or when
+    /// polling fails due to AWS API errors.
     pub async fn wait_until_stable(&self) -> Result<()> {
         wait_stack_stable(&self.client, self.stack_name.as_str()).await
     }
 
     /// Output keys mapped to values (non-empty keys only).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `DescribeStacks` fails or when the response is
+    /// missing a stack or outputs unexpectedly.
     pub async fn outputs(&self) -> Result<BTreeMap<String, String>> {
         let stack_name = self.stack_name.as_str();
         let resp = self
@@ -161,6 +181,11 @@ impl CloudFormation {
     }
 
     /// Deletes the stack (if present and not already gone) and waits until deletion finishes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `DescribeStacks`, `DeleteStack`, or subsequent
+    /// polling fails, or when the stack transitions to a delete failure state.
     pub async fn destroy(&self) -> Result<()> {
         let stack_name = self.stack_name.as_str();
 
@@ -172,8 +197,12 @@ impl CloudFormation {
             .send()
             .await;
         let need_cf_delete = match describe {
-            Ok(resp) => {
-                if let Some(st) = resp.stacks().first() {
+            Ok(resp) => resp.stacks().first().map_or_else(
+                || {
+                    info!(%stack_name, "DescribeStacks returned no stacks — treating as gone");
+                    false
+                },
+                |st| {
                     let status = st.stack_status();
                     if matches!(status, Some(StackStatus::DeleteComplete)) {
                         info!(%stack_name, "stack already DELETE_COMPLETE — nothing to do");
@@ -182,11 +211,8 @@ impl CloudFormation {
                         info!(%stack_name, ?status, "stack exists — will DeleteStack");
                         true
                     }
-                } else {
-                    info!(%stack_name, "DescribeStacks returned no stacks — treating as gone");
-                    false
-                }
-            }
+                },
+            ),
             Err(e) => {
                 if describe_stacks_reports_missing_stack(&e) {
                     info!(%stack_name, "stack does not exist — nothing to delete");
@@ -229,7 +255,7 @@ impl CloudFormation {
                         let st = resp.stacks().first();
                         let status = st.and_then(|x| x.stack_status());
                         n = n.saturating_add(1);
-                        if n == 1 || n % 6 == 0 {
+                        if n == 1 || n.is_multiple_of(6) {
                             info!(%stack_name, ?status, "delete wait poll");
                         } else {
                             debug!(%stack_name, ?status, "delete wait poll");
@@ -242,7 +268,10 @@ impl CloudFormation {
                             Some(StackStatus::DeleteFailed) => {
                                 bail!("stack `{stack_name}` delete failed");
                             }
-                            Some(StackStatus::DeleteInProgress) | _ => {
+                            Some(StackStatus::DeleteInProgress) => {
+                                sleep(Duration::from_secs(5)).await;
+                            }
+                            _ => {
                                 sleep(Duration::from_secs(5)).await;
                             }
                         }
@@ -256,26 +285,23 @@ impl CloudFormation {
 }
 
 fn describe_stacks_reports_missing_stack<R>(err: &CfSdkError<DescribeStacksError, R>) -> bool {
-    match err {
-        CfSdkError::ServiceError(ctx) => {
-            let e = ctx.err();
-            let code = e.meta().code();
-            let msg = e.meta().message();
-            let missing = code == Some("ValidationError")
-                && msg.is_some_and(|m| m.contains("does not exist"));
-            debug!(
-                code,
-                message = msg,
-                request_id = e.request_id(),
-                missing_stack = missing,
-                "DescribeStacks service error"
-            );
-            missing
-        }
-        _ => {
-            debug!(error = %err, "DescribeStacks non-service error");
-            false
-        }
+    if let CfSdkError::ServiceError(ctx) = err {
+        let e = ctx.err();
+        let code = e.meta().code();
+        let msg = e.meta().message();
+        let missing =
+            code == Some("ValidationError") && msg.is_some_and(|m| m.contains("does not exist"));
+        debug!(
+            code,
+            message = msg,
+            request_id = e.request_id(),
+            missing_stack = missing,
+            "DescribeStacks service error"
+        );
+        missing
+    } else {
+        debug!(error = %err, "DescribeStacks non-service error");
+        false
     }
 }
 
@@ -291,7 +317,7 @@ fn stack_parameters(params: &[(String, String)]) -> Vec<Parameter> {
         .collect()
 }
 
-fn stack_in_progress(status: Option<&StackStatus>) -> bool {
+const fn stack_in_progress(status: Option<&StackStatus>) -> bool {
     matches!(
         status,
         Some(
@@ -308,7 +334,7 @@ fn stack_in_progress(status: Option<&StackStatus>) -> bool {
     )
 }
 
-fn stack_failed(status: Option<&StackStatus>) -> bool {
+const fn stack_failed(status: Option<&StackStatus>) -> bool {
     matches!(
         status,
         Some(
@@ -339,7 +365,7 @@ async fn wait_stack_stable(
         let stack = resp.stacks().first().context("stack missing during wait")?;
         let status = stack.stack_status();
         tick = tick.saturating_add(1);
-        if tick == 1 || tick % 6 == 0 {
+        if tick == 1 || tick.is_multiple_of(6) {
             info!(
                 %stack_name,
                 ?status,
@@ -358,12 +384,12 @@ async fn wait_stack_stable(
         }
         if stack_failed(status) {
             let reason = stack.stack_status_reason().unwrap_or("no reason returned");
-            bail!("stack `{stack_name}` failed: {:?} — {reason}", status);
+            bail!("stack `{stack_name}` failed: {status:?} — {reason}");
         }
         if stack_in_progress(status) || status.is_none() {
             sleep(Duration::from_secs(5)).await;
             continue;
         }
-        bail!("stack `{stack_name}` unexpected status: {:?}", status);
+        bail!("stack `{stack_name}` unexpected status: {status:?}");
     }
 }

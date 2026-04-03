@@ -26,6 +26,7 @@ pub struct RuntimeConfig {
     pub nitrum: NitrumConfig,
     /// IMDS base URL from `NITRUM_IMDS_BASE_URL` or [`DEFAULT_IMDS_LATEST_BASE_URL`] (no trailing slash).
     /// Default is standard EC2 IMDS; override for host-side runs or metadata mocks.
+    #[allow(dead_code)]
     pub imds_latest_base_url: String,
     /// AWS region from IMDS.
     pub aws_region: String,
@@ -33,9 +34,9 @@ pub struct RuntimeConfig {
     pub aws_sdk_config: Arc<aws_config::SdkConfig>,
     /// Instance ID from IMDS.
     pub instance_id: String,
-    /// DynamoDB table name from SSM.
+    /// `DynamoDB` table name from SSM.
     pub dynamodb_table: String,
-    /// Optional DynamoDB API endpoint (`NITRUM_DYNAMODB_ENDPOINT_URL`).
+    /// Optional `DynamoDB` API endpoint (`NITRUM_DYNAMODB_ENDPOINT_URL`).
     pub dynamodb_endpoint: Option<String>,
     /// KMS key ID from SSM.
     pub kms_key_id: String,
@@ -147,13 +148,13 @@ impl RuntimeConfig {
         Ok(Self {
             nitrum,
             imds_latest_base_url,
-            aws_sdk_config,
             aws_region,
-            dynamodb_table,
-            kms_key_id,
-            dynamodb_endpoint,
-            kms_endpoint,
+            aws_sdk_config,
             instance_id,
+            dynamodb_table,
+            dynamodb_endpoint,
+            kms_key_id,
+            kms_endpoint,
             ingress_listen_addr,
             acme_http01_listen_addr,
             crypto_api_listen_addr,

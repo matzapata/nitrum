@@ -42,7 +42,7 @@ async fn main() {
 
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Init(args) => init::run(args).await,
+        Commands::Init(args) => init::run(args),
         Commands::Build(args) => build::run(args).await,
         Commands::Local(args) => local_cmd::run(args).await,
         Commands::Cloud(args) => cloud_cmd::run(args).await,

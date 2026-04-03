@@ -1,7 +1,7 @@
 //! Enclave-side AWS credential source for the shared [`aws_config::SdkConfig`].
 //!
 //! [`EnclaveProvider`] implements [`ProvideCredentials`] and owns an [`ImdsClient`]
-//! that caches short-lived IMDSv2 role credentials by wall-clock time bucket.
+//! that caches short-lived `IMDSv2` role credentials by wall-clock time bucket.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,7 +18,7 @@ use tracing::debug;
 
 // ── IMDSv2 constants ─────────────────────────────────────────────────────────
 
-/// IMDSv2 token TTL (seconds). AWS allows up to 21600.
+/// `IMDSv2` token TTL (seconds). AWS allows up to 21600.
 const TOKEN_TTL_SECS: u64 = 21600;
 
 /// How often cached role credentials are refreshed (seconds).
@@ -42,7 +42,7 @@ struct CredCache {
     credentials: Option<Credentials>,
 }
 
-/// IMDSv2 client with built-in credential caching by wall-clock time bucket.
+/// `IMDSv2` client with built-in credential caching by wall-clock time bucket.
 pub struct ImdsClient {
     /// Base URL including the `/latest` segment (no trailing slash).
     /// In a Nitro enclave this is typically `http://169.254.169.254/latest` when gvproxy runs with `-ec2-metadata-access`.
@@ -143,15 +143,16 @@ impl ImdsClient {
         let bucket = Self::ttl_bucket();
         let mut guard = self.cache.lock().await;
 
-        if guard.ttl_bucket == bucket {
-            if let Some(ref c) = guard.credentials {
-                return Ok(c.clone());
-            }
+        if guard.ttl_bucket == bucket
+            && let Some(ref c) = guard.credentials
+        {
+            return Ok(c.clone());
         }
 
         let creds = self.fetch_role_credentials().await?;
         guard.ttl_bucket = bucket;
         guard.credentials = Some(creds.clone());
+        drop(guard);
         Ok(creds)
     }
 
@@ -233,7 +234,7 @@ impl EnclaveProvider {
     }
 
     /// Share an existing [`ImdsClient`] (e.g. with [`super::ssm::SsmParameters`]).
-    pub fn with_imds(imds: Arc<ImdsClient>) -> Self {
+    pub const fn with_imds(imds: Arc<ImdsClient>) -> Self {
         Self { imds }
     }
 

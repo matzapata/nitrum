@@ -14,19 +14,21 @@ use tracing::{error, info, warn};
 pub enum EnclaveError {
     #[error("Failed to run command: {0}")]
     CommandFailed(String),
+    // Reserved for future use when debug log streaming errors need to be surfaced.
+    #[allow(dead_code)]
     #[error("Failed to send debug logs to stdout: {0}")]
     SendDebugLogsFailed(String),
 }
 
 impl From<std::io::Error> for EnclaveError {
     fn from(e: std::io::Error) -> Self {
-        EnclaveError::CommandFailed(e.to_string())
+        Self::CommandFailed(e.to_string())
     }
 }
 
 impl From<serde_json::Error> for EnclaveError {
     fn from(e: serde_json::Error) -> Self {
-        EnclaveError::CommandFailed(e.to_string())
+        Self::CommandFailed(e.to_string())
     }
 }
 
@@ -38,12 +40,12 @@ enum NitroCommand {
 }
 
 impl NitroCommand {
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
-            NitroCommand::TerminateEnclave => "terminate-enclave",
-            NitroCommand::DescribeEnclaves => "describe-enclaves",
-            NitroCommand::RunEnclave => "run-enclave",
-            NitroCommand::Console => "console",
+            Self::TerminateEnclave => "terminate-enclave",
+            Self::DescribeEnclaves => "describe-enclaves",
+            Self::RunEnclave => "run-enclave",
+            Self::Console => "console",
         }
     }
 }
@@ -57,7 +59,7 @@ pub struct Enclave {
 
 impl Enclave {
     #[must_use]
-    pub fn new(debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
+    pub const fn new(debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
         Self {
             debug_mode,
             cpu_count,
@@ -125,10 +127,8 @@ impl Enclave {
                 Ok(()) => {
                     info!("Enclave started... Waiting 5 seconds for warmup.");
                     tokio::time::sleep(Duration::from_secs(5)).await;
-                    if debug_mode {
-                        if let Err(e) = Self::send_debug_logs_to_stdout().await {
-                            warn!(error = %e, "debug log attach failed; continuing supervision");
-                        }
+                    if debug_mode && let Err(e) = Self::send_debug_logs_to_stdout().await {
+                        warn!(error = %e, "debug log attach failed; continuing supervision");
                     }
                     backoff_secs = 1;
                 }
@@ -141,7 +141,7 @@ impl Enclave {
     }
 
     async fn sleep_backoff(backoff_secs: &mut u64) {
-        let wait = (*backoff_secs).max(1).min(MAX_BACKOFF_SECS);
+        let wait = (*backoff_secs).clamp(1, MAX_BACKOFF_SECS);
         tokio::time::sleep(Duration::from_secs(wait)).await;
         Self::advance_backoff(backoff_secs);
     }
@@ -254,7 +254,7 @@ impl Drop for Enclave {
 
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
             rt.spawn(async {
-                if let Err(e) = Enclave::shutdown_all_enclaves().await {
+                if let Err(e) = Self::shutdown_all_enclaves().await {
                     warn!(error = %e, "failed to terminate enclaves on shutdown");
                 }
             });

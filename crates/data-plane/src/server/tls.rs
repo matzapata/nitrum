@@ -30,7 +30,7 @@ pub use super::acme::challenge_handler;
 // TlsState
 // ---------------------------------------------------------------------------
 
-/// TLS state machine: provides RustlsConfig for the server and `.next()` to drive ACME events.
+/// TLS state machine: provides `RustlsConfig` for the server and `.next()` to drive ACME events.
 pub struct TlsState {
     state: Arc<DataPlaneState>,
     rustls_config: RustlsConfig,
@@ -43,12 +43,12 @@ impl TlsState {
     pub fn new(state: Arc<DataPlaneState>) -> Self {
         let domain = state.config.tls_termination.domain.clone();
         let acme_enabled = state.config.tls_termination.acme;
-        let (server_config, cert_hash) = ephemeral_server_config(&[domain.clone()]);
+        let (server_config, cert_hash) = ephemeral_server_config(std::slice::from_ref(&domain));
         *state.tls_cert_hash.write().unwrap() = Some(cert_hash);
         let rustls_config = RustlsConfig::from_config(server_config);
 
         if !acme_enabled {
-            return TlsState {
+            return Self {
                 state,
                 rustls_config,
                 acme_state: None,
@@ -69,9 +69,9 @@ impl TlsState {
         let client_tls_config = None;
 
         let storage_for_acme = state.storage.clone();
-        TlsState {
+        Self {
             state,
-            rustls_config: rustls_config.clone(),
+            rustls_config,
             acme_state: Some(AcmeState::new(
                 domain,
                 storage_for_acme,
@@ -82,7 +82,7 @@ impl TlsState {
         }
     }
 
-    /// RustlsConfig to pass to `bind_rustls`. Hot-reloaded when ACME renews.
+    /// `RustlsConfig` to pass to `bind_rustls`. Hot-reloaded when ACME renews.
     pub fn rustls_config(&self) -> RustlsConfig {
         self.rustls_config.clone()
     }
@@ -129,11 +129,11 @@ impl TlsState {
                 }
                 Ok(AcmeEvent::CertRenewed)
             }
-            other => Ok(other),
+            other @ AcmeEvent::CertIssued => Ok(other),
         }
     }
 
-    fn apply_cert(&mut self, chain: &str, key: &str) {
+    fn apply_cert(&self, chain: &str, key: &str) {
         if let Some(hash) = cert_hash_from_chain_pem(chain) {
             *self.state.tls_cert_hash.write().unwrap() = Some(hash);
         }
