@@ -45,10 +45,9 @@ TODO:
 - [] Doc on A alias for domain
 - [] Acme wait for domain to be available?
 - [x] More samples, gmail mcp? blockchain wallet?
+- [] Release pipeline, images, binary, etc 
 - [] Verify cert is store enc and leader lock
 - [] Add some unit tests and e2e
-- [] Release pipeline, images, binary, etc 
 - [] Prometheus / grafana
-- [] cors
 - [] add nitrum.local to be used inside enclave?
  -->

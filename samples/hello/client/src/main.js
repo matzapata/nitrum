@@ -1,13 +1,14 @@
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { NitrumVerifier } from "nitrum-node";
 
-const baseUrl = process.env.ENCLAVE_URL as string;
+const baseUrl = process.env.ENCLAVE_URL;
 if (!baseUrl) {
   throw new Error("ENCLAVE_URL is not set");
 }
 
-async function runStep<T>(label: string, fn: () => Promise<T>): Promise<void> {
+const isLocalDevelopment =
+  baseUrl.includes("nitrum.local") || baseUrl.includes("localhost");
+
+async function runStep(label, fn) {
   console.log(`\n--- ${label} ---`);
   const out = await fn();
   if (out !== undefined) {
@@ -15,23 +16,32 @@ async function runStep<T>(label: string, fn: () => Promise<T>): Promise<void> {
   }
 }
 
-export async function main(): Promise<void> {
+export async function main() {
   console.log("ENCLAVE_URL:", baseUrl);
 
-  await runStep("GET /.well-known/enclave/attestation with verification", async () => {
-    const verifier = new NitrumVerifier({
-      baseUrl,
-      tlsRejectUnauthorized: process.env.ENCLAVE_TLS_INSECURE === "1" || process.env.ENCLAVE_TLS_INSECURE === "true",
-    });
+  await runStep(
+    "GET /.well-known/enclave/attestation with verification",
+    async () => {
+      if (isLocalDevelopment) {
+        return "skipping attestation verification in local development";
+      }
 
-    return await verifier.verify();
-  });
+      const verifier = new NitrumVerifier({
+        baseUrl,
+        tlsRejectUnauthorized:
+          process.env.ENCLAVE_TLS_INSECURE === "1" ||
+          process.env.ENCLAVE_TLS_INSECURE === "true",
+      });
+
+      return await verifier.verify();
+    },
+  );
 
   await runStep("GET /.well-known/enclave/status", async () => {
     const res = await fetch(`${baseUrl}/.well-known/enclave/status`);
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   });
 
   await runStep("GET /health", async () => {
@@ -45,7 +55,7 @@ export async function main(): Promise<void> {
     const res = await fetch(`${baseUrl}/egress`);
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   });
 
   await runStep("POST /crypto", async () => {
@@ -56,7 +66,7 @@ export async function main(): Promise<void> {
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   });
 
   await runStep("POST /random", async () => {
@@ -67,20 +77,18 @@ export async function main(): Promise<void> {
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   });
 
   await runStep("GET /env", async () => {
     const res = await fetch(`${baseUrl}/env`);
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text);
   });
 }
 
-if (resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] ?? "")) {
-  main().catch((err: unknown) => {
-    console.error(err);
-    process.exitCode = 1;
-  });
-}
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});

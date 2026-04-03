@@ -5,16 +5,11 @@
   "type": "module",
   "description": "Sample client: fetch Nitro attestation from the hello enclave and verify it",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "attest": "yarn build && node dist/index.js"
+    "start": "node src/main.js",
+    "attest": "node src/main.js"
   },
   "dependencies": {
     "nitrum-node": "1.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.0.0"
   },
   "engines": {
     "node": ">=18"
