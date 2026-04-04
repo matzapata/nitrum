@@ -4,6 +4,10 @@ Nitrum is a **Rust** toolkit for running applications inside **AWS Nitro Enclave
 
 If you are familiar with platforms like **Evervault Enclaves** \([docs](https://docs.evervault.com/enclaves)\), Nitrum plays a similar role: it focuses on **TLS termination, attestation, and networking inside the enclave**, so your application code can stay as close as possible to “regular” HTTP services.
 
+> **⚠️ WARNING:** Nitrum is **work in progress** and **not ready for production use**. APIs, features, and security properties may change at any time.  
+Please use for development, testing, and feedback only!
+
+
 ### Goals
 
 - **Make Nitro Enclaves approachable**: sensible defaults, clear CLI workflows, and sample projects.
@@ -76,16 +80,12 @@ Nitrum is released under the **MIT** license. See `LICENSE` for details.
 TODO:
 
 
-- [] Review all docs
 - [] Control plane pulls s3 file
-- [x] Docs on installing the cli
-- [x] Release pipeline, images, binary, etc 
-- [] include build git hash in docker image
-- [x] cli on init already fixates docker images to latest hash
-- [] Verify cert is store enc and leader lock
-- [] Add some unit tests and e2e where appropiate
+- [] include build git hash in docker image as label
+- [] Add some more tests, specially e2e using docker compose
+- [] Encrypt Certificate before storing, ensure optimal lock usage
 - [] Prometheus / grafana
-- [] Configure internal endpoints and external endpoints exposure
+- [] Configure services ports and optionally disable external endpoints
 - [] Cloudformation template as param
 - [] Init takes templates
  -->
