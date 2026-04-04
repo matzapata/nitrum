@@ -20,7 +20,7 @@ impl<'a> EnclaveLocalStack<'a> {
         Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: "matzapata/nitrum-data-plane:v0.1.1-dev".to_string(),
+            data_plane_image: "ghcr.io/matzapata/nitrum/data-plane:latest-dev".to_string(),
         }
     }
 

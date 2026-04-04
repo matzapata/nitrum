@@ -143,7 +143,7 @@ Uploads the EIF (built from source if omitted) and creates or updates the CloudF
 - `--retain` — retain resources on stack delete (set this to true for production deployments).
 - `--kms-administrator-role-arn` — optional full IAM role or user ARN passed through as CloudFormation `KmsAdministratorRoleArn`. If you omit the flag, that parameter is not supplied and the template default applies. To look up your account ID when building ARNs, run: `aws sts get-caller-identity | jq -r '.Account'`.
 
-The `runtime.control_plane` field in `nitrum.toml` is the full Docker image reference (for example `my-registry/nitrum-control-plane@sha256:…`) passed to CloudFormation for the EC2 control-plane service.
+The `runtime.control_plane` field in `nitrum.toml` is the full Docker image reference (for example `my-registry/control-plane@sha256:…`) passed to CloudFormation for the EC2 control-plane service.
 
 ### `nitrum cloud destroy`
 
@@ -196,8 +196,7 @@ FROM node:20-alpine@sha256:<exact_digest>
 ```
 
 - Avoid floating tags in `nitrum.toml` runtime images:
-  - Use `runtime.data_plane = "ghcr.io/…/nitrum-data-plane@sha256:…"` instead of `:latest`.
-  - Use `runtime.nitro_cli = "…@sha256:…"` for the nitro-cli image.
+  - **`nitrum init` does this for you by default** for the bundled Nitrum runtime images: it resolves `data_plane`, `control_plane`, and `nitro_cli` from their template `:latest` tags to immutable `@sha256:…` references and writes those into `nitrum.toml`. Feel free to update them manually to whatever you want.
 - Keep build inputs declarative:
   - Avoid downloading tools or dependencies at build time without pinning versions and checksums.
   - Prefer lockfiles (`package-lock.json`, `Cargo.lock`) and checksum‑verified downloads when possible.
@@ -219,7 +218,7 @@ Typical path from a new project to a deployed enclave:
 3. **Build** — `nitrum build` to produce the EIF under `.nitrum/artifacts/`.
 4. **Configure secrets and env** — `nitrum cloud env set KEY VALUE` (and related `env` subcommands) so the enclave has the parameters it needs at startup. Requires AWS credentials configured for `nitrum cloud`.
 5. **Deploy** — `nitrum cloud deploy` to create or update the stack from `nitrum.toml` and the built EIF.
-6. **DNS** — Point your `[tls_termination].domain` (and any other hostnames your stack expects) at the load balancer or endpoints emitted by the deployment (for example ALB DNS name), including any records ACME HTTP-01 or TLS need.
+6. **DNS** — Point your `[tls_termination].domain` at the load balancer. 
 
 After deploy, use `nitrum cloud logs` for production debugging and `nitrum describe` when you need EIF measurements for verification or policy.
 

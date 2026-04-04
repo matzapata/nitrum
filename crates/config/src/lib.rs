@@ -241,9 +241,9 @@ pub struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
-            data_plane: "matzapata/nitrum-data-plane:latest".to_string(),
-            control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
-            nitro_cli: "matzapata/nitrum-nitro-cli:latest".to_string(),
+            data_plane: "ghcr.io/matzapata/nitrum/data-plane:latest".to_string(),
+            control_plane: "ghcr.io/matzapata/nitrum/control-plane:latest".to_string(),
+            nitro_cli: "ghcr.io/matzapata/nitrum/nitro-cli:latest".to_string(),
         }
     }
 }

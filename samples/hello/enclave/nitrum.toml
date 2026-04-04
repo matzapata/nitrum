@@ -5,9 +5,9 @@
 name = "nitrum-hello"
 
 [runtime]
-data_plane = "matzapata/nitrum-data-plane:v0.1.0"
-control_plane = "matzapata/nitrum-control-plane:v0.1.0"
-nitro_cli = "matzapata/nitrum-nitro-cli:v0.1.0"
+data_plane = "ghcr.io/matzapata/nitrum/data-plane:latest"
+control_plane = "ghcr.io/matzapata/nitrum/control-plane:latest"
+nitro_cli = "ghcr.io/matzapata/nitrum/nitro-cli:latest"
 
 [service]
 port = 8080

@@ -9,7 +9,7 @@
     "attest": "node src/main.js"
   },
   "dependencies": {
-    "nitrum-node": "1.0.0"
+    "nitrum-node": "0.0.1"
   },
   "engines": {
     "node": ">=18"

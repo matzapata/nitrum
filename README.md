@@ -74,16 +74,18 @@ Nitrum is released under the **MIT** license. See `LICENSE` for details.
 
 <!-- 
 TODO:
+
+
 - [] Review all docs
-- [] Doc on A alias for domain
-- [] Docs on installing the cli
 - [] Control plane pulls s3 file
+- [x] Docs on installing the cli
 - [x] Release pipeline, images, binary, etc 
 - [] include build git hash in docker image
-- [] cli on init already fixates docker images to latest hash
+- [x] cli on init already fixates docker images to latest hash
 - [] Verify cert is store enc and leader lock
 - [] Add some unit tests and e2e where appropiate
 - [] Prometheus / grafana
 - [] Configure internal endpoints and external endpoints exposure
-- [] Export cloudformation
+- [] Cloudformation template as param
+- [] Init takes templates
  -->

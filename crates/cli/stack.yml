@@ -105,7 +105,7 @@ Parameters:
 
   ControlPlaneImage:
     Type: String
-    Default: matzapata/nitrum-control-plane:latest
+    Default: ghcr.io/matzapata/nitrum/control-plane:latest
     Description: >
       Full Docker image reference for the Nitrum control-plane on EC2 (registry/repo:tag), e.g. from nitrum.toml control_plane.
 

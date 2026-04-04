@@ -40,8 +40,8 @@ jobs:
           cache-from: type=gha,scope=control-plane
           cache-to: type=gha,mode=max,scope=control-plane
           tags: |
-            ${{ env.GHCR_PREFIX }}/nitrum-control-plane:${{ github.ref_name }}
-            ${{ env.GHCR_PREFIX }}/nitrum-control-plane:latest
+            ${{ env.GHCR_PREFIX }}/control-plane:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/control-plane:latest
 
       - name: Build and push data-plane
         uses: docker/build-push-action@v6
@@ -55,8 +55,8 @@ jobs:
           cache-from: type=gha,scope=data-plane
           cache-to: type=gha,mode=max,scope=data-plane
           tags: |
-            ${{ env.GHCR_PREFIX }}/nitrum-data-plane:${{ github.ref_name }}
-            ${{ env.GHCR_PREFIX }}/nitrum-data-plane:latest
+            ${{ env.GHCR_PREFIX }}/data-plane:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/data-plane:latest
 
       - name: Build and push nitro-cli
         uses: docker/build-push-action@v6
@@ -68,8 +68,8 @@ jobs:
           cache-from: type=gha,scope=nitro-cli
           cache-to: type=gha,mode=max,scope=nitro-cli
           tags: |
-            ${{ env.GHCR_PREFIX }}/nitrum-nitro-cli:${{ github.ref_name }}
-            ${{ env.GHCR_PREFIX }}/nitrum-nitro-cli:latest
+            ${{ env.GHCR_PREFIX }}/nitro-cli:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/nitro-cli:latest
 
   cli-binaries:
     strategy:

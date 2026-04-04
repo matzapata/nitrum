@@ -1,14 +1,22 @@
 use crate::utils;
+use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
     HealthCheck, NitrumConfig, Project, Runtime, Scaling, Service, TlsTermination,
     validate_project_name,
 };
+use futures_util::future::try_join3;
 use indicatif::ProgressBar;
 use serde_json::Value;
 use std::env;
 use std::fs;
+use std::path::Path;
+
+/// Matches `.github/workflows/release.yml` (`GHCR_PREFIX` = `ghcr.io/<github.repository>`).
+const DEFAULT_DATA_PLANE: &str = "ghcr.io/matzapata/nitrum/data-plane:latest";
+const DEFAULT_CONTROL_PLANE: &str = "ghcr.io/matzapata/nitrum/control-plane:latest";
+const DEFAULT_NITRO_CLI: &str = "ghcr.io/matzapata/nitrum/nitro-cli:latest";
 
 #[derive(Args)]
 pub struct InitArgs {
@@ -17,7 +25,7 @@ pub struct InitArgs {
     pub name: String,
 }
 
-pub fn run(args: InitArgs) -> Result<()> {
+pub async fn run(args: InitArgs) -> Result<()> {
     validate_project_name(&args.name).map_err(|msg| {
         anyhow::anyhow!(
             "{msg} (project directory name is used as `project.name` in nitrum.toml for `nitrum cloud deploy`)"
@@ -41,14 +49,40 @@ pub fn run(args: InitArgs) -> Result<()> {
 
     let spinner = utils::style_spinner(
         ProgressBar::new_spinner(),
-        "Writing bundled sample project…",
+        "Resolving runtime image digests…",
     );
+
+    let resolver = ImageDigestResolver::new().context("container registry HTTP client")?;
+
+    let (data_plane, control_plane, nitro_cli) = try_join3(
+        resolver.resolve(DEFAULT_DATA_PLANE),
+        resolver.resolve(DEFAULT_CONTROL_PLANE),
+        resolver.resolve(DEFAULT_NITRO_CLI),
+    )
+    .await
+    .context("pin runtime images to registry digests (needs network access to ghcr.io)")?;
+
+    spinner.set_message("Writing bundled sample project…");
+
+    let nitrum_config = NitrumConfig {
+        project: Project {
+            name: args.name.clone(),
+        },
+        runtime: Runtime {
+            data_plane,
+            control_plane,
+            nitro_cli,
+        },
+        service: Service::default(),
+        health_check: HealthCheck::default(),
+        scaling: Scaling::default(),
+        tls_termination: TlsTermination::default(),
+    };
 
     let writes: Vec<(&str, String)> = vec![
         ("src/main.js", sample_main_js().to_string()),
         ("package.json", sample_package_json(&args.name)?),
         ("Dockerfile", sample_dockerfile().to_string()),
-        ("nitrum.toml", sample_nitro_config(&args.name)),
     ];
 
     for (relative_path, contents) in writes {
@@ -59,36 +93,27 @@ pub fn run(args: InitArgs) -> Result<()> {
         }
         fs::write(dest, contents).with_context(|| format!("write {relative_path}"))?;
     }
+
+    spinner.set_message("Writing nitrum.toml…");
+    write_sample_config(&directory.join("nitrum.toml"), &nitrum_config)
+        .context("write nitrum.toml")?;
     spinner.finish_with_message("Project initialized.");
 
     Ok(())
 }
 
-fn sample_nitro_config(name: &str) -> String {
-    let config = NitrumConfig {
-        project: Project {
-            name: name.to_string(),
-        },
-        runtime: Runtime {
-            data_plane: "matzapata/nitrum-data-plane:latest".to_string(),
-            control_plane: "matzapata/nitrum-control-plane:latest".to_string(),
-            nitro_cli: "matzapata/nitrum-nitro-cli:latest".to_string(),
-        },
-        service: Service::default(),
-        health_check: HealthCheck::default(),
-        scaling: Scaling::default(),
-        tls_termination: TlsTermination::default(),
-    };
+fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
     config
         .validate()
-        .expect("init template must satisfy NitrumConfig::validate");
-    let body = toml::to_string_pretty(&config).expect("serialize nitrum.toml for init");
-    format!(
+        .map_err(|e| anyhow::anyhow!("invalid init template: {e}"))?;
+    let body = toml::to_string_pretty(config).context("serialize nitrum.toml")?;
+    let contents = format!(
         "# Default template generated with `nitrum init`\n\
          # For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/lib.rs\n\
          \n\
          {body}"
-    )
+    );
+    fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
 
 const fn sample_main_js() -> &'static str {

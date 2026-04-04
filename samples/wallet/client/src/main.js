@@ -1,6 +1,7 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 import axios from "axios";
 import https from "https";
+import { NitrumVerifier } from "nitrum-node";
 
 const baseUrl = "https://nitrum.local";
 
