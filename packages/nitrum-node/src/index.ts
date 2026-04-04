@@ -18,6 +18,7 @@ export type {
   VerifyOptions,
 } from "./types";
 
+export { AWS_NITRO_ROOT_CA } from "./caroot";
 export { verifyAttestation, verifyTlsLeafBindsAttestation } from "./attest-verify";
 export { NitrumVerifier } from "./nitrum-verifier";
 export type { NitrumVerifierOptions as NitrumVerifierInit } from "./nitrum-verifier";

@@ -14,6 +14,15 @@ async function runDemo() {
 
   const clientSecret = "my-very-private-secret";
 
+  // Attestation verification
+  const verifier = new NitrumVerifier({
+    baseUrl,
+    tlsRejectUnauthorized:
+      process.env.ENCLAVE_TLS_INSECURE === "1" ||
+      process.env.ENCLAVE_TLS_INSECURE === "true",
+  });
+  await verifier.verify();
+
   // 1) Ask the enclave to generate and encrypt a new wallet key
   const generateRes = await axios.post(
     `${baseUrl}/wallet`,

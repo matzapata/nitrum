@@ -20,10 +20,12 @@ build-nitro-cli no_cache="":
         -f crates/cli/Dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-nitro-cli:{{tag}} \
+        -t {{ dockerhub_user }}/nitrum-nitro-cli:latest \
         .
 
 push-nitro-cli:
     docker push {{dockerhub_user}}/nitrum-nitro-cli:{{tag}}
+    docker push {{dockerhub_user}}/nitrum-nitro-cli:latest
 
 # ── Control Plane ───────────────────────────────────
 
@@ -33,10 +35,12 @@ build-control-plane no_cache="":
         -f crates/control-plane/Dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-control-plane:{{tag}} \
+        -t {{ dockerhub_user }}/nitrum-control-plane:latest \
         .
 
 push-control-plane:
     docker push {{dockerhub_user}}/nitrum-control-plane:{{tag}}
+    docker push {{dockerhub_user}}/nitrum-control-plane:latest
 
 # ── Data Plane ───────────────────────────────────
 
@@ -47,11 +51,13 @@ build-data-plane no_cache="":
         --build-arg FEATURES=enclave \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}} \
+        -t {{ dockerhub_user }}/nitrum-data-plane:latest \
         .
 
 
 push-data-plane:
     docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}
+    docker push {{dockerhub_user}}/nitrum-data-plane:latest
 
 # ── Data Plane Dev ───────────────────────────────────
 
@@ -62,11 +68,9 @@ build-data-plane-dev no_cache="":
         --build-arg FEATURES=pebble \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ dockerhub_user }}/nitrum-data-plane:{{tag}}-dev \
+        -t {{ dockerhub_user }}/nitrum-data-plane:latest-dev \
         .
 
 push-data-plane-dev:
     docker push {{dockerhub_user}}/nitrum-data-plane:{{tag}}-dev
-
-
-
-    
+    docker push {{dockerhub_user}}/nitrum-data-plane:latest-dev

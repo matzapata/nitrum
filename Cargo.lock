@@ -1198,6 +1198,7 @@ dependencies = [
  "anyhow",
  "aws-config",
  "aws-sdk-cloudwatchlogs",
+ "aws-sdk-s3",
  "clap",
  "config",
  "serde_json",

@@ -1,6 +1,6 @@
 {
   "name": "nitrum-node",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Verify AWS Nitro Enclave attestation documents using Node.js >= 18.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +10,11 @@
       "require": "./dist/index.js",
       "import": "./dist/index.js"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/matzapata/nitrum.git",
+    "directory": "packages/nitrum-node"
   },
   "files": [
     "dist",

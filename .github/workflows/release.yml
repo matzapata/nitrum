@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   docker-images:
@@ -17,11 +18,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: GHCR image prefix
+        run: echo "GHCR_PREFIX=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push control-plane
         uses: docker/build-push-action@v6
@@ -32,9 +37,11 @@ jobs:
           push: true
           build-args: |
             FEATURES=enclave
+          cache-from: type=gha,scope=control-plane
+          cache-to: type=gha,mode=max,scope=control-plane
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-control-plane:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-control-plane:latest
+            ${{ env.GHCR_PREFIX }}/nitrum-control-plane:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/nitrum-control-plane:latest
 
       - name: Build and push data-plane
         uses: docker/build-push-action@v6
@@ -45,20 +52,24 @@ jobs:
           push: true
           build-args: |
             FEATURES=enclave
+          cache-from: type=gha,scope=data-plane
+          cache-to: type=gha,mode=max,scope=data-plane
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-data-plane:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-data-plane:latest
+            ${{ env.GHCR_PREFIX }}/nitrum-data-plane:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/nitrum-data-plane:latest
 
       - name: Build and push nitro-cli
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: crates/cli/Dockerfile
+          file: crates/cli/nitro-cli.dockerfile
           platforms: linux/amd64
           push: true
+          cache-from: type=gha,scope=nitro-cli
+          cache-to: type=gha,mode=max,scope=nitro-cli
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-nitro-cli:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/nitrum-nitro-cli:latest
+            ${{ env.GHCR_PREFIX }}/nitrum-nitro-cli:${{ github.ref_name }}
+            ${{ env.GHCR_PREFIX }}/nitrum-nitro-cli:latest
 
   cli-binaries:
     strategy:

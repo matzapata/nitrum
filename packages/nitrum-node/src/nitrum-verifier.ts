@@ -72,7 +72,12 @@ export class NitrumVerifier {
     });
 
     if (!result.valid) {
-      throw new Error(result.reason ?? "verifyAttestation failed");
+      const msg = result.reason ?? "verifyAttestation failed";
+      const err = new Error(msg);
+      if (this.init.debug && "error" in result && result.error !== undefined) {
+        (err as Error & { cause?: unknown }).cause = result.error;
+      }
+      throw err;
     }
 
     const u = resolveHttpsBaseUrl(base);
@@ -96,19 +101,20 @@ function normalizeBase(base: string): string {
 
 /** Parse attestation endpoint JSON body and return the base64 document string. */
 function parseAttestationResponse(text: string): string {
-  let data: { document?: string; error?: string };
+  let data: { data?: string; error?: string };
   try {
-    data = JSON.parse(text) as { document?: string; error?: string };
+    data = JSON.parse(text) as { data?: string; error?: string };
   } catch {
     throw new Error("attestation: expected JSON");
   }
   if (data.error) {
     throw new Error(data.error);
   }
-  if (!data.document) {
+  const b64 = data.data;
+  if (!b64) {
     throw new Error("attestation: missing document");
   }
-  return data.document;
+  return b64;
 }
 
 /** Resolve and validate verifier base URL, enforcing HTTPS for TLS binding. */
