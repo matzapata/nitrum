@@ -58,6 +58,21 @@ jobs:
             ${{ env.GHCR_PREFIX }}/data-plane:${{ github.ref_name }}
             ${{ env.GHCR_PREFIX }}/data-plane:latest
 
+      - name: Build and push data-plane (local / pebble)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/data-plane/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            FEATURES=pebble
+          cache-from: type=gha,scope=data-plane-dev
+          cache-to: type=gha,mode=max,scope=data-plane-dev
+          tags: |
+            ${{ env.GHCR_PREFIX }}/data-plane:${{ github.ref_name }}-dev
+            ${{ env.GHCR_PREFIX }}/data-plane:latest-dev
+
       - name: Build and push nitro-cli
         uses: docker/build-push-action@v6
         with:
