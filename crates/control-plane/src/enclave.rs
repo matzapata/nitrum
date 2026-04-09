@@ -57,7 +57,7 @@ pub struct Enclave {
 
 impl Enclave {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         artifact: EnclaveArtifact,
         debug_mode: bool,
         cpu_count: u32,
