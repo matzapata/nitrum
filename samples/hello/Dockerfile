@@ -1,7 +1,7 @@
 
 # Data plane is built on top of alpine:3.20
 ARG DATA_PLANE_IMAGE=ghcr.io/matzapata/nitrum/data-plane:latest-dev
-FROM ${DATA_PLANE_IMAGE}
+FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
 
 # Install Node and npm
 RUN apk add --no-cache nodejs npm

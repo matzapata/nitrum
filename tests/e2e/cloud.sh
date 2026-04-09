@@ -4,7 +4,8 @@
 #
 # Environment (see tests/e2e/.env.example):
 #   NITRUM_BIN               optional override command; default:
-#                            cargo run --manifest-path <repo>/Cargo.toml --bin nitrum
+#                            cargo run -q ... (quiet compile; see NITRUM_E2E_RUST_LOG)
+#   NITRUM_E2E_RUST_LOG      tracing filter for default cargo path (default: warn,cli=info)
 #   NITRUM_E2E_PARENT_DIR, NITRUM_E2E_INIT_NAME, PROJECT
 #   AWS_REGION or AWS_DEFAULT_REGION
 #   NITRUM_E2E_ENV_KEY / NITRUM_E2E_ENV_VALUE   for `cloud env set` (defaults: DEMO / hello)
@@ -41,10 +42,11 @@ nitrum() {
     if [[ -n "${NITRUM_BIN:-}" ]]; then
         # shellcheck disable=SC2206
         cmd=(${NITRUM_BIN})
+        "${cmd[@]}" -- "$@"
     else
-        cmd=(cargo run --manifest-path "${REPO_ROOT}/Cargo.toml" --bin nitrum)
+        RUST_LOG="${NITRUM_E2E_RUST_LOG:-warn,cli=info}" \
+            cargo run -q --manifest-path "${REPO_ROOT}/Cargo.toml" --bin nitrum -- "$@"
     fi
-    "${cmd[@]}" -- "$@"
 }
 
 step_init() {

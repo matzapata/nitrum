@@ -3,7 +3,8 @@
 #
 # Environment (see tests/e2e/.env.example):
 #   NITRUM_BIN               optional override command; default:
-#                            cargo run --manifest-path <repo>/Cargo.toml --bin nitrum
+#                            cargo run -q ... (quiet compile; see NITRUM_E2E_RUST_LOG)
+#   NITRUM_E2E_RUST_LOG      tracing filter for default cargo path (default: warn,cli=info)
 #   NITRUM_E2E_PARENT_DIR    parent directory for `nitrum init <name>` (default: <repo>/target/nitrum-e2e-workspace)
 #   NITRUM_E2E_INIT_NAME     project folder / project.name (default: nitrum-e2e-demo)
 #
@@ -32,10 +33,11 @@ nitrum() {
     if [[ -n "${NITRUM_BIN:-}" ]]; then
         # shellcheck disable=SC2206
         cmd=(${NITRUM_BIN})
+        "${cmd[@]}" -- "$@"
     else
-        cmd=(cargo run --manifest-path "${REPO_ROOT}/Cargo.toml" --bin nitrum)
+        RUST_LOG="${NITRUM_E2E_RUST_LOG:-warn,cli=info}" \
+            cargo run -q --manifest-path "${REPO_ROOT}/Cargo.toml" --bin nitrum -- "$@"
     fi
-    "${cmd[@]}" -- "$@"
 }
 
 step_init() {

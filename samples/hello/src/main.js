@@ -8,11 +8,11 @@ const app = express();
 
 app.use(express.json());
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) => {
   res.send("OK");
 });
 
-app.get("/egress", async (req, res) => {
+app.get("/egress", async (_req, res) => {
   try {
     const { data } = await axios.get("https://httpbin.org/ip");
     res.json(data);
@@ -38,8 +38,8 @@ app.post("/crypto", async (req, res) => {
     const { data: encrypted } = await axios.post("http://localhost:3000/encrypt", body, {
       headers: { "Content-Type": "application/json" },
     });
-    const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", encrypted, {
-      headers: { "Content-Type": "application/json" },
+    const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", { ciphertext: encrypted.data }, {
+        headers: { "Content-Type": "application/json" },
     });
     res.json({ encrypted, decrypted });
   } catch (err) {
@@ -49,13 +49,13 @@ app.post("/crypto", async (req, res) => {
 });
 
 app.post("/random", async (req, res) => {
-  const { data } = await axios.post("http://localhost:3000/random", req.body, {
+  const { data } = await axios.post("http://localhost:3000/random", { length: req.body.length }, {
     headers: { "Content-Type": "application/json" },
   });
   res.json(data);
 });
 
-app.get("/env", async (req, res) => {
+app.get("/env", async (_req, res) => {
   res.json({ env: process.env.DEMO });
 });
 

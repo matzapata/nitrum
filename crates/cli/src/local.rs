@@ -24,7 +24,7 @@ impl<'a> EnclaveLocalStack<'a> {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
             data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE")
-                .unwrap_or_else(|_| "ghcr.io/matzapata/data-plane:latest-dev".to_string()),
+                .unwrap_or_else(|_| "ghcr.io/matzapata/nitrum/data-plane:latest-dev".to_string()),
         }
     }
 
@@ -40,6 +40,7 @@ impl<'a> EnclaveLocalStack<'a> {
             // images from a registry. Disable BuildKit here so local tags such as
             // `nitrum-e2e-data-plane:local` work as `FROM ${DATA_PLANE_IMAGE}` inputs.
             .env("DOCKER_BUILDKIT", "0")
+            .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .env("COMPOSE_DOCKER_CLI_BUILD", "0")
             .arg("compose")
             .arg("--progress")
@@ -82,6 +83,7 @@ impl<'a> EnclaveLocalStack<'a> {
             .current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
             .env("DATA_PLANE_IMAGE", &self.data_plane_image)
+            .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .arg("compose")
             .arg("--progress")
             .arg("quiet")
@@ -123,6 +125,7 @@ impl<'a> EnclaveLocalStack<'a> {
         cmd.current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
             .env("DATA_PLANE_IMAGE", &self.data_plane_image)
+            .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .arg("compose")
             .arg("-f")
             .arg(compose_file)

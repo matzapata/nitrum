@@ -95,18 +95,28 @@ services:
 
   # LocalStack: SSM + DynamoDB + KMS on 4566 (SSM params, table, symmetric DEK CMK).
   localstack:
-    image: localstack/localstack:latest
+    # Pinned: `latest` (2026.x) expects LOCALSTACK_AUTH_TOKEN; 3.7.x runs without a license for local dev.
+    image: localstack/localstack:3.7.2
+    platform: linux/amd64
     environment:
       - SERVICES=ssm,dynamodb,kms
       - AWS_DEFAULT_REGION=us-east-1
     ports:
       - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
 
   # One-shot: create DynamoDB table + SSM params expected by the data-plane (see crates/data-plane/src/utils/ssm.rs).
   localstack-init:
     image: amazon/aws-cli:latest
+    platform: linux/amd64
     depends_on:
-      - localstack
+      localstack:
+        condition: service_healthy
     environment:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -185,6 +195,7 @@ services:
 
   pebble:
     image: ghcr.io/letsencrypt/pebble:latest
+    platform: linux/amd64
     command: ["-config", "/config/pebble-config.json"]
     ports:
       - "14000:14000"
@@ -197,6 +208,7 @@ services:
 
   enclave:
     image: ${ENCLAVE_IMAGE}
+    platform: linux/amd64
     pull_policy: never
     build:
       context: ..

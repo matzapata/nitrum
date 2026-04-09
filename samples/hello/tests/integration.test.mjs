@@ -17,7 +17,7 @@ import { before, describe, it } from "node:test";
 import { NitrumVerifier } from "nitrum-node";
 
 function resolveBaseUrl() {
-  const raw = (process.env.ENCLAVE_URL || process.env.NITRUM_E2E_BASE_URL || "").trim();
+  const raw = (process.env.ENCLAVE_URL || "https://127.0.0.1:443").trim();
   return raw.replace(/\/$/, "");
 }
 
@@ -104,14 +104,14 @@ describe("nitrum project (integration)", () => {
     });
     assert.ok(data && typeof data === "object");
     assert.ok("encrypted" in data && "decrypted" in data);
-    assert.equal(data.decrypted.plaintext, "hello");
+    assert.equal(data.decrypted.data, "hello");
   });
 
   it("POST /random returns JSON", async () => {
     const data = await fetchJson(`${baseUrl}/random`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ length: 32 }),
     });
     assert.ok(data && typeof data === "object");
   });
