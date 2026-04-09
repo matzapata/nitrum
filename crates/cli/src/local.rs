@@ -23,9 +23,8 @@ impl<'a> EnclaveLocalStack<'a> {
         Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE").unwrap_or_else(|_| {
-                "ghcr.io/matzapata/data-plane:latest-dev".to_string()
-            }),
+            data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE")
+                .unwrap_or_else(|_| "ghcr.io/matzapata/data-plane:latest-dev".to_string()),
         }
     }
 

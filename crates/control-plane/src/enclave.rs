@@ -57,7 +57,12 @@ pub struct Enclave {
 
 impl Enclave {
     #[must_use]
-    pub fn new(artifact: EnclaveArtifact, debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
+    pub fn new(
+        artifact: EnclaveArtifact,
+        debug_mode: bool,
+        cpu_count: u32,
+        memory_mib: u32,
+    ) -> Self {
         Self {
             debug_mode,
             cpu_count,
@@ -125,7 +130,8 @@ impl Enclave {
                 tokio::time::sleep(Duration::from_secs(backoff_secs.min(MAX_BACKOFF_SECS))).await;
             }
 
-            match Self::run_enclave_once(debug_mode, cpu_count, memory_mib, eif_path.as_str()).await {
+            match Self::run_enclave_once(debug_mode, cpu_count, memory_mib, eif_path.as_str()).await
+            {
                 Ok(()) => {
                     info!("Enclave started... Waiting 5 seconds for warmup.");
                     tokio::time::sleep(Duration::from_secs(5)).await;

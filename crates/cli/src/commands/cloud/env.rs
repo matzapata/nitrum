@@ -72,12 +72,10 @@ pub async fn run(args: EnvArgs) -> Result<()> {
         EnvCommand::Delete { key, force } => {
             validate_env_key(&key)?;
             let name = app_env_parameter_name(&config.project.name, &key);
-            if !force
-                && !utils::confirm(&format!("Delete `{key}` from SSM ({name})?"))
-            {
+            if !force && !utils::confirm(&format!("Delete `{key}` from SSM ({name})?")) {
                 return Ok(());
             }
-            
+
             ssm.delete(&name).await?;
             println!("Deleted {key} ({name})");
         }

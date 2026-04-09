@@ -14,7 +14,10 @@ impl EnclaveArtifact {
     pub fn try_from_local(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         if !path.is_file() {
-            bail!("EIF path does not exist or is not a file: {}", path.display());
+            bail!(
+                "EIF path does not exist or is not a file: {}",
+                path.display()
+            );
         }
         Ok(Self { path })
     }

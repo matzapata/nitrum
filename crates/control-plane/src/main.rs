@@ -21,10 +21,20 @@ struct Args {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["eif_bucket", "eif_hash"])]
     eif: Option<PathBuf>,
     /// S3 bucket containing the EIF (object key is `{eif-hash}.eif`, same as `nitrum cloud deploy`).
-    #[arg(long, value_name = "NAME", requires = "eif_hash", conflicts_with = "eif")]
+    #[arg(
+        long,
+        value_name = "NAME",
+        requires = "eif_hash",
+        conflicts_with = "eif"
+    )]
     eif_bucket: Option<String>,
     /// Version label / hash prefix for the EIF (first 12 hex chars of EIF sha256 from deploy; S3 key `{hash}.eif`).
-    #[arg(long, value_name = "HASH", requires = "eif_bucket", conflicts_with = "eif")]
+    #[arg(
+        long,
+        value_name = "HASH",
+        requires = "eif_bucket",
+        conflicts_with = "eif"
+    )]
     eif_hash: Option<String>,
     /// Enable debug mode.
     #[arg(long, default_value_t = false)]
