@@ -67,6 +67,7 @@ impl EnclaveCloudStack {
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
         let eif_label: String = artifact.hash.chars().take(12).collect();
+        let eif_s3_key = format!("{eif_label}.eif");
         let retain_str = if retain { "true" } else { "false" };
         let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
 
@@ -85,7 +86,7 @@ impl EnclaveCloudStack {
             ("ProjectName".to_string(), config.project.name.clone()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
-            ("EifS3Key".to_string(), eif_label.clone()),
+            ("EifS3Key".to_string(), eif_s3_key.clone()),
             ("EifVersionLabel".to_string(), eif_label.clone()),
             ("AsgMinSize".to_string(), scaling.min_replicas.to_string()),
             ("AsgMaxSize".to_string(), scaling.max_replicas.to_string()),
@@ -113,7 +114,7 @@ impl EnclaveCloudStack {
         }
 
         self.bucket.create_if_non_existent().await?;
-        self.bucket.upload(&eif_label, &artifact.eif_path).await?;
+        self.bucket.upload(&eif_s3_key, &artifact.eif_path).await?;
 
         let need_wait = self.cloudformation.update_if_needed(&params).await?;
         if need_wait {

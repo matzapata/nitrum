@@ -22,7 +22,11 @@ function resolveBaseUrl() {
 }
 
 function isLocalDevelopment(url) {
-  return url.includes("nitrum.local") || url.includes("localhost") || url.includes("127.0.0.1");
+  return (
+    url.includes("nitrum.local") ||
+    url.includes("localhost") ||
+    url.includes("127.0.0.1")
+  );
 }
 
 function tlsInsecureEnv() {
@@ -65,20 +69,18 @@ describe("nitrum project (integration)", () => {
     }
   });
 
-  describe("GET /.well-known/enclave/attestation", () => {
-    if (isLocalDevelopment(baseUrl)) {
-      it.skip("NitrumVerifier skipped in local development (non-production TLS)", () => {});
-    } else {
-      it("verifies attestation and TLS leaf binding", async () => {
-        const verifier = new NitrumVerifier({
-          baseUrl,
-          tlsRejectUnauthorized: !tlsInsecureEnv(),
-        });
-        const doc = await verifier.verify();
-        assert.ok(doc && typeof doc === "object");
+  if (isLocalDevelopment(baseUrl)) {
+    it.skip("GET /.well-known/enclave/attestation skipped in local development (non-production TLS)", () => {});
+  } else {
+    it("GET /.well-known/enclave/attestation validates attestation and TLS leaf binding", async () => {
+      const verifier = new NitrumVerifier({
+        baseUrl,
+        tlsRejectUnauthorized: !tlsInsecureEnv(),
       });
-    }
-  });
+      const doc = await verifier.verify();
+      assert.ok(doc && typeof doc === "object");
+    });
+  }
 
   it("GET /.well-known/enclave/status returns JSON", async () => {
     const data = await fetchJson(`${baseUrl}/.well-known/enclave/status`);

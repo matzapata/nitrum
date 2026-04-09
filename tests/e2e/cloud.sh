@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linear workflow:
-#   init → build → cloud env set → cloud deploy → cloud logs → npm tests (NLB URL) → cloud destroy → cloud env delete
+#   init → build → cloud env set → cloud deploy → wait active → cloud logs → npm tests (NLB URL) → cloud destroy → cloud env delete
 #
 # Environment (see tests/e2e/.env.example):
 #   NITRUM_BIN               optional override command; default:
@@ -12,6 +12,8 @@
 #   NITRUM_E2E_STACK_NAME                       optional; default: nitrum-<project.name from init> = nitrum-${NITRUM_E2E_INIT_NAME}
 #   ENCLAVE_URL                         optional; if set, skips stack lookup for tests
 #   ENCLAVE_TLS_INSECURE                        default 1 (self-signed / hostname mismatch on NLB DNS)
+#   NITRUM_CLOUD_WAIT_ACTIVE_TIMEOUT_SECONDS    default 300 (5 minutes)
+#   NITRUM_CLOUD_WAIT_ACTIVE_POLL_SECONDS       default 5
 #   NITRUM_CLOUD_LOGS_SINCE_MINUTES             default 15
 #
 # Usage: from repo root, `./tests/e2e/cloud.sh`
@@ -36,6 +38,8 @@ ENV_KEY="${NITRUM_E2E_ENV_KEY:-DEMO}"
 ENV_VALUE="${NITRUM_E2E_ENV_VALUE:-hello}"
 STACK_NAME="${NITRUM_E2E_STACK_NAME:-nitrum-${NAME}}"
 LOGS_SINCE="${NITRUM_CLOUD_LOGS_SINCE_MINUTES:-15}"
+WAIT_ACTIVE_TIMEOUT_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_TIMEOUT_SECONDS:-300}"
+WAIT_ACTIVE_POLL_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_POLL_SECONDS:-5}"
 
 nitrum() {
     local -a cmd
@@ -76,6 +80,50 @@ step_env_set() {
 step_deploy() {
     echo "=== cloud deploy ==="
     nitrum cloud deploy --force --path "${PROJECT}"
+}
+
+step_wait_active() {
+    command -v curl >/dev/null 2>&1 || {
+        echo "error: curl not found (needed to wait for ENCLAVE_URL readiness)" >&2
+        exit 1
+    }
+
+    local base
+    base="$(resolve_base_url)" || exit 1
+    export ENCLAVE_URL="${base}"
+    export ENCLAVE_TLS_INSECURE="${ENCLAVE_TLS_INSECURE:-1}"
+
+    echo "=== wait active (timeout ${WAIT_ACTIVE_TIMEOUT_SECONDS}s): ${ENCLAVE_URL} ==="
+
+    local deadline now remaining sleep_for
+    deadline=$((SECONDS + WAIT_ACTIVE_TIMEOUT_SECONDS))
+
+    local -a curl_args
+    curl_args=(-sS -o /dev/null --connect-timeout 5 --max-time 10)
+    if [[ "${ENCLAVE_TLS_INSECURE}" == "1" ]]; then
+        curl_args+=(-k)
+    fi
+
+    while true; do
+        if curl "${curl_args[@]}" "${ENCLAVE_URL}"; then
+            echo "=== enclave is responsive ==="
+            return 0
+        fi
+
+        now=${SECONDS}
+        if ((now >= deadline)); then
+            echo "error: enclave did not become responsive within ${WAIT_ACTIVE_TIMEOUT_SECONDS}s (${ENCLAVE_URL})" >&2
+            exit 1
+        fi
+
+        remaining=$((deadline - now))
+        echo "waiting for enclave to respond... (${remaining}s remaining)"
+        sleep_for="${WAIT_ACTIVE_POLL_SECONDS}"
+        if ((remaining < WAIT_ACTIVE_POLL_SECONDS)); then
+            sleep_for="${remaining}"
+        fi
+        sleep "${sleep_for}"
+    done
 }
 
 step_cloud_logs() {
@@ -136,6 +184,7 @@ step_init
 step_build
 step_env_set
 step_deploy
+step_wait_active
 step_cloud_logs
 step_tests
 step_destroy
