@@ -103,19 +103,20 @@ The request may be empty or use `Content-Type: application/json` with an optiona
   }
   ```
 
-The `samples/hello/enclave/src/main.js` file demonstrates an encrypt/decrypt round-trip and `/random` over HTTP. The `samples/wallet/enclave/src/main.js` sample builds on the same primitives to encrypt a wallet key and use it for signing without ever exposing the raw private key to the client.
+The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip and `/random` over HTTP. The `samples/wallet/enclave/src/main.js` sample builds on the same primitives to encrypt a wallet key and use it for signing without ever exposing the raw private key to the client.
 
 ## Commands
 
 ### `nitrum init [NAME]`
 
-Scaffold a new project with a sample app and default `nitrum.toml`.
+Scaffold a new project with a sample app, default `nitrum.toml`, and `tests/integration.test.mjs` (Node’s test runner + optional `nitrum-node` attestation checks when `ENCLAVE_URL` points at a real deployment).
 
 Typical first steps:
 
 ```bash
 nitrum init my-app
 cd my-app
+npm install
 nitrum build
 ```
 
@@ -132,6 +133,8 @@ Local development via Docker Compose:
 - `nitrum local up` — start the stack in the background.
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
+
+By default, `nitrum local up` uses `runtime.data_plane` as the enclave Dockerfile `DATA_PLANE_IMAGE` arg. If you need a different image just for local development (for example a Pebble-enabled or unpublished tag), override it at runtime with `NITRUM_DEV_DATA_PLANE_IMAGE` (or the older compatibility variable `NITRUM_LOCAL_DATA_PLANE_IMAGE`).
 
 Use this while iterating on your application code before pushing a new EIF to AWS.
 
@@ -155,7 +158,7 @@ Manage application environment variables as SSM Parameter Store `SecureString` v
 
 - `nitrum cloud env set KEY VALUE` — create or overwrite a parameter.
 - `nitrum cloud env get` — list every app env parameter as `KEY=value` (decrypted; sensitive).
-- `nitrum cloud env delete KEY` — remove the parameter.
+- `nitrum cloud env delete KEY` — remove the parameter (add `--force` to skip the confirmation prompt, for scripts).
 
 At runtime, the data-plane loads every parameter under that path at startup (unless `NITRUM_APP_ENV_SSM_PREFIX` is set to empty to skip) and passes them to the user process environment, overlaying the parent environment.
 
@@ -174,7 +177,7 @@ Runs `nitro-cli describe-eif` in Docker against an EIF path (wrapper for inspect
 Options are defined in the `shared` crate; the sample project comments point to the source. Common sections:
 
 - `[project]` `name` — project identifier; CloudFormation stack name and `ProjectName` match it; S3 bucket is `nitrum-{name}`; SSM paths use `/nitrum/{name}/…` (data-plane infra and app env).
-- `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and `nitrum local` (base containing the in-enclave data-plane).
+- `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
 - `[service]` — listen port for your app.

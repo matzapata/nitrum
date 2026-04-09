@@ -7,8 +7,8 @@ use std::time::Duration;
 /// Path to the nitro-cli binary.
 pub const NITRO_CLI: &str = "nitro-cli";
 
-/// Path to the enclave image file (control-plane container).
-pub const EIF_PATH: &str = "/app/enclave.eif";
+/// Directory for S3-downloaded EIFs (relative to process cwd): `{ARTIFACTS_DIR}/{hash}.eif`.
+pub const ARTIFACTS_DIR: &str = ".nitrum/artifacts";
 
 /// CID passed to `nitro-cli run-enclave --enclave-cid`.
 pub const ENCLAVE_CID: &str = "16";

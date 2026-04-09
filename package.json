@@ -3,7 +3,6 @@
   "name": "nitrum-monorepo",
   "workspaces": [
     "packages/*",
-    "samples/hello/client",
-    "samples/hello/enclave"
+    "samples/hello"
   ]
 }

@@ -15,4 +15,4 @@ nitrum cloud deploy
 
 After deploy, use the stack outputs (for example the load balancer URL) to reach the service over HTTPS.
 
-Inspect `nitrum.toml` here for how this sample wires the data-plane and control-plane; replace `enclave/` with your own code when you are ready.
+Inspect `nitrum.toml` here for how this sample wires the data-plane and control-plane; replace `src/` with your own code when you are ready.

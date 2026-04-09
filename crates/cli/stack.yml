@@ -5,6 +5,7 @@ Description: >
   ProjectName: stack name, DynamoDB table, KMS alias, log groups, tags, launch template, and SSM layout.
   Retain defaults false.
   Upload the EIF to S3; set EifVersionLabel when you publish a new EIF to refresh instances.
+  The control-plane container downloads the EIF from S3 at startup (not EC2 user-data).
   Two AZs, single NAT, NLB security group and cross-zone load balancing enabled.
 
 Metadata:
@@ -53,7 +54,8 @@ Parameters:
   EifS3Key:
     Type: String
     Default: enclave.eif
-    Description: S3 object key of the EIF file.
+    Description: >
+      S3 object key of the EIF file 
 
   EifVersionLabel:
     Type: String
@@ -87,7 +89,6 @@ Parameters:
     MaxValue: 8
     Description: >
       vCPUs per Nitro Enclave (nitro-cli --cpu-count). Must fit the EC2 instance type and match
-      nitro_enclaves allocator cpu_count set in UserData.
 
   EnclaveMemoryMib:
     Type: Number
@@ -748,11 +749,7 @@ Resources:
 
               sleep 5
 
-              CONTROL_PLANE_IMAGE="${ControlPlaneImage}"
-              EIF_ASSET_HASH="${EifVersionLabel}"
-
-              docker pull "$CONTROL_PLANE_IMAGE"
-              aws s3 cp "s3://${EifS3Bucket}/${EifS3Key}" /usr/bin/enclave.eif --region "${AWS::Region}"
+              docker pull "${ControlPlaneImage}"
 
               cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'
               [Unit]
@@ -764,7 +761,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -p 80:80 -p 443:443 -v /usr/bin/enclave.eif:/app/enclave.eif ${ControlPlaneImage} /app/control-plane --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
@@ -911,5 +908,5 @@ Outputs:
     Value: !Ref NitroASG
 
   EifS3Uri:
-    Description: S3 URI instances use to download the EIF
+    Description: S3 URI the control-plane uses to download the EIF at container startup
     Value: !Sub "s3://${EifS3Bucket}/${EifS3Key}"

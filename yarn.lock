@@ -736,18 +736,12 @@ hasown@^2.0.2:
   dependencies:
     function-bind "^1.1.2"
 
-"hello-client@file:/Users/matzapata/git/nitrum/nitrum/samples/hello/client":
+"hello@file:/Users/matzapata/git/nitrum/nitrum/samples/hello":
   version "1.0.0"
-  resolved "file:samples/hello/client"
+  resolved "file:samples/hello"
   dependencies:
-    nitrum-node "1.0.0"
-
-"hello@file:/Users/matzapata/git/nitrum/nitrum/samples/hello/enclave":
-  version "1.0.0"
-  resolved "file:samples/hello/enclave"
-  dependencies:
-    axios "^1"
-    express "^5"
+    axios "1"
+    express "5"
 
 hmac-drbg@^1.0.1:
   version "1.0.1"
@@ -872,7 +866,7 @@ negotiator@^1.0.0:
   resolved "https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz"
   integrity sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==
 
-nitrum-node@1.0.0, "nitrum-node@file:/Users/matzapata/git/nitrum/nitrum/packages/nitrum-node":
+nitrum-node@0.0.1, "nitrum-node@file:/Users/matzapata/git/nitrum/nitrum/packages/nitrum-node":
   version "0.0.1"
   resolved "file:packages/nitrum-node"
   dependencies:

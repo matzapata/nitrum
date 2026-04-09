@@ -80,7 +80,6 @@ Nitrum is released under the **MIT** license. See `LICENSE` for details.
 TODO:
 
 
-- [] Control plane pulls s3 file
 - [] include build git hash in docker image as label
 - [] Add some more tests, specially e2e using docker compose
 - [] Encrypt Certificate before storing, ensure optimal lock usage

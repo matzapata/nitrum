@@ -83,6 +83,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
         ("src/main.js", sample_main_js().to_string()),
         ("package.json", sample_package_json(&args.name)?),
         ("Dockerfile", sample_dockerfile().to_string()),
+        (
+            "tests/integration.test.mjs",
+            sample_integration_test_mjs().to_string(),
+        ),
     ];
 
     for (relative_path, contents) in writes {
@@ -120,7 +124,7 @@ const fn sample_main_js() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/enclave/src/main.js"
+        "samples/hello/src/main.js"
     ))
 }
 
@@ -137,7 +141,7 @@ const fn sample_package_json_template() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/enclave/package.json"
+        "samples/hello/package.json"
     ))
 }
 
@@ -145,6 +149,14 @@ const fn sample_dockerfile() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/enclave/Dockerfile"
+        "samples/hello/Dockerfile"
+    ))
+}
+
+const fn sample_integration_test_mjs() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/tests/integration.test.mjs"
     ))
 }

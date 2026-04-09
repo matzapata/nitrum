@@ -34,7 +34,12 @@ pub enum EnvCommand {
     /// List all app env parameters under the project prefix (decrypted KEY=value; sensitive)
     Get,
     /// Remove the parameter
-    Delete { key: String },
+    Delete {
+        key: String,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 pub async fn run(args: EnvArgs) -> Result<()> {
@@ -64,12 +69,15 @@ pub async fn run(args: EnvArgs) -> Result<()> {
                 }
             }
         }
-        EnvCommand::Delete { key } => {
+        EnvCommand::Delete { key, force } => {
             validate_env_key(&key)?;
             let name = app_env_parameter_name(&config.project.name, &key);
-            if !utils::confirm(&format!("Delete `{key}` from SSM ({name})?")) {
+            if !force
+                && !utils::confirm(&format!("Delete `{key}` from SSM ({name})?"))
+            {
                 return Ok(());
             }
+            
             ssm.delete(&name).await?;
             println!("Deleted {key} ({name})");
         }

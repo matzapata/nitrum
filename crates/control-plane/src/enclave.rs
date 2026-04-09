@@ -1,4 +1,5 @@
-use crate::constants::{EIF_PATH, ENCLAVE_CID, ENCLAVE_HEALTH_POLL, MAX_BACKOFF_SECS, NITRO_CLI};
+use crate::artifact::EnclaveArtifact;
+use crate::constants::{ENCLAVE_CID, ENCLAVE_HEALTH_POLL, MAX_BACKOFF_SECS, NITRO_CLI};
 use serde_json::Value;
 use std::process::Stdio;
 use std::time::Duration;
@@ -14,10 +15,6 @@ use tracing::{error, info, warn};
 pub enum EnclaveError {
     #[error("Failed to run command: {0}")]
     CommandFailed(String),
-    // Reserved for future use when debug log streaming errors need to be surfaced.
-    #[allow(dead_code)]
-    #[error("Failed to send debug logs to stdout: {0}")]
-    SendDebugLogsFailed(String),
 }
 
 impl From<std::io::Error> for EnclaveError {
@@ -54,16 +51,18 @@ pub struct Enclave {
     debug_mode: bool,
     cpu_count: u32,
     memory_mib: u32,
+    artifact: EnclaveArtifact,
     supervisor: Option<JoinHandle<()>>,
 }
 
 impl Enclave {
     #[must_use]
-    pub const fn new(debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
+    pub fn new(artifact: EnclaveArtifact, debug_mode: bool, cpu_count: u32, memory_mib: u32) -> Self {
         Self {
             debug_mode,
             cpu_count,
             memory_mib,
+            artifact,
             supervisor: None,
         }
     }
@@ -76,8 +75,9 @@ impl Enclave {
         let debug_mode = self.debug_mode;
         let cpu_count = self.cpu_count;
         let memory_mib = self.memory_mib;
+        let artifact = self.artifact.clone();
         self.supervisor = Some(tokio::spawn(async move {
-            if let Err(e) = Self::run_loop(debug_mode, cpu_count, memory_mib).await {
+            if let Err(e) = Self::run_loop(debug_mode, cpu_count, memory_mib, artifact).await {
                 error!(error = %e, "enclave supervisor exited with error");
             }
         }));
@@ -87,8 +87,10 @@ impl Enclave {
         debug_mode: bool,
         cpu_count: u32,
         memory_mib: u32,
+        artifact: EnclaveArtifact,
     ) -> Result<(), EnclaveError> {
         let mut backoff_secs: u64 = 0;
+        let eif_path = artifact.path().display().to_string();
 
         loop {
             match Self::describe_enclaves_stdout().await {
@@ -123,7 +125,7 @@ impl Enclave {
                 tokio::time::sleep(Duration::from_secs(backoff_secs.min(MAX_BACKOFF_SECS))).await;
             }
 
-            match Self::run_enclave_once(debug_mode, cpu_count, memory_mib).await {
+            match Self::run_enclave_once(debug_mode, cpu_count, memory_mib, eif_path.as_str()).await {
                 Ok(()) => {
                     info!("Enclave started... Waiting 5 seconds for warmup.");
                     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -163,10 +165,11 @@ impl Enclave {
         debug_mode: bool,
         cpu_count: u32,
         memory_mib: u32,
+        eif_path: &str,
     ) -> Result<(), EnclaveError> {
         let cpu = cpu_count.to_string();
         let memory = memory_mib.to_string();
-        info!(cpu_count = %cpu, memory_mib = %memory, "Starting enclave...");
+        info!(cpu_count = %cpu, memory_mib = %memory, eif_path, "Starting enclave...");
         let mut run_args: Vec<&str> = vec![
             NITRO_CLI,
             NitroCommand::RunEnclave.as_str(),
@@ -177,7 +180,7 @@ impl Enclave {
             "--enclave-cid",
             ENCLAVE_CID,
             "--eif-path",
-            EIF_PATH,
+            eif_path,
         ];
         if debug_mode {
             info!("Debug mode enabled...");

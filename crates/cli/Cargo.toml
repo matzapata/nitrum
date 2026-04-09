@@ -7,9 +7,10 @@ include = [
     "src/**/*",
     "../../infra/cloudformation/template.yml",
     "../../infra/docker/compose.yml",
-    "../../samples/hello/enclave/Dockerfile",
-    "../../samples/hello/enclave/package.json",
-    "../../samples/hello/enclave/src/main.js",
+    "../../samples/hello/Dockerfile",
+    "../../samples/hello/package.json",
+    "../../samples/hello/src/main.js",
+    "../../samples/hello/tests/integration.test.mjs",
 ]
 
 [[bin]]

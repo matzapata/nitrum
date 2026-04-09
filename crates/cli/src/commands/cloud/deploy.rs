@@ -25,6 +25,9 @@ pub struct DeployArgs {
     /// Pass `--debug-mode` to control-plane runtime
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub debug_mode: bool,
+    /// Skip the deployment confirmation prompt
+    #[arg(long)]
+    pub force: bool,
     /// Optional full IAM principal ARN (role or user) for KMS key administration in the stack key policy.
     /// When omitted, the parameter is not sent and `CloudFormation` uses the template default.
     #[arg(long = "kms-administrator-role-arn", value_name = "ARN")]
@@ -68,15 +71,17 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let region_display = cloud_stack.region_display();
     let bucket = cloud_stack.bucket_name();
     let retain_str = if args.retain { "true" } else { "false" };
-    if !utils::confirm(&format!(
-        "Deploy CloudFormation stack (ProjectName={stack_name}, Retain={retain_str}, DebugMode={}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
-        args.debug_mode,
-        config.scaling.min_replicas,
-        config.scaling.max_replicas,
-        config.scaling.desired_replicas,
-        config.scaling.num_cpus,
-        config.scaling.ram_size_mib,
-    )) {
+    if !args.force
+        && !utils::confirm(&format!(
+            "Deploy CloudFormation stack (ProjectName={stack_name}, Retain={retain_str}, DebugMode={}, region {region_display}, S3 `s3://{bucket}`, ASG {}-{} (desired {}), enclave {} vCPU / {} MiB)?",
+            args.debug_mode,
+            config.scaling.min_replicas,
+            config.scaling.max_replicas,
+            config.scaling.desired_replicas,
+            config.scaling.num_cpus,
+            config.scaling.ram_size_mib,
+        ))
+    {
         return Ok(());
     }
 

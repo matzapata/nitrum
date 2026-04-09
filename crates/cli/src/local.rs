@@ -9,8 +9,11 @@ use tokio::process::Command;
 use crate::constants;
 
 pub struct EnclaveLocalStack<'a> {
+    /// Project directory containing `nitrum.toml` and the enclave `Dockerfile`.
     project_root: &'a Path,
+    /// Local compose tag for the app image (`nitrum-{name}:dev`).
     enclave_image: String,
+    /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`); pebble build for local Compose.
     data_plane_image: String,
 }
 
@@ -20,7 +23,9 @@ impl<'a> EnclaveLocalStack<'a> {
         Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: "ghcr.io/matzapata/nitrum/data-plane:latest-dev".to_string(),
+            data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE").unwrap_or_else(|_| {
+                "ghcr.io/matzapata/data-plane:latest-dev".to_string()
+            }),
         }
     }
 
@@ -32,6 +37,11 @@ impl<'a> EnclaveLocalStack<'a> {
             .current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
             .env("DATA_PLANE_IMAGE", self.data_plane_image.clone())
+            // `docker compose build` under BuildKit / buildx may try to resolve local-only base
+            // images from a registry. Disable BuildKit here so local tags such as
+            // `nitrum-e2e-data-plane:local` work as `FROM ${DATA_PLANE_IMAGE}` inputs.
+            .env("DOCKER_BUILDKIT", "0")
+            .env("COMPOSE_DOCKER_CLI_BUILD", "0")
             .arg("compose")
             .arg("--progress")
             .arg("quiet")
@@ -113,6 +123,7 @@ impl<'a> EnclaveLocalStack<'a> {
         let mut cmd = Command::new("docker");
         cmd.current_dir(self.project_root)
             .env("ENCLAVE_IMAGE", &self.enclave_image)
+            .env("DATA_PLANE_IMAGE", &self.data_plane_image)
             .arg("compose")
             .arg("-f")
             .arg(compose_file)

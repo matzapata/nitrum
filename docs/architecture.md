@@ -1,89 +1,102 @@
-# Architecture
+# ,Architecture
 
-Nitrum is a Rust workspace for building and running workloads in **AWS Nitro Enclaves**, with a **CLI** for local development, enclave builds, and CloudFormation-based deployment. This document explains **how** the platform achieves TLS termination inside the enclave, how TLS certificates and encryption keys are stored and synchronized, which APIs the data-plane exposes, how secrets are handled, and how the CLI deploy flow ties everything together.
+Nitrum is a Rust workspace for building and running workloads in AWS Nitro Enclaves, with a CLI for local development, enclave builds, and CloudFormation-based deployment. This document explains how the platform achieves TLS termination inside the enclave, how TLS certificates and encryption keys are stored and synchronized , which APIs the data-plane exposes, how secrets are handled, and how the CLI deploy flow ties everything together.
 
 ## Workspace layout
 
-| Crate / area | Role |
-|--------------|------|
-| **`cli` crate / `nitrum` binary** | User-facing commands: `init`, `build`, `local`, `cloud deploy`, `cloud destroy`, `cloud env`, `cloud logs`, `describe`. Orchestrates Docker, Compose, and AWS APIs. |
-| **`control-plane`** | Runs on the parent EC2 instance: **gvisor-tap-vsock (`gvproxy`)** for TAP/VSOCK networking and **nitro-cli** to start the enclave with the EIF. |
-| **`data-plane`** | Runs inside the enclave: loads `nitrum.toml`, wires storage/crypto, runs TLS and HTTP ingress, and hosts the application process. |
-| **`config`** | Shared configuration types (for example `nitrum.toml` deserialization). |
+
+| Crate / area                  | Role                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli` crate / `nitrum` binary | User-facing commands: `init`, `build`, `local`, `cloud deploy`, `cloud destroy`, `cloud env`, `cloud logs`, `describe`. Orchestrates Docker, Compose, and AWS APIs. |
+| `control-plane`               | Runs on the parent EC2 instance: gvisor-tap-vsock (`gvproxy`) for TAP/VSOCK networking and nitro-cli to start the enclave with the EIF.                             |
+| `data-plane`                  | Runs inside the enclave: loads `nitrum.toml`, wires storage/crypto, runs TLS and HTTP ingress, and hosts the application process.                                   |
+| `config`                      | Shared configuration types (for example `nitrum.toml` deserialization).                                                                                             |
+
 
 ## High-level system context
 
-In production, an **EIF** (enclave image file) built from your project is uploaded (for example to S3), EC2 instances pull it, and the **control-plane** container starts the enclave. Traffic reaches the **data-plane** inside the enclave according to your networking and TLS settings.
+In production, an EIF (enclave image file) built from your project is uploaded to S3, the control-plane  pulls it and starts the enclave. Traffic reaches the data-plane inside the enclave according to your networking and TLS settings.
 
 Conceptually:
 
-- The **control-plane** is responsible for **“wiring the world”**: Nitro, networking, metadata access, and starting the enclave.
-- The **data-plane** is responsible for **“owning secrets and TLS”**: cert provisioning, attestation documents, KMS-based keys, and request routing to your app.
+- The control-plane is responsible for “wiring the world”: Nitro, networking, metadata access, and starting the enclave.
+- The data-plane is responsible for “owning secrets and TLS”: cert provisioning, attestation documents, KMS-based keys, and request routing to your app.
 
 ## Control plane vs data plane
 
-The **control-plane** stays on the host: it manages **gvproxy** (VSOCK, TAP, port forwards, EC2 metadata path) and uses **nitro-cli** to run and monitor the enclave. The **data-plane** runs **inside** the enclave with restricted access; it initializes crypto and storage (KMS, DynamoDB, etc., depending on configuration), serves HTTPS, and runs your command (for example `node /app/src/main.js`).
+The control-plane stays on the host: it manages gvproxy (VSOCK, TAP, port forwards, EC2 metadata path) and uses nitro-cli to run and monitor the enclave. The data-plane runs inside the enclave with restricted access; it initializes crypto and storage (KMS, DynamoDB, etc., depending on configuration), serves HTTPS, and runs your command (for example `node /app/src/main.js`).
 
 ## Control-plane and data-plane (detailed)
 
-Other Nitro projects (for example AWS samples or stacks built on [**nitriding-daemon**](https://github.com/brave/nitriding-daemon)) often split **edge TLS + attestation HTTP** into a separate daemon and call the workload an “app.” In **Nitrum**, those responsibilities live in the **`data-plane` crate**: `server/ingress.rs` terminates TLS, exposes `/.well-known/enclave/*`, drives **ACME HTTP-01** when enabled, and **reverse-proxies** everything else to your process on `127.0.0.1` and the port from `nitrum.toml`. The **control-plane** crate on the parent only runs **gvproxy** and **nitro-cli**; it does not terminate application HTTPS.
+In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, exposes `/.well-known/enclave/*`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and the port from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
 
 ### TLS termination, certificate storage, and sync
 
-- **HTTPS (443)** is served by the data-plane **ingress** using **rustls**. Traffic from the Internet hits the EC2 host, **gvproxy** forwards it over **vsock/TAP** into the enclave, and the ingress router handles TLS.
-- **Self-signed bootstrap:** On startup, `TlsState` builds an ephemeral server config for the configured domain and records a **hash of the certificate** used when minting attestation documents (see below). This allows the enclave to answer HTTPS and attestation requests before a real ACME certificate exists.
-- **ACME (`[tls_termination] acme = true`):**
-  - A dedicated **HTTP** listener (HTTP-01) serves `/.well-known/acme-challenge/*`.
-  - The ACME client in `server/acme/` talks to **Let’s Encrypt** (or **Pebble** in local dev) over HTTPS using normal egress.
-  - When a certificate is issued, the **certificate chain and private key are encrypted with a data-plane encryption key** (see KMS section) and stored in a durable backend (for example S3 or DynamoDB) under a key derived from the project name and domain.
+- HTTPS (443) is served by the data-plane ingress using rustls. Traffic from the Internet hits the EC2 host, gvproxy forwards it over vsock/TAP into the enclave, and the ingress router handles TLS.
+- Self-signed bootstrap: On startup, `TlsState` builds an ephemeral server config for the configured domain and records a hash of the certificate used when minting attestation documents (see below). This allows the enclave to answer HTTPS and attestation requests before a real ACME certificate exists.
+- ACME (`[tls_termination] acme = true`):
+  - A dedicated HTTP listener (HTTP-01) serves `/.well-known/acme-challenge/*`.
+  - The ACME client in `server/acme/` talks to Let’s Encrypt (or Pebble in local dev) over HTTPS using normal egress.
+  - When a certificate is issued, the certificate chain and private key are encrypted with a data-plane encryption key (see KMS section) and stored in a durable backend (for example S3 or DynamoDB) under a key derived from the project name and domain.
   - The ingress layer hot‑reloads rustls with the new certificate without restarting the enclave.
-- **Cross-instance sync:** On subsequent boots or across additional replicas, the data-plane:
+- Cross-instance sync: On subsequent boots or across additional replicas, the data-plane:
   - Looks up the stored, encrypted certificate material.
-  - Uses the same **enclave‑bound encryption key** (recovered via KMS `Decrypt`) to decrypt it.
+  - Uses the same enclave‑bound encryption key (recovered via KMS `Decrypt`) to decrypt it.
   - Re‑uses the certificate and key, so every instance presents the same identity to clients and attestation verifiers.
-- **Application traffic:** After TLS decryption, `ingress_proxy` forwards the request as **plain HTTP** to your app (`http://127.0.0.1:<service.port>…`).
+- Application traffic: After TLS decryption, `ingress_proxy` forwards the request as plain HTTP to your app (`http://127.0.0.1:<service.port>…`).
 
 ### AWS credentials from inside the enclave (IMDS)
 
-The data-plane uses an **IMDSv2** client (`utils/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With **gvproxy** started using **`-ec2-metadata-access`** on the parent, that address inside the enclave is routed so **role credentials** resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
+The data-plane uses an IMDSv2 client (`utils/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With gvproxy started using `-ec2-metadata-access` on the parent, that address inside the enclave is routed so role credentials resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
 
 ### Persistent encryption key and KMS
 
-The data-plane also needs a **durable symmetric key** to encrypt long‑lived platform state such as:
+The data-plane also needs a durable symmetric key to encrypt long‑lived platform state such as:
 
-- The **TLS certificate and private key** described above.
+- The TLS certificate and private key described above.
 - Any additional encrypted blobs managed by Nitrum itself.
 
-That key is derived from a **KMS data key**:
+That key is derived from a KMS data key:
 
-- **Key generation:** On first startup, `crypto/kms.rs` calls **`GenerateDataKeyWithoutPlaintext`** on a stack‑specific KMS key. This produces:
-  - A **ciphertext blob** (the data key encrypted under the KMS key).
-  - A one‑time **plaintext data key** that is only used in‑memory.
-- **Local wrapping:** The plaintext data key is run through a key‑derivation step to create a **data-plane encryption key**, which is then used to encrypt platform state (certificates, internal secrets) before those blobs are written to storage.
-- **Persistence:** Only the **KMS-encrypted data key** and the **wrapped platform blobs** are stored; the plaintext key never leaves enclave memory.
-- **Re-use across instances:** On later startups:
+- Key generation: On first startup, `crypto/kms.rs` calls `GenerateDataKeyWithoutPlaintext` on a stack‑specific KMS key. This produces:
+  - A ciphertext blob (the data key encrypted under the KMS key).
+  - A one‑time plaintext data key that is only used in‑memory.
+- Local wrapping: The plaintext data key is run through a key‑derivation step to create a data-plane encryption key, which is then used to encrypt platform state (certificates, internal secrets) before those blobs are written to storage.
+- Persistence: Only the KMS-encrypted data key and the wrapped platform blobs are stored; the plaintext key never leaves enclave memory.
+- Re-use across instances: On later startups:
   - The data-plane loads the encrypted data key from storage.
-  - It calls **`Decrypt`** with a Nitro **`Recipient`** so that KMS only returns the plaintext to enclaves whose PCRs match the configured policy.
+  - It calls `Decrypt` with a Nitro `Recipient` so that KMS only returns the plaintext to enclaves whose PCRs match the configured policy.
   - It re-derives the data-plane encryption key and decrypts the previously stored certificate and other internal secrets.
 
-This gives you a **single logical encryption key per project**, enforced by KMS policy and Nitro attestation, while allowing any healthy enclave instance in that project to restore and use the same TLS identity and platform secrets.
+This gives you a single logical encryption key per project, enforced by KMS policy and Nitro attestation, while allowing any healthy enclave instance in that project to restore and use the same TLS identity and platform secrets.
 
 ### Attestation and platform APIs
 
 The data-plane exposes a small HTTP surface alongside your application:
 
-- **`GET /.well-known/enclave/attestation`**
-  - Calls the **NSM** (`crypto/attest.rs`) to obtain an attestation document.
-  - Binds the document to the **current TLS certificate** by including a hash of the certificate in the NSM request.
+- `GET /.well-known/enclave/attestation`
+  - Calls the NSM (`crypto/attest.rs`) to obtain an attestation document.
+  - Binds the document to the current TLS certificate by including a hash of the certificate in the NSM request.
   - Returns a base64‑encoded document that clients can verify against a known PCR policy and the expected TLS public key.
-- **`GET /.well-known/enclave/status`**
+- `GET /.well-known/enclave/status`
   - Returns a small JSON object describing the data-plane’s health (for example, whether ACME completed, whether storage/KMS are reachable, and whether the application health check passes).
-- **Application routes**
-  - Everything that is **not** under `/.well-known/enclave/*` is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<service.port>`.
+- Application routes
+  - Everything that is not under `/.well-known/enclave/*` is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<service.port>`.
+
+### Internal crypto HTTP API
+
+In addition to the public ingress on HTTPS, the data-plane runs a **separate plain HTTP server** (`crypto/api.rs`) intended for use from inside the enclave—typically your application calling `127.0.0.1` (or the configured bind address) over the loopback path. It is **not** behind the ingress TLS listener and is **not** the same process surface as `/.well-known/enclave/`* on port 443.
+
+- **Listen address:** `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `0.0.0.0:3000`), parsed at runtime with the rest of the data-plane env-driven config (`config.rs`).
+- **Crypto material:** `POST /encrypt` and `POST /decrypt` use the KMS-backed DEK held by `CryptoClient` (AES-GCM; see the KMS section). Bodies are JSON: encrypt sends `{"plaintext": "<utf-8 string>"}` and returns base64 ciphertext in `data`; decrypt sends `{"ciphertext": "<base64>"}` and returns the decrypted UTF-8 string in `data`. Failures populate `error`.
+- **Attestation:** `POST /attestation` accepts JSON with optional camelCase fields `nonce`, `publicKey`, and `userData` (each a standard base64 string when present). The response returns a base64-encoded raw attestation document in `data`. This complements `GET /.well-known/enclave/attestation`, which is tailored for external HTTPS clients and binds the current TLS leaf into the NSM request.
+- **Other routes:** `GET /health` returns `{"status":"ok"}`. `POST /random` accepts an optional JSON body `{"length": <n>}` (default 32, max 1024) and returns cryptographically random bytes as base64 in `data`.
+
+Treat this listener as a sensitive enclave-local capability: restrict exposure with network layout and deployment defaults, and do not assume application-level authentication unless you add it at the edge or in your app.
 
 ### Reference sequence diagrams (Mermaid)
 
-The following diagrams mirror the **IMDS credential**, **attestation**, and **KMS + durable store** flows from common Nitro/SSS-style architecture drawings. **Nitrum mapping:** *nitriding / TAP edge* → **data-plane ingress**; *sss app* → **your process** behind `ingress_proxy` (plain HTTP on `127.0.0.1`). Nitrum talks to **IMDS at `169.254.169.254`** (no separate `127.0.0.1` metadata proxy) when **gvproxy** runs with **`-ec2-metadata-access`**.
+The following diagrams mirror the IMDS credential, attestation, and KMS + durable store flows from common Nitro/SSS-style architecture drawings. Nitrum mapping: *nitriding / TAP edge* → data-plane ingress; *sss app* → your process behind `ingress_proxy` (plain HTTP on `127.0.0.1`). Nitrum talks to IMDS at `169.254.169.254` (no separate `127.0.0.1` metadata proxy) when gvproxy runs with `-ec2-metadata-access`.
 
 #### 1. Application traffic and IMDS credentials (reference flow)
 
@@ -122,9 +135,11 @@ sequenceDiagram
     gv-->>-ext: HTTPS response
 ```
 
+
+
 #### 2. Attestation document (reference flow)
 
-Nitrum exposes **`GET /.well-known/enclave/attestation`** (optional query parameters may be added later; the handler currently binds the **TLS certificate hash** into the NSM request).
+Nitrum exposes `GET /.well-known/enclave/attestation` (optional query parameters may be added later; the handler currently binds the TLS certificate hash into the NSM request).
 
 ```mermaid
 sequenceDiagram
@@ -145,9 +160,11 @@ sequenceDiagram
     ext->>ext: Verify PCRs policy and cert binding
 ```
 
+
+
 #### 3. Enclave workload with KMS and DynamoDB (reference flow)
 
-Represents patterns like **KMS encrypt / generate-data-key** plus **DynamoDB** persistence (exact routes are your app’s; Nitrum’s storage layer uses similar AWS calls with enclave credentials).
+Represents patterns like KMS encrypt / generate-data-key plus DynamoDB persistence (exact routes are your app’s; Nitrum’s storage layer uses similar AWS calls with enclave credentials).
 
 ```mermaid
 sequenceDiagram
@@ -173,9 +190,11 @@ sequenceDiagram
     gv-->>-ext: HTTPS response
 ```
 
+
+
 ### Sequence: enclave bring-up, ACME, and readiness (Nitrum)
 
-Simplified lifecycle on the **production** path: control-plane starts **gvproxy**, **nitro-cli** loads the EIF, **data-plane** brings up ingress and (optionally) ACME, then your app listens behind the ingress proxy.
+Simplified lifecycle on the production path: control-plane starts gvproxy, nitro-cli loads the EIF, data-plane brings up ingress and (optionally) ACME, then your app listens behind the ingress proxy.
 
 ```mermaid
 sequenceDiagram
@@ -216,6 +235,8 @@ sequenceDiagram
     gv-->>-client: HTTPS response
 ```
 
+
+
 ### Sequence: KMS decrypt with attestation (envelope DEK)
 
 ```mermaid
@@ -231,6 +252,8 @@ sequenceDiagram
     kms-->>-dp: Plaintext data key (or CMS-wrapped per API)
     dp->>dp: Unwrap / use DEK for local crypto
 ```
+
+
 
 ## Typical flows
 
@@ -251,15 +274,17 @@ sequenceDiagram
     CLI->>DC: logs -f
 ```
 
+
+
 ### Build and deploy
 
 `nitrum build` and `nitrum cloud deploy` form the standard path from source to running enclave:
 
-- **`nitrum build`**
+- `nitrum build`
   - Uses Docker to build your application image according to `Dockerfile` and `nitrum.toml`.
-  - Runs **`nitro-cli build-enclave`** in a dedicated image to produce an **EIF**.
+  - Runs `nitro-cli build-enclave` in a dedicated image to produce an EIF.
   - Writes `.nitrum/artifacts/{project.name}.eif` and any build metadata.
-- **`nitrum cloud deploy`**
+- `nitrum cloud deploy`
   - Reads `nitrum.toml` to determine project name, domain, runtime images, scaling hints, TLS, and egress configuration.
   - Uploads the EIF to a project‑scoped S3 bucket.
   - Creates or updates a CloudFormation stack that provisions the EC2 instances, control-plane, IAM roles, KMS keys, SSM paths, and CloudWatch log groups needed to run the enclave and its data-plane.
@@ -282,17 +307,19 @@ sequenceDiagram
     CF-->>Dev: stack events / outputs
 ```
 
+
+
 ## Secrets and configuration
 
-Runtime and deployment parameters live in **`nitrum.toml`** at the project root (`[project]`, `[runtime]`, service port, health checks, scaling hints, TLS, egress options). The `config` crate defines the schema; see [usage.md](usage.md) for a short reference.
+Runtime and deployment parameters live in `nitrum.toml` at the project root (`[project]`, `[runtime]`, service port, health checks, scaling hints, TLS, egress options). The `config` crate defines the schema; see [usage.md](usage.md) for a short reference.
 
-Application **secrets** are kept separate from platform encryption keys and certificates:
+Application secrets are kept separate from platform encryption keys and certificates:
 
-- **Application secrets in SSM**
-  - `nitrum cloud env set KEY VALUE` writes a `SecureString` to **SSM Parameter Store** under `/nitrum/{project.name}/env/KEY`.
+- Application secrets in SSM
+  - `nitrum cloud env set KEY VALUE` writes a `SecureString` to SSM Parameter Store under `/nitrum/{project.name}/env/KEY`.
   - At startup, the data-plane uses the enclave’s IAM role (via IMDS) to call SSM and read those values.
-  - Decrypted values are injected into the **user process environment** before your application is started, overlaying any existing host environment variables.
-- **Platform keys and certs**
+  - Decrypted values are injected into the user process environment before your application is started, overlaying any existing host environment variables.
+- Platform keys and certs
   - Are encrypted using the KMS data key described above and written to an internal storage namespace reserved for Nitrum.
   - Are never exposed via `nitrum cloud env` or other user‑facing secrets APIs.
 
@@ -302,3 +329,4 @@ This split keeps your application’s own secrets easy to reason about (just env
 
 - [usage.md](usage.md) — CLI commands, config, and reproducible build guidance.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — building and testing the workspace.
+
