@@ -2,7 +2,8 @@
 
 use super::client::AcmeClient;
 use super::storage::AcmeStorage;
-use crate::constants::CERTIFICATE_RENEWAL_FRACTION;
+use crate::constants::{ACME_LOCK_RETRY_INTERVAL, CERTIFICATE_RENEWAL_FRACTION};
+use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
 use crate::utils::leader::Leader;
 use anyhow::Result;
@@ -33,16 +34,18 @@ impl AcmeState {
     pub fn new(
         domain: String,
         storage: Arc<StorageClient>,
+        crypto: Arc<CryptoClient>,
         leader: Arc<Leader>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Self {
+        let cert_storage = AcmeStorage::new(storage.clone(), crypto.clone());
         Self {
             domain,
-            cert_storage: AcmeStorage::new(storage.clone()),
+            cert_storage,
             leader,
             cert_store: Arc::new(RwLock::new(None)),
-            inner: AcmeClient::new(storage, directory_url, client_tls_config),
+            inner: AcmeClient::new(storage, crypto, directory_url, client_tls_config),
             current_chain: None,
         }
     }
@@ -51,39 +54,55 @@ impl AcmeState {
         self.cert_store.clone()
     }
 
-    /// Return an existing cert from storage or provision one (under leader lock).
+    /// Return an existing cert from storage or provision one (under leader lock only when needed).
+    ///
+    /// The ACME leader lock is taken only when storage is missing a cert/key pair or the stored
+    /// leaf is due for renewal. While waiting for the lock, storage is re-polled so followers pick
+    /// up a cert as soon as another instance writes it.
     pub async fn get_or_provision(&self) -> Result<(String, String)> {
-        if let Some(pair) = self.cert_storage.read_cert_pair().await?
-            && self.current_chain.as_deref() != Some(&pair.0)
-        {
-            return Ok(pair);
-        }
-
-        let guard = loop {
-            if let Some(g) = self.leader.try_acquire_leader().await? {
-                break g;
+        loop {
+            if let Some(pair) = self.cert_storage.read_cert_pair().await? {
+                if self.current_chain.as_deref() != Some(&pair.0) {
+                    return Ok(pair);
+                }
+                if !Self::renewal_due(&self.inner, &pair.0) {
+                    return Ok(pair);
+                }
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        };
 
-        if let Some(pair) = self.cert_storage.read_cert_pair().await?
-            && self.current_chain.as_deref() != Some(&pair.0)
-        {
-            return Ok(pair);
-        }
+            if let Some(_guard) = self.leader.try_acquire_leader().await? {
+                if let Some(pair) = self.cert_storage.read_cert_pair().await? {
+                    if self.current_chain.as_deref() != Some(&pair.0) {
+                        return Ok(pair);
+                    }
+                    if !Self::renewal_due(&self.inner, &pair.0) {
+                        return Ok(pair);
+                    }
+                }
 
-        let (account, credentials) = self.inner.load_or_create_account().await?;
-        if let Some(creds) = credentials {
-            self.inner.save_account(&creds).await?;
+                let (account, credentials) = self.inner.load_or_create_account().await?;
+                if let Some(creds) = credentials {
+                    self.inner.save_account(&creds).await?;
+                }
+                info!(domain = %self.domain, "provisioning ACME certificate");
+                let (chain, key) = self
+                    .inner
+                    .provision_cert(account, &self.domain, self.cert_storage.as_ref())
+                    .await?;
+                self.cert_storage.write_cert_pair(&chain, &key).await?;
+                return Ok((chain, key));
+            }
+
+            tokio::time::sleep(ACME_LOCK_RETRY_INTERVAL).await;
         }
-        info!(domain = %self.domain, "provisioning ACME certificate");
-        let (chain, key) = self
-            .inner
-            .provision_cert(account, &self.domain, self.cert_storage.as_ref())
-            .await?;
-        self.cert_storage.write_cert_pair(&chain, &key).await?;
-        drop(guard);
-        Ok((chain, key))
+    }
+
+    /// Whether the leaf in `chain_pem` has reached the configured renewal point (or parsing failed).
+    fn renewal_due(inner: &AcmeClient, chain_pem: &str) -> bool {
+        inner
+            .duration_until_renewal(chain_pem)
+            .map(|d| d.as_secs() == 0)
+            .unwrap_or(true)
     }
 
     /// Sleep until renewal time then renew. Call in a loop after `get_or_provision`.

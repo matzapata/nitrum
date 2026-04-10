@@ -2,7 +2,8 @@
 //!
 //! When `TlsTermination.acme` is true, [`super::acme`] handles Let's Encrypt (or Pebble).
 //! Otherwise the server starts with a generated self-signed cert until shared storage
-//! provides a cert (see deployment docs). Cert PEM + key live in shared storage for ACME.
+//! provides a cert (see deployment docs). Cert PEM + key are stored in shared storage for ACME,
+//! wrapped with the data-plane DEK (AES-GCM).
 
 use crate::state::DataPlaneState;
 use crate::storage::keys;
@@ -69,12 +70,15 @@ impl TlsState {
         let client_tls_config = None;
 
         let storage_for_acme = state.storage.clone();
+        let crypto_for_acme = state.crypto.clone();
+        
         Self {
             state,
             rustls_config,
             acme_state: Some(AcmeState::new(
                 domain,
                 storage_for_acme,
+                crypto_for_acme,
                 acme_leader,
                 directory_url,
                 client_tls_config,

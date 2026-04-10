@@ -2,6 +2,7 @@
 
 use super::utils::acme_https_client;
 use crate::constants::CERTIFICATE_RENEWAL_FRACTION;
+use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
 use crate::storage::keys;
 use anyhow::{Context, Result, bail};
@@ -17,19 +18,26 @@ use tracing::{debug, info};
 use x509_parser::parse_x509_certificate;
 
 pub struct AcmeClient {
+    /// Persistent storage layer for ACME credentials.
     storage: Arc<StorageClient>,
+    /// Encrypts ACME account JSON at rest (same DEK as TLS material).
+    crypto: Arc<CryptoClient>,
+    /// URL to the ACME directory endpoint.
     directory_url: String,
+    /// Optional client TLS configuration for ACME endpoint.
     client_tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl AcmeClient {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         storage: Arc<StorageClient>,
+        crypto: Arc<CryptoClient>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Self {
         Self {
             storage,
+            crypto,
             directory_url,
             client_tls_config,
         }
@@ -55,8 +63,12 @@ impl AcmeClient {
             ($builder:expr) => {{
                 if let Some(ref data) = stored {
                     debug!(directory_url = %self.directory_url, "ACME: restoring account");
+                    let plain = self
+                        .crypto
+                        .decrypt(data)
+                        .context("decrypt acme account from storage")?;
                     let creds: AccountCredentials =
-                        serde_json::from_slice(data).context("parse acme account")?;
+                        serde_json::from_slice(&plain).context("parse acme account")?;
                     let account = $builder.from_credentials(creds).await.context("restore account")?;
                     return Ok((account, None));
                 }
@@ -80,8 +92,12 @@ impl AcmeClient {
 
     pub(crate) async fn save_account(&self, credentials: &AccountCredentials) -> Result<()> {
         let data = serde_json::to_string_pretty(credentials).context("serialize account")?;
+        let enc = self
+            .crypto
+            .encrypt(data.as_bytes())
+            .context("encrypt acme account for storage")?;
         self.storage
-            .set_object(keys::ACME_ACCOUNT_OBJECT_KEY, data.as_bytes())
+            .set_object(keys::ACME_ACCOUNT_OBJECT_KEY, &enc)
             .await
             .context("write acme account to storage")
     }

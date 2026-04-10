@@ -1,5 +1,10 @@
+use std::time::Duration;
+
 /// VSOCK port where gvproxy listens on the host (CID 3).
 pub const HOST_PROXY_PORT: u32 = 1024;
+
+/// Delay between polls while waiting for the ACME leader lock (another instance may be provisioning).
+pub const ACME_LOCK_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Default certificate renewal fraction (2/3 of the certificate lifetime).
 pub const CERTIFICATE_RENEWAL_FRACTION: f64 = 2.0 / 3.0;
