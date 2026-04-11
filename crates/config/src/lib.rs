@@ -183,7 +183,6 @@ impl TlsTermination {
     }
 }
 
-
 /// Controls exposure of `/.well-known/enclave/*` routes on the ingress (TLS) listener.
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct WellKnown {

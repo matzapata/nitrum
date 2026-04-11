@@ -44,7 +44,10 @@ async fn main() {
         )
         .init();
 
-    let Args { config, command: cli_command } = Args::parse();
+    let Args {
+        config,
+        command: cli_command,
+    } = Args::parse();
 
     // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
     // when the parent runs gvproxy with `-ec2-metadata-access`.

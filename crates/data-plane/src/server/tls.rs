@@ -71,7 +71,7 @@ impl TlsState {
 
         let storage_for_acme = state.storage.clone();
         let crypto_for_acme = state.crypto.clone();
-        
+
         Self {
             state,
             rustls_config,
