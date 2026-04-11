@@ -19,5 +19,4 @@ COPY src/main.js src/main.js
 # Copy the nitrum configuration
 COPY nitrum.toml /app/nitrum.toml
 
-# Start the enclave
-CMD ["/app/data-plane", "--config", "/app/nitrum.toml", "--", "node", "/app/src/main.js"]
+CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]

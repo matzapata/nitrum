@@ -183,30 +183,22 @@ impl TlsTermination {
     }
 }
 
+
+/// Controls exposure of `/.well-known/enclave/*` routes on the ingress (TLS) listener.
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct Service {
-    /// Port to use for the service.
-    pub port: u16,
+pub struct WellKnown {
+    /// When true, serve `GET /.well-known/enclave/status`.
+    pub enclave_status: bool,
+    /// When true, serve `GET /.well-known/enclave/attestation`.
+    pub enclave_attestation: bool,
 }
 
-impl Default for Service {
+impl Default for WellKnown {
     fn default() -> Self {
-        Self { port: 8080 }
-    }
-}
-
-impl Service {
-    /// Validates semantic constraints for `[service]`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` with a human-readable message when the service
-    /// configuration is invalid (for example a zero port).
-    pub fn validate(&self) -> Result<(), String> {
-        if self.port == 0 {
-            return Err("`service.port` must not be 0".to_string());
+        Self {
+            enclave_status: true,
+            enclave_attestation: true,
         }
-        Ok(())
     }
 }
 
@@ -214,6 +206,12 @@ impl Service {
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Project {
     pub name: String,
+    /// TCP port your application listens on (`127.0.0.1`); the ingress proxies here after TLS.
+    #[serde(default = "default_app_port")]
+    pub port: u16,
+    /// Process argv for the user workload (read from `nitrum.toml` by the data-plane unless overridden by trailing CLI args).
+    #[serde(default, alias = "command")]
+    pub start_command: Vec<String>,
 }
 
 impl Project {
@@ -224,7 +222,11 @@ impl Project {
     /// Returns `Err` with a human-readable message when the project name is
     /// invalid according to [`validate_project_name`].
     pub fn validate(&self) -> Result<(), String> {
-        validate_project_name(&self.name)
+        validate_project_name(&self.name)?;
+        if self.port == 0 {
+            return Err("`project.port` must not be 0".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -268,7 +270,8 @@ pub struct NitrumConfig {
     pub project: Project,
     #[serde(default)]
     pub runtime: Runtime,
-    pub service: Service,
+    #[serde(default)]
+    pub well_known: WellKnown,
     pub health_check: HealthCheck,
     pub scaling: Scaling,
     pub tls_termination: TlsTermination,
@@ -284,7 +287,6 @@ impl NitrumConfig {
     pub fn validate(&self) -> Result<(), String> {
         self.project.validate()?;
         self.runtime.validate()?;
-        self.service.validate()?;
         self.health_check.validate()?;
         self.scaling.validate()?;
         self.tls_termination.validate()?;

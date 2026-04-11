@@ -44,7 +44,7 @@ async fn main() {
         )
         .init();
 
-    let args = Args::parse();
+    let Args { config, command: cli_command } = Args::parse();
 
     // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
     // when the parent runs gvproxy with `-ec2-metadata-access`.
@@ -53,14 +53,20 @@ async fn main() {
     #[cfg(not(feature = "enclave"))]
     info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
 
-    let runtime_config = RuntimeConfig::load(&args.config).await.unwrap_or_else(|e| {
+    let runtime_config = RuntimeConfig::load(&config).await.unwrap_or_else(|e| {
         error!(
             error = %format!("{:#}", e),
-            config_path = %args.config.display(),
+            config_path = %config.display(),
             "failed to load runtime config"
         );
         std::process::exit(1);
     });
+
+    let user_command: Vec<String> = if !cli_command.is_empty() {
+        cli_command
+    } else {
+        runtime_config.nitrum.project.start_command.clone()
+    };
 
     // Create storage client
     let storage: Arc<StorageClient> = Arc::new(StorageClient::new(&runtime_config));
@@ -106,14 +112,14 @@ async fn main() {
     });
 
     // Run user process if provided, otherwise run until SIGINT
-    let exit_code = if args.command.is_empty() {
+    let exit_code = if user_command.is_empty() {
         info!("no command provided, running until SIGINT");
         let _ = tokio::signal::ctrl_c().await;
         info!("received SIGINT, shutting down");
         0
     } else {
         tokio::select! {
-            result = server::runner::run(&args.command, &runtime_config.user_env) => {
+            result = server::runner::run(&user_command, &runtime_config.user_env) => {
                 result.unwrap_or_else(|e| {
                     tracing::error!(error = %e, "failed to run user process");
                     1

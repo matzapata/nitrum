@@ -2,7 +2,8 @@
 //! enclave endpoints and ACME challenges, and proxying all other traffic to the
 //! user application.
 //!
-//! The following well-known paths are handled directly (the user app is not invoked):
+//! Optional well-known paths (enabled via `[well_known]` in `nitrum.toml`) are handled directly
+//! (the user app is not invoked):
 //!   - GET /.well-known/enclave/status
 //!     -> Responds with 200 {"status":"ok"}
 //!   - GET /.well-known/enclave/attestation
@@ -76,9 +77,15 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
     };
 
     // HTTPS router
-    let https_router = Router::new()
-        .route("/.well-known/enclave/status", get(ingress_status))
-        .route("/.well-known/enclave/attestation", get(ingress_attestation))
+    let mut https_router = Router::new();
+    if state.config.well_known.enclave_status {
+        https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
+    }
+    if state.config.well_known.enclave_attestation {
+        https_router =
+            https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
+    }
+    let https_router = https_router
         .fallback(ingress_proxy)
         .with_state(state.clone());
 
@@ -161,7 +168,7 @@ async fn ingress_proxy(
         .uri()
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
-    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.service.port);
+    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.project.port);
     let url = format!("http://{forward_to}{path_and_query}");
     info!(url = %url, "ingress: proxying to app");
 

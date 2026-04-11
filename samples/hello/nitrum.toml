@@ -3,14 +3,17 @@
 
 [project]
 name = "nitrum-hello"
+port = 8080
+start_command = ["node", "/app/src/main.js"]
 
 [runtime]
 data_plane = "ghcr.io/matzapata/nitrum/data-plane:latest"
 control_plane = "ghcr.io/matzapata/nitrum/control-plane:latest"
 nitro_cli = "ghcr.io/matzapata/nitrum/nitro-cli:latest"
 
-[service]
-port = 8080
+[well_known]
+enclave_status = true
+enclave_attestation = true
 
 [health_check]
 path = "/health"

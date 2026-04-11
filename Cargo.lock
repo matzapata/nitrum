@@ -1201,7 +1201,6 @@ dependencies = [
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-s3",
  "clap",
- "config",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

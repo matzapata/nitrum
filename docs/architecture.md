@@ -28,7 +28,7 @@ The control-plane stays on the host: it manages gvproxy (VSOCK, TAP, port forwar
 
 ## Control-plane and data-plane (detailed)
 
-In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, exposes `/.well-known/enclave/*`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and the port from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
+In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, optionally exposes `/.well-known/enclave/*` per `[well_known]` in `nitrum.toml`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and `project.port` from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
 
 ### TLS termination, certificate storage, and sync
 
@@ -43,7 +43,7 @@ In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, exposes `/
   - Looks up the stored, encrypted certificate material.
   - Uses the same enclave‑bound encryption key (recovered via KMS `Decrypt`) to decrypt it.
   - Re‑uses the certificate and key, so every instance presents the same identity to clients and attestation verifiers.
-- Application traffic: After TLS decryption, `ingress_proxy` forwards the request as plain HTTP to your app (`http://127.0.0.1:<service.port>…`).
+- Application traffic: After TLS decryption, `ingress_proxy` forwards the request as plain HTTP to your app (`http://127.0.0.1:<project.port>…`).
 
 ### AWS credentials from inside the enclave (IMDS)
 
@@ -81,7 +81,7 @@ The data-plane exposes a small HTTP surface alongside your application:
 - `GET /.well-known/enclave/status`
   - Returns a small JSON object describing the data-plane’s health (for example, whether ACME completed, whether storage/KMS are reachable, and whether the application health check passes).
 - Application routes
-  - Everything that is not under `/.well-known/enclave/*` is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<service.port>`.
+  - Everything that is not under `/.well-known/enclave/*` (when those routes are enabled) is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<project.port>`.
 
 ### Internal crypto HTTP API
 
@@ -222,7 +222,7 @@ sequenceDiagram
     end
 
     dp->>dp: Listen HTTPS (ingress + well-known routes)
-    app->>app: Bind HTTP on 127.0.0.1 (service.port)
+    app->>app: Bind HTTP on 127.0.0.1 (project.port)
 
     Note over client,app: Steady state
 

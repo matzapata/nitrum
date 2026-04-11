@@ -3,7 +3,7 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    HealthCheck, NitrumConfig, Project, Runtime, Scaling, Service, TlsTermination,
+    HealthCheck, NitrumConfig, Project, Runtime, Scaling, TlsTermination, WellKnown,
     validate_project_name,
 };
 use futures_util::future::try_join3;
@@ -67,13 +67,15 @@ pub async fn run(args: InitArgs) -> Result<()> {
     let nitrum_config = NitrumConfig {
         project: Project {
             name: args.name.clone(),
+            port: 8080,
+            start_command: vec!["node".to_string(), "/app/src/main.js".to_string()],
         },
         runtime: Runtime {
             data_plane,
             control_plane,
             nitro_cli,
         },
-        service: Service::default(),
+        well_known: WellKnown::default(),
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),
         tls_termination: TlsTermination::default(),

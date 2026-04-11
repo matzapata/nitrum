@@ -18,7 +18,7 @@ Needed only if you use `**nitrum cloud`** (deploy, env, logs, destroy). Local-on
 
 ## Project layout and example
 
-`nitrum init [name]` by default creates a sample Node.js server, but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[service]` in `nitrum.toml`.
+`nitrum init [name]` by default creates a sample Node.js server, but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
 
 The repository includes a reference project under `samples/hello` which shows the end‑to‑end flow:
 
@@ -30,27 +30,21 @@ Use that sample as a concrete reference when wiring your own projects.
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
-The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Requests on the paths below are handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[service]` in `nitrum.toml`.
+The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Requests on the paths below are handled **inside the ingress** when enabled via `[well_known]`; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
 
 #### Endpoints reachable from the Internet (or local TLS client)
 
-- `GET /.well-known/enclave/status` Returns a minimal liveness payload for the ingress/data-plane.  
-If all goes well, the enclave responds with status code `200 OK` and a JSON body:
-  ```
-  {
-    "status": "ok"
-  }
-  ```
-- `GET /.well-known/enclave/attestation` Returns an **AWS Nitro attestation document** for the running enclave, with the **current TLS leaf certificate** bound into the NSM request (certificate hash as `public_key` material).  
-Optional query parameter: `nonce` — standard Base64 encoding of raw nonce bytes.  
-If all goes well, the enclave responds with status code `200 OK` and:
-  ```
-  {
-    "data": "<base64-encoded attestation document (raw COSE/CBOR bytes)>"
-  }
-  ```
-  If the TLS certificate is not yet available, the enclave responds with status code `503 Service Unavailable` and a JSON body such as `{"error":"TLS certificate not yet available"}`. Attestation failures may yield `500 Internal Server Error` with `{"error":"attestation failed: ..."}`.
-- `GET /.well-known/acme-challenge/{token}` Served only when `**[tls_termination].acme**` is enabled. A separate **plain-HTTP** listener on `NITRUM_ACME_HTTP01_LISTEN_ADDR` (default `**0.0.0.0:80`**) exposes this path for **ACME HTTP-01** validation. If all goes well, the server responds with status code `200 OK` and the challenge key authorization bytes as the body (content type `application/octet-stream`).
+When `[well_known].enclave_status` is true (default):
+
+- `GET /.well-known/enclave/status` — minimal liveness payload for the ingress/data-plane. On success: `200 OK` and `{"status":"ok"}`.
+
+When `[well_known].enclave_attestation` is true (default):
+
+- `GET /.well-known/enclave/attestation` — **AWS Nitro attestation document** for the running enclave, with the **current TLS leaf certificate** bound into the NSM request (certificate hash as `public_key` material). Optional query: `nonce` (standard Base64 of raw nonce bytes). On success: `200 OK` and `{"data":"<base64-encoded attestation document>"}`. If the TLS certificate is not yet available: `503` with `{"error":"TLS certificate not yet available"}`. Attestation errors may return `500` with `{"error":"attestation failed: ..."}`.
+
+When `[tls_termination].acme` is enabled:
+
+- `GET /.well-known/acme-challenge/{token}` — **ACME HTTP-01** on a separate plain-HTTP listener (`NITRUM_ACME_HTTP01_LISTEN_ADDR`, default `0.0.0.0:80`). On success: `200 OK` and the challenge key authorization bytes (`application/octet-stream`).
 
 ### Data-plane crypto HTTP API (internal)
 
@@ -177,10 +171,12 @@ Runs `nitro-cli describe-eif` in Docker against an EIF path (wrapper for inspect
 Options are defined in the `shared` crate; the sample project comments point to the source. Common sections:
 
 - `[project]` `name` — project identifier; CloudFormation stack name and `ProjectName` match it; S3 bucket is `nitrum-{name}`; SSM paths use `/nitrum/{name}/…` (data-plane infra and app env).
+- `[project]` `port` — TCP port your app listens on at `127.0.0.1` (ingress proxies here after TLS).
+- `[project]` `start_command` — argv for the user process (JSON array in `nitrum.toml`); the data-plane spawns it after loading config (CLI args after `--` still override when used).
 - `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
-- `[service]` — listen port for your app.
+- `[well_known]` — `enclave_status` / `enclave_attestation` toggle the `/.well-known/enclave/*` routes on the TLS listener (defaults: enabled).
 - `[health_check]` — path, port, and interval for health checks.
 - `[scaling]` — replica hints and enclave CPU/RAM (used in deployment templates).
 - `[tls_termination]` — `acme` and `domain` for certificates.
