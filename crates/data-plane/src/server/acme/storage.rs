@@ -14,7 +14,7 @@ pub struct AcmeStorage {
 }
 
 impl AcmeStorage {
-    pub(crate) fn new(client: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
+    pub(crate) const fn new(client: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
         Self { client, crypto }
     }
 

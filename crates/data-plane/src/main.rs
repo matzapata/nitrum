@@ -65,10 +65,10 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let user_command: Vec<String> = if !cli_command.is_empty() {
-        cli_command
-    } else {
+    let user_command: Vec<String> = if cli_command.is_empty() {
         runtime_config.nitrum.project.start_command.clone()
+    } else {
+        cli_command
     };
 
     // Create storage client

@@ -29,7 +29,7 @@ pub struct AcmeClient {
 }
 
 impl AcmeClient {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         storage: Arc<StorageClient>,
         crypto: Arc<CryptoClient>,
         directory_url: String,

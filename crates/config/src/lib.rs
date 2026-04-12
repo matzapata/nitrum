@@ -206,7 +206,6 @@ impl Default for WellKnown {
 pub struct Project {
     pub name: String,
     /// TCP port your application listens on (`127.0.0.1`); the ingress proxies here after TLS.
-    #[serde(default = "default_app_port")]
     pub port: u16,
     /// Process argv for the user workload (read from `nitrum.toml` by the data-plane unless overridden by trailing CLI args).
     #[serde(default, alias = "command")]
