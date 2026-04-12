@@ -6,7 +6,10 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 
 - **Rust**: A recent stable toolchain ([rustup](https://rustup.rs/)).
 - **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum local` (Compose).
-- **just** (optional): Recipes in the [`justfile`](justfile) mirror common commands (`check`, `lint`, `format`, Docker image builds).
+- **Python**: `3.11+` for documentation tooling.
+- **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
+- **Poetry**: Python dependency manager used for docs diagram generation.
+- **just** (optional): Recipes in the [`justfile`](justfile) mirror common commands (`check`, `lint`, `format`, Docker image builds, docs diagram generation).
 
 Clone the repo and run from the workspace root:
 
@@ -14,6 +17,33 @@ Clone the repo and run from the workspace root:
 cargo check --all-targets
 cargo test --all-features
 ```
+
+### Render architecture diagrams
+
+The architecture diagrams in `docs/diagrams/` are generated from Python source via `mingrammer/diagrams`.
+
+System requirements:
+
+- Python `3.11+`
+- Poetry `2.x` (or newer)
+- Graphviz (`dot`)
+
+Example install on macOS:
+
+```bash
+brew install graphviz poetry
+```
+
+Generate diagrams:
+
+```bash
+just generate-diagrams
+```
+
+This command installs the Poetry diagram dependencies (if needed) and renders:
+
+- `docs/diagrams/output/nitrum-aws-overview.png`
+- `docs/diagrams/output/nitrum-runtime-flow.png`
 
 ## Code style and quality
 

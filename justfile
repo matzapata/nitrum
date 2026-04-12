@@ -12,6 +12,10 @@ lint:
 format:
     cargo fmt --all
 
+generate-diagrams:
+    poetry install --no-root --with diagrams
+    poetry run python docs/diagrams/render_all.py
+
 # ── Nitro CLI ───────────────────────────────────
 
 build-nitro-cli no_cache="":

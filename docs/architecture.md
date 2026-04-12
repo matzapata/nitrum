@@ -1,6 +1,8 @@
-# ,Architecture
+# Architecture
 
 Nitrum is a Rust workspace for building and running workloads in AWS Nitro Enclaves, with a CLI for local development, enclave builds, and CloudFormation-based deployment. This document explains how the platform achieves TLS termination inside the enclave, how TLS certificates and encryption keys are stored and synchronized , which APIs the data-plane exposes, how secrets are handled, and how the CLI deploy flow ties everything together.
+
+The generated diagrams used in this document are stored in `docs/diagrams/output/` and can be refreshed with `just generate-diagrams`.
 
 ## Workspace layout
 
@@ -16,6 +18,18 @@ Nitrum is a Rust workspace for building and running workloads in AWS Nitro Encla
 ## High-level system context
 
 In production, an EIF (enclave image file) built from your project is uploaded to S3, the control-plane  pulls it and starts the enclave. Traffic reaches the data-plane inside the enclave according to your networking and TLS settings.
+
+![Nitrum AWS Deployment Overview](diagrams/output/nitrum-aws-overview.png)
+
+How to read the deployment overview:
+
+- The **left side** shows developer workflows (`nitrum build`, then `nitrum cloud deploy`) that produce and publish an EIF.
+- The **center** shows AWS infrastructure managed by the stack: VPC networking, NLB, EC2 Auto Scaling, KMS, DynamoDB, SSM, and CloudWatch.
+- The **right inner cluster** represents one Nitro-enabled EC2 instance with host control-plane stages: artifact download, `gvproxy` networking bootstrap, and enclave supervision/restart handling.
+- The **ACME edge between enclave ingress and Let's Encrypt** highlights that certificate issuance is initiated from inside the enclave data-plane.
+- The **user service -> crypto API edges** show enclave-local calls used by your app for attestation and encryption/decryption operations.
+- The **arrows from enclave services to KMS/DynamoDB/SSM/CloudWatch** represent runtime platform responsibilities (key management, durable state and cert persistence, env loading, and logs).
+- The **client -> NLB -> host -> enclave path** shows the external request entry path before request routing reaches your app.
 
 Conceptually:
 
