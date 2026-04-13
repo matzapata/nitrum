@@ -1,12 +1,11 @@
 ## Nitrum
 
-Nitrum is a **Rust** toolkit for running applications inside **AWS Nitro Enclaves**. It combines an in-enclave **data-plane**, a host **control-plane**, and a **`nitrum` CLI** that helps you scaffold projects, build EIF images, run a local Docker stack for testing, and deploy to AWS.
-
-If you are familiar with platforms like **Evervault Enclaves** \([docs](https://docs.evervault.com/enclaves)\), Nitrum plays a similar role: it focuses on **TLS termination, attestation, and networking inside the enclave**, so your application code can stay as close as possible to “regular” HTTP services.
-
 > **⚠️ WARNING:** Nitrum is **work in progress** and **not ready for production use**. APIs, features, and security properties may change at any time.  
 Please use for development, testing, and feedback only!
 
+Nitrum is a **Rust** toolkit for running applications inside **AWS Nitro Enclaves**. It combines an in-enclave **data-plane**, a host **control-plane**, and a **`nitrum` CLI** that helps you scaffold projects, build EIF images, run a local Docker stack for testing, and deploy to AWS.
+
+If you are familiar with platforms like [Evervault Enclaves](https://docs.evervault.com/enclaves) or [Nitriding daemon](https://github.com/brave/nitriding-daemon), Nitrum plays a similar role: it focuses on **TLS termination, attestation, and networking inside the enclave**, so your application code can stay as close as possible to “regular” HTTP services. On top of that, Nitrum adds utilities for attestation, encryption with key synchronization, and a CLI to manage the entire development workflow—from local testing to production deployment.
 
 ### Goals
 
@@ -32,14 +31,14 @@ curl -fsSL https://raw.githubusercontent.com/matzapata/nitrum/develop/scripts/in
 
 Optional environment variables:
 
-- **`NITRUM_VERSION`** — `latest` (default) or a tag such as `v0.1.0`
+- **`NITRUM_VERSION`** — `latest` (default) or a tag such as `v0.1.0-beta.1`
 - **`NITRUM_INSTALL_DIR`** — install directory (default: `~/.local/bin`)
 - **`NITRUM_REPO`** — `owner/name` if you use a fork (default: `matzapata/nitrum`)
 
 Example: install a specific release into `/usr/local/bin` (may require write permission):
 
 ```bash
-export NITRUM_VERSION=v0.1.0
+export NITRUM_VERSION=v0.1.0-beta.1
 export NITRUM_INSTALL_DIR=/usr/local/bin
 curl -fsSL https://raw.githubusercontent.com/matzapata/nitrum/develop/scripts/install-nitrum.sh | sudo -E bash
 ```
