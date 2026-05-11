@@ -94,8 +94,7 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 fn now_epoch_millis() -> i64 {
     let millis: i128 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis().cast_signed())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis().cast_signed());
 
     millis.try_into().unwrap_or(i64::MAX)
 }

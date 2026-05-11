@@ -45,7 +45,7 @@ impl Monitoring {
                 .with_log_group_name(&log_group)
                 .with_log_stream_name(&log_stream)
                 .with_batch_size(50)
-                .with_interval(Duration::from_millis(1000)),
+                .with_interval(Duration::from_secs(1)),
         );
 
         tracing_subscriber::registry()

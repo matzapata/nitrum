@@ -22,7 +22,7 @@ impl ImageDigestResolver {
     pub fn new() -> Result<Self> {
         let client = Client::builder()
             .user_agent(concat!("nitrum/", env!("CARGO_PKG_VERSION")))
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_mins(1))
             .build()
             .context("build HTTP client for container registry")?;
         Ok(Self { client })

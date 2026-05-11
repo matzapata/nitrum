@@ -101,8 +101,7 @@ impl AcmeState {
     fn renewal_due(inner: &AcmeClient, chain_pem: &str) -> bool {
         inner
             .duration_until_renewal(chain_pem)
-            .map(|d| d.as_secs() == 0)
-            .unwrap_or(true)
+            .map_or(true, |d| d.as_secs() == 0)
     }
 
     /// Sleep until renewal time then renew. Call in a loop after `get_or_provision`.
@@ -116,7 +115,7 @@ impl AcmeState {
             .duration_until_renewal(chain)
             .unwrap_or_else(|_| {
                 tracing::warn!("could not parse cert lifetime, sleeping 1h");
-                Duration::from_secs(3600)
+                Duration::from_hours(1)
             });
         tracing::info!(
             "next cert refresh in {} (at {:.0}% of cert life)",

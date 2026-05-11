@@ -113,7 +113,7 @@ impl Bucket {
                 if !head_object_is_not_found(&e) {
                     return Err(e.into());
                 }
-                let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let len = std::fs::metadata(path).map_or(0, |m| m.len());
                 info!(
                     %bucket,
                     %key,
