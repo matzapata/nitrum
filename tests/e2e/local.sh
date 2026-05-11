@@ -9,8 +9,8 @@
 #   ENCLAVE_URL              default: https://nitrum.local (override for http://127.0.0.1:443 if you prefer)
 #   ENCLAVE_TLS_INSECURE     default: 1
 #   NITRUM_LOCAL_LOGS_TAIL   passed to `nitrum local logs --tail` (default: 80)
-#   NITRUM_DEV_DATA_PLANE_IMAGE or NITRUM_LOCAL_DATA_PLANE_IMAGE
-#                            if unset, e2e builds a pebble data-plane image once and uses it
+#   NITRUM_LOCAL_DATA_PLANE_IMAGE
+#                            optional; if unset, e2e builds a pebble data-plane image once and uses it
 #   NITRUM_E2E_REBUILD_DATA_PLANE
 #                            if non-empty, force `docker build` even when the local tag exists
 #
@@ -39,13 +39,8 @@ E2E_DATA_PLANE_TAG="${NITRUM_E2E_DATA_PLANE_TAG:-nitrum-e2e-data-plane:local}"
 STACK_UP=0
 
 ensure_local_data_plane_image() {
-    if [[ -n "${NITRUM_DEV_DATA_PLANE_IMAGE:-}" ]]; then
-        echo "=== data-plane: using NITRUM_DEV_DATA_PLANE_IMAGE=${NITRUM_DEV_DATA_PLANE_IMAGE} ==="
-        return 0
-    fi
     if [[ -n "${NITRUM_LOCAL_DATA_PLANE_IMAGE:-}" ]]; then
         echo "=== data-plane: using NITRUM_LOCAL_DATA_PLANE_IMAGE=${NITRUM_LOCAL_DATA_PLANE_IMAGE} ==="
-        export NITRUM_DEV_DATA_PLANE_IMAGE="${NITRUM_LOCAL_DATA_PLANE_IMAGE}"
         return 0
     fi
     if [[ -n "${NITRUM_E2E_REBUILD_DATA_PLANE:-}" ]] || ! docker image inspect "${E2E_DATA_PLANE_TAG}" >/dev/null 2>&1; then
@@ -58,7 +53,7 @@ ensure_local_data_plane_image() {
     else
         echo "=== data-plane: reuse image ${E2E_DATA_PLANE_TAG} (set NITRUM_E2E_REBUILD_DATA_PLANE=1 to rebuild) ==="
     fi
-    export NITRUM_DEV_DATA_PLANE_IMAGE="${E2E_DATA_PLANE_TAG}"
+    export NITRUM_LOCAL_DATA_PLANE_IMAGE="${E2E_DATA_PLANE_TAG}"
 }
 
 nitrum() {

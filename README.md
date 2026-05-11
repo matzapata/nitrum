@@ -60,6 +60,8 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 
 - **Architecture** — how the control-plane, data-plane, TLS, attestation, and AWS integrations fit together:  
   [docs/architecture.md](docs/architecture.md)
+- **Networking** — how enclave traffic flows through `tap`, `gvproxy`, ingress, and IMDS/AWS egress paths:  
+  [docs/networking.md](docs/networking.md)
 - **Usage** — CLI commands, configuration (`nitrum.toml`), and workflows for local and cloud deployments:  
   [docs/usage.md](docs/usage.md)
 - **Contributing** — development environment, style, and CI details:  

@@ -22,7 +22,7 @@
 #   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 #
 # Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
-# LocalStack SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
+# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
 # `.nitrum/local-stack.yml` to refresh this template after upgrading the CLI.
 
 configs:
@@ -93,30 +93,32 @@ services:
     ports:
       - "1338:1338"
 
-  # LocalStack: SSM + DynamoDB + KMS on 4566 (SSM params, table, symmetric DEK CMK).
-  localstack:
-    # Pinned: `latest` (2026.x) expects LOCALSTACK_AUTH_TOKEN; 3.7.x runs without a license for local dev.
-    image: localstack/localstack:3.7.2
+  # Floci: AWS-compatible SSM + DynamoDB + KMS on 4566 (SSM params, table, symmetric DEK CMK).
+  aws:
+    image: floci/floci:1.5.5
     platform: linux/amd64
     environment:
-      - SERVICES=ssm,dynamodb,kms
       - AWS_DEFAULT_REGION=us-east-1
+      - FLOCI_DEFAULT_REGION=us-east-1
     ports:
       - "4566:4566"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 5s
-      timeout: 10s
-      retries: 40
-      start_period: 60s
+      # Match upstream Floci image (Alpine: wget, not curl). JVM warm-up on emulated amd64 can exceed a short window.
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4566/_floci/health"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 120s
 
   # One-shot: create DynamoDB table + SSM params expected by the data-plane (see crates/data-plane/src/utils/ssm.rs).
-  localstack-init:
+  aws-init:
     image: amazon/aws-cli:latest
     platform: linux/amd64
     depends_on:
-      localstack:
-        condition: service_healthy
+      aws:
+        # Do not wait for Docker "healthy" — Floci/JVM startup can exceed healthcheck limits on slow or emulated CPUs.
+        # The script below polls the DynamoDB API until the emulator responds.
+        condition: service_started
     environment:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
@@ -128,13 +130,19 @@ services:
     command:
       - |
         set -e
-        echo "Waiting for LocalStack..."
-        for i in $$(seq 1 60); do
-          if aws --endpoint-url=http://localstack:4566 dynamodb list-tables >/dev/null 2>&1; then
+        echo "Waiting for Floci (service aws) to accept AWS API calls..."
+        ok=0
+        for i in $$(seq 1 180); do
+          if aws --endpoint-url=http://aws:4566 dynamodb list-tables >/dev/null 2>&1; then
+            ok=1
             break
           fi
           sleep 1
         done
+        if [ "$$ok" != 1 ]; then
+          echo "Timed out after 180s — check: docker compose logs aws"
+          exit 1
+        fi
         
         PROJECT_NAME=dev
         if [ -f /nitrum-project/nitrum.toml ]; then
@@ -147,24 +155,24 @@ services:
         DP_PREFIX="/nitrum/$$PROJECT_NAME/data-plane"
         ENV_PREFIX="/nitrum/$$PROJECT_NAME/env"
         
-        aws --endpoint-url=http://localstack:4566 dynamodb create-table \
+        aws --endpoint-url=http://aws:4566 dynamodb create-table \
           --table-name "$$PROJECT_NAME" \
           --attribute-definitions AttributeName=pk,AttributeType=S \
           --key-schema AttributeName=pk,KeyType=HASH \
           --billing-mode PAY_PER_REQUEST 2>/dev/null || true
         
-        KMS_KEY_ID=$$(aws --endpoint-url=http://localstack:4566 kms create-key \
+        KMS_KEY_ID=$$(aws --endpoint-url=http://aws:4566 kms create-key \
           --description nitrum-local-symmetric-data-key \
           --query KeyMetadata.KeyId --output text)
         
-        aws --endpoint-url=http://localstack:4566 ssm put-parameter \
+        aws --endpoint-url=http://aws:4566 ssm put-parameter \
           --name "$${DP_PREFIX}/kms_key_id" --value "$$KMS_KEY_ID" --type String --overwrite
         
-        aws --endpoint-url=http://localstack:4566 ssm put-parameter \
+        aws --endpoint-url=http://aws:4566 ssm put-parameter \
           --name "$${DP_PREFIX}/dynamodb_table" --value "$$PROJECT_NAME" --type String --overwrite
         
         if [ -f /nitrum-project/.env.local ]; then
-          echo "Syncing .env.local to LocalStack SSM under $$ENV_PREFIX ..."
+          echo "Syncing .env.local to SSM (Floci) under $$ENV_PREFIX ..."
           HASH=$$(printf '\043')
           while IFS= read -r line || [ -n "$$line" ]; do
             line=$$(printf '%s' "$$line" | tr -d '\r')
@@ -180,7 +188,7 @@ services:
               echo "  skip invalid key: $$key"
               continue
             fi
-            if aws --endpoint-url=http://localstack:4566 ssm put-parameter \
+            if aws --endpoint-url=http://aws:4566 ssm put-parameter \
               --name "$${ENV_PREFIX}/$$key" --value "$$val" --type SecureString --overwrite; then
               echo "  $$key"
             else
@@ -191,7 +199,7 @@ services:
           echo "No .env.local (optional); skipping app env SSM seed."
         fi
         
-        echo "LocalStack init done."
+        echo "aws-init (Floci seed) done."
 
   pebble:
     image: ghcr.io/letsencrypt/pebble:latest
@@ -223,7 +231,7 @@ services:
         aliases:
           - nitrum.local
     depends_on:
-      localstack-init:
+      aws-init:
         condition: service_completed_successfully
       imds:
         condition: service_started
@@ -234,11 +242,11 @@ services:
 
       # Only for local dev
       NITRUM_IMDS_BASE_URL: http://imds:1338/latest
-      NITRUM_SSM_ENDPOINT_URL: http://localstack:4566
-      NITRUM_DYNAMODB_ENDPOINT_URL: http://localstack:4566
+      NITRUM_SSM_ENDPOINT_URL: http://aws:4566
+      NITRUM_DYNAMODB_ENDPOINT_URL: http://aws:4566
       NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"
       NITRUM_ACME_DIRECTORY_URL: https://pebble:14000/dir
-      NITRUM_KMS_ENDPOINT_URL: http://localstack:4566
+      NITRUM_KMS_ENDPOINT_URL: http://aws:4566
       PEBBLE_MINICA_CERT: |
         -----BEGIN CERTIFICATE-----
         MIIDPzCCAiegAwIBAgIIU0Xm9UFdQxUwDQYJKoZIhvcNAQELBQAwIDEeMBwGA1UE

@@ -128,7 +128,7 @@ Local development via Docker Compose:
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
 
-By default, `nitrum local up` uses `runtime.data_plane` as the enclave Dockerfile `DATA_PLANE_IMAGE` arg. If you need a different image just for local development (for example a Pebble-enabled or unpublished tag), override it at runtime with `NITRUM_DEV_DATA_PLANE_IMAGE` (or the older compatibility variable `NITRUM_LOCAL_DATA_PLANE_IMAGE`).
+The enclave Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from the environment variable `NITRUM_LOCAL_DATA_PLANE_IMAGE` if set; otherwise it defaults to `ghcr.io/matzapata/nitrum/data-plane:latest-dev`. Use a local or Pebble-enabled build when you are not using that default (for example the image produced by `tests/e2e/local.sh`).
 
 Use this while iterating on your application code before pushing a new EIF to AWS.
 
