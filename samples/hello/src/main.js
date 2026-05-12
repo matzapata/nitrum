@@ -55,6 +55,21 @@ app.post("/random", async (req, res) => {
   res.json(data);
 });
 
+app.post("/kv", async (req, res) => {
+  try {
+    const { key = "hello/default", value = `kv-${Date.now()}` } = req.body || {};
+    const headers = { "Content-Type": "application/json" };
+
+    await axios.post("http://localhost:3000/kv/set", { key, value }, { headers });
+    const { data } = await axios.post("http://localhost:3000/kv/get", { key }, { headers });
+
+    res.json({ key, value: data.data });
+  } catch (err) {
+    console.error(`[server] kv error: ${err.message}`);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.get("/env", async (_req, res) => {
   res.json({ env: process.env.DEMO });
 });

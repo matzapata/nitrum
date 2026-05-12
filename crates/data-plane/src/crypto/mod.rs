@@ -5,6 +5,7 @@
 pub mod api;
 mod attest;
 mod client;
+mod kv;
 mod kms;
 mod random;
 

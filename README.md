@@ -77,10 +77,11 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 
 Nitrum is released under the **MIT** license. See `LICENSE` for details.
 
-<!-- 
+<!--
 TODO:
 
-- [] Storage api
-- [] Cloudformation template export
-- [] include build git hash in docker image as label
- -->
+- [ ] Egress whitelist
+- [ ] Logs, filter sensitive values, headers, etc?
+- [ ] Cloudformation template consolidation and export / import
+- [ ] Include build git hash in docker image as label
+-->

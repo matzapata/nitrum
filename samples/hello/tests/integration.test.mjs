@@ -118,6 +118,19 @@ describe("nitrum project (integration)", () => {
     assert.ok(data && typeof data === "object");
   });
 
+  it("POST /kv round-trips via data-plane KV storage", async () => {
+    const key = `e2e_kv_${Date.now()}`;
+    const value = "nitrum-kv-test";
+    const data = await fetchJson(`${baseUrl}/kv`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    });
+    assert.ok(data && typeof data === "object");
+    assert.equal(data.key, key);
+    assert.equal(data.value, value);
+  });
+
   it("GET /env returns JSON", async () => {
     const data = await fetchJson(`${baseUrl}/env`);
     assert.ok(data && typeof data === "object");

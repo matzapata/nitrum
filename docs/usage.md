@@ -48,7 +48,7 @@ When `[tls_termination].acme` is enabled:
 
 ### Data-plane crypto HTTP API (internal)
 
-When you run `nitrum local up` or deploy with `nitrum cloud deploy`, the in-enclave data-plane serves a small JSON HTTP API for encryption and randomness on `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `**0.0.0.0:3000`**). Application code inside the enclave typically calls `http://localhost:3000/...`.
+When you run `nitrum local up` or deploy with `nitrum cloud deploy`, the in-enclave data-plane serves a small JSON HTTP API for encryption, key-value storage, and randomness on `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `**0.0.0.0:3000`**). Application code inside the enclave typically calls `http://localhost:3000/...`.
 
 #### Endpoints reachable from application code
 
@@ -82,6 +82,26 @@ The request must use `Content-Type: application/json` with a body of the form:
   }
   ```
   Invalid Base64 may yield `400 Bad Request`; decryption failures or decrypted bytes that are not valid UTF-8 may yield `422 Unprocessable Entity`, with `data` set to `null` and an `error` message.
+- `POST /kv/set` Stores a UTF-8 string under a logical key in shared DynamoDB storage. The value is encrypted with the same KMS-backed DEK as `/encrypt` before persistence (`set_object` overwrites any existing value for that key).  
+  Request body:
+  ```
+  {
+    "key": "<logical key>",
+    "value": "<UTF-8 string>"
+  }
+  ```
+  The logical `key` must be non-empty, at most 512 bytes, and may contain only ASCII letters, digits, and `_ : @ . / -`. The `value` must not exceed 384 KiB (UTF-8 byte length).  
+  Success: `200 OK` with `{ "data": "ok", "error": null }`.  
+  Validation errors: `400 Bad Request`. Encryption or storage failures: `500 Internal Server Error`.
+- `POST /kv/get` Loads and decrypts a value previously stored with `/kv/set`.  
+  Request body:
+  ```
+  {
+    "key": "<logical key, same rules as /kv/set>"
+  }
+  ```
+  Success: `200 OK` with `{ "data": "<original plaintext string>", "error": null }`.  
+  Missing key: `404 Not Found`. Invalid key: `400 Bad Request`. Decryption failure or non-UTF-8 plaintext after decrypt: `422 Unprocessable Entity`. Storage errors: `500 Internal Server Error`.
 - `POST /random` Returns cryptographically secure random bytes.  
 The request may be empty or use `Content-Type: application/json` with an optional body:
   ```
@@ -97,7 +117,7 @@ The request may be empty or use `Content-Type: application/json` with an optiona
   }
   ```
 
-The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip and `/random` over HTTP. The `samples/wallet/enclave/src/main.js` sample builds on the same primitives to encrypt a wallet key and use it for signing without ever exposing the raw private key to the client.
+The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `samples/wallet/enclave/src/main.js` sample uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext` while still returning it in the HTTP response for the client-driven signing flow.
 
 ## Commands
 

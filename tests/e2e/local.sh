@@ -13,6 +13,7 @@
 #                            optional; if unset, e2e builds a pebble data-plane image once and uses it
 #   NITRUM_E2E_REBUILD_DATA_PLANE
 #                            if non-empty, force `docker build` even when the local tag exists
+#                            (set after changing data-plane code, e.g. new crypto HTTP routes)
 #
 # Add 127.0.0.1 nitrum.local to /etc/hosts if needed.
 #

@@ -48,6 +48,18 @@ async function random(length) {
   return Buffer.from(data, "base64");
 }
 
+async function kvSet(key, value) {
+  const { data: { data, error } } = await axios.post(
+    "http://localhost:3000/kv/set",
+    { key, value },
+    { headers: { "Content-Type": "application/json" } },
+  );
+  if (error) {
+    throw new Error(`[enclave] kv set error: ${error}`);
+  }
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP surface for the enclave
 // ---------------------------------------------------------------------------
@@ -77,6 +89,8 @@ app.post("/wallet", async (req, res) => {
       privateKey: privateKey.toString("hex"),
       secret,
     }));
+
+    await kvSet("wallet:demo_last_ciphertext", ciphertext);
 
     res.json({ ciphertext });
   } catch (err) {

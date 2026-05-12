@@ -1,6 +1,7 @@
 //! Provide internal api for crypto operations.
 
 use super::attest::get_attestation_doc;
+use super::kv::{EnclaveKvStore, KvStoreError};
 use crate::state::DataPlaneState;
 use anyhow::Context;
 use axum::{
@@ -14,9 +15,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
-/// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
+/// Run the crypto API server (attestation, encrypt, decrypt, KV) until the process exits.
 pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
     let addr = state.config.crypto_api_listen_addr;
     let listener = tokio::net::TcpListener::bind(addr)
@@ -31,6 +32,8 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         .route("/attestation", post(attestation))
         .route("/encrypt", post(encrypt))
         .route("/decrypt", post(decrypt))
+        .route("/kv/set", post(kv_set))
+        .route("/kv/get", post(kv_get))
         .with_state(state);
 
     axum::serve(listener, router)
@@ -201,6 +204,78 @@ async fn decrypt(
         StatusCode::OK,
         [("content-type", "application/json")],
         json!({ "data": plaintext, "error": null }).to_string(),
+    )
+        .into_response()
+}
+
+// ── KV storage (DEK-wrapped values in DynamoDB) ────────────────────────────
+
+#[derive(Deserialize)]
+struct KvSetRequest {
+    /// Logical key (namespaced to `kv:` in storage; validated).
+    key: String,
+    /// UTF-8 plaintext stored encrypted at rest.
+    value: String,
+}
+
+#[derive(Deserialize)]
+struct KvGetRequest {
+    /// Logical key previously passed to `/kv/set`.
+    key: String,
+}
+
+async fn kv_set(
+    State(state): State<Arc<DataPlaneState>>,
+    Json(req): Json<KvSetRequest>,
+) -> impl IntoResponse {
+    let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
+    if let Err(e) = store.set(&req.key, &req.value).await {
+        return kv_error_response(e);
+    }
+
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        json!({ "data": "ok", "error": null }).to_string(),
+    )
+        .into_response()
+}
+
+async fn kv_get(
+    State(state): State<Arc<DataPlaneState>>,
+    Json(req): Json<KvGetRequest>,
+) -> impl IntoResponse {
+    let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
+    let value = match store.get(&req.key).await {
+        Ok(v) => v,
+        Err(e) => return kv_error_response(e),
+    };
+
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        json!({ "data": value, "error": null }).to_string(),
+    )
+        .into_response()
+}
+
+fn kv_error_response(err: KvStoreError) -> axum::response::Response {
+    let (status, msg) = match &err {
+        KvStoreError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
+        KvStoreError::NotFound => (StatusCode::NOT_FOUND, err.to_string()),
+        KvStoreError::Unprocessable(m) => {
+            warn!(error = %m, "kv request failed (unprocessable)");
+            (StatusCode::UNPROCESSABLE_ENTITY, m.clone())
+        }
+        KvStoreError::Internal(e) => {
+            warn!(error = %format!("{e:#}"), "kv request failed (internal)");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
+        }
+    };
+    (
+        status,
+        [("content-type", "application/json")],
+        json!({ "data": null, "error": msg }).to_string(),
     )
         .into_response()
 }

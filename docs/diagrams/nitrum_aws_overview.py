@@ -74,7 +74,9 @@ def build_diagram() -> None:
                         with Cluster("Nitro Enclave"):
                             ingress = Server("data-plane ingress\nTLS + ACME + attestation")
                             user_service = Server("user service")
-                            crypto = Server("crypto API\nlocalhost:3000\nattestation + encrypt/decrypt")
+                            crypto = Server(
+                                "crypto API\nlocalhost:3000\nattestation + encrypt/decrypt + kv"
+                            )
 
         build >> Edge(label="upload EIF") >> eif_bucket
         deploy >> Edge(label="provisions") >> asg
@@ -97,7 +99,7 @@ def build_diagram() -> None:
         control_plane >> Edge(label="establish vsock / TAP + supervise restart") >> ingress
         ingress >> Edge(label="reverse proxy app traffic") >> user_service
         user_service >> Edge(label="POST /attestation") >> crypto
-        user_service >> Edge(label="POST /encrypt, /decrypt") >> crypto
+        user_service >> Edge(label="POST /encrypt, /decrypt, /kv/set, /kv/get") >> crypto
         ingress >> Edge(label="ACME challenge + finalize") >> acme_ca
         acme_ca >> Edge(label="issued certificate chain") >> ingress
 
