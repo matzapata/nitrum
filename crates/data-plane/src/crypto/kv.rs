@@ -39,7 +39,7 @@ pub struct EnclaveKvStore {
 
 impl EnclaveKvStore {
     /// Builds a store from shared clients.
-    pub fn new(storage: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
+    pub const fn new(storage: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
         Self { storage, crypto }
     }
 
@@ -139,9 +139,6 @@ mod tests {
 
     #[test]
     fn kv_object_key_format() {
-        assert_eq!(
-            crate::storage::keys::kv_object_key("mykey"),
-            "kv:mykey"
-        );
+        assert_eq!(crate::storage::keys::kv_object_key("mykey"), "kv:mykey");
     }
 }

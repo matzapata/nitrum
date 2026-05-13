@@ -5,8 +5,8 @@
 pub mod api;
 mod attest;
 mod client;
-mod kv;
 mod kms;
+mod kv;
 mod random;
 
 pub use attest::get_attestation_doc;
