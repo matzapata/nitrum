@@ -15,7 +15,7 @@ RUN cd gvisor-tap-vsock && CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -ldfla
 # control-plane builder
 ################################################################################
 
-FROM rust:1.92-slim AS control-plane-builder
+FROM rust:1.95-slim AS control-plane-builder
 
 WORKDIR /build
 
@@ -27,14 +27,17 @@ COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
+COPY crates/observability/Cargo.toml crates/observability/Cargo.toml
 
 # Stub sources so workspace members parse (control-plane depends on config; cli/data-plane are workspace members).
-RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src \
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/observability/src \
 && echo 'fn main() {}' > crates/cli/src/main.rs \
 && echo 'fn main() {}' > crates/data-plane/src/main.rs \
-&& echo 'fn main() {}' > crates/control-plane/src/main.rs
+&& echo 'fn main() {}' > crates/control-plane/src/main.rs \
+&& echo 'pub fn noop() {}' > crates/observability/src/lib.rs
 
 COPY crates/config/src crates/config/src
+COPY crates/observability/src crates/observability/src
 COPY crates/control-plane/src crates/control-plane/src
 
 RUN cargo build --release -p control-plane --target x86_64-unknown-linux-musl

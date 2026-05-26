@@ -14,6 +14,7 @@ use crate::crypto::CryptoClient;
 use crate::state::DataPlaneState;
 use crate::storage::StorageClient;
 use clap::Parser;
+use observability::{Component, Telemetry, TelemetryConfig};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -36,14 +37,6 @@ async fn main() {
         .install_default()
         .expect("failed to install default rustls crypto provider");
 
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let Args {
         config,
         command: cli_command,
@@ -54,16 +47,25 @@ async fn main() {
     #[cfg(feature = "enclave")]
     networking::init().await;
     #[cfg(not(feature = "enclave"))]
-    info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
+    eprintln!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
 
     let runtime_config = RuntimeConfig::load(&config).await.unwrap_or_else(|e| {
-        error!(
-            error = %format!("{:#}", e),
-            config_path = %config.display(),
-            "failed to load runtime config"
+        eprintln!(
+            "failed to load runtime config from {}: {e:#}",
+            config.display()
         );
         std::process::exit(1);
     });
+
+    let stream_suffix = format!("{}-{}", runtime_config.instance_id, std::process::id());
+    let telemetry = Telemetry::init(TelemetryConfig {
+        project: runtime_config.nitrum.project.name.clone(),
+        component: Component::DataPlane,
+        log_stream_suffix: stream_suffix,
+        aws_config: Some(runtime_config.aws_sdk_config.clone()),
+        cloudwatch: true,
+    })
+    .await;
 
     let user_command: Vec<String> = if cli_command.is_empty() {
         runtime_config.nitrum.project.start_command.clone()
@@ -80,6 +82,7 @@ async fn main() {
             .await
             .unwrap_or_else(|e| {
                 error!(
+                    error.kind = "crypto_setup",
                     error = %format!("{:#}", e),
                     "crypto setup failed"
                 );
@@ -99,7 +102,7 @@ async fn main() {
     tokio::spawn(async move {
         info!("API task starting");
         if let Err(e) = crypto::api::run(crypto_state).await {
-            error!(error = %e, "API task failed");
+            error!(error.kind = "crypto_api", error = %e, "API task failed");
         }
         tracing::warn!("API task exited");
     });
@@ -109,7 +112,7 @@ async fn main() {
     tokio::spawn(async move {
         info!("ingress task starting");
         if let Err(e) = server::ingress::run(ingress_state).await {
-            error!(error = %e, "ingress task failed");
+            error!(error.kind = "ingress", error = %e, "ingress task failed");
         }
         tracing::warn!("ingress task exited");
     });
@@ -119,12 +122,13 @@ async fn main() {
         info!("no command provided, running until SIGINT");
         let _ = tokio::signal::ctrl_c().await;
         info!("received SIGINT, shutting down");
+        telemetry.shutdown().await;
         0
     } else {
-        tokio::select! {
+        let code = tokio::select! {
             result = server::runner::run(&user_command, &runtime_config.user_env) => {
                 result.unwrap_or_else(|e| {
-                    tracing::error!(error = %e, "failed to run user process");
+                    tracing::error!(error.kind = "user_process", error = %e, "failed to run user process");
                     1
                 })
             }
@@ -132,7 +136,9 @@ async fn main() {
                 info!("received SIGINT, shutting down");
                 0
             }
-        }
+        };
+        telemetry.shutdown().await;
+        code
     };
 
     std::process::exit(exit_code);

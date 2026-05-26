@@ -2,7 +2,7 @@
 # chef — installs cargo-chef once, reused by both planner and builder
 ################################################################################
 
-FROM rust:1.92-slim AS chef
+FROM rust:1.95-slim AS chef
 
 WORKDIR /build
 
@@ -25,12 +25,14 @@ COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/config/Cargo.toml         crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml     crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml            crates/cli/Cargo.toml
+COPY crates/observability/Cargo.toml  crates/observability/Cargo.toml
 
 # Stub all workspace members so `cargo chef prepare` can resolve the full graph
-RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/config/src \
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/config/src crates/observability/src \
     && echo 'fn main() {}' > crates/cli/src/main.rs \
     && echo 'fn main() {}' > crates/control-plane/src/main.rs \
     && echo 'fn main() {}' > crates/data-plane/src/main.rs \
+    && echo 'pub fn noop() {}' > crates/observability/src/lib.rs \
     && touch crates/config/src/lib.rs
 
 RUN cargo chef prepare --recipe-path recipe.json
@@ -57,6 +59,8 @@ COPY crates/config/src      crates/config/src
 COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/src  crates/data-plane/src
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
+COPY crates/observability/src crates/observability/src
+COPY crates/observability/Cargo.toml crates/observability/Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/cli/Cargo.toml  crates/cli/Cargo.toml
 
@@ -79,6 +83,8 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       io.nitrum.git.sha="${GIT_SHA}"
 
 RUN apk update && apk upgrade && apk --no-cache add iproute2
+
+ENV NITRUM_LOG_FORMAT=json
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
 RUN chmod +x /app/data-plane

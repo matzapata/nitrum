@@ -21,6 +21,7 @@ pub struct CryptoClient {
 
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
+    #[tracing::instrument(name = "crypto_client_init", skip(config, storage))]
     pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
         let kms = Kms::new(&config);
 

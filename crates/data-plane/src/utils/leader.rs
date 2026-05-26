@@ -27,6 +27,7 @@ impl Leader {
     }
 
     /// Try to become leader for this lock. Returns a guard if this instance got the lock.
+    #[tracing::instrument(name = "leader_acquire", skip(self), fields(lock_key = %self.key, owner = %self.owner))]
     pub async fn try_acquire_leader(&self) -> Result<Option<LeaderGuard>> {
         let acquired = self
             .storage
@@ -55,6 +56,7 @@ pub struct LeaderGuard {
 
 impl LeaderGuard {
     /// Release the lock immediately so another instance can become leader.
+    #[tracing::instrument(name = "leader_release", skip(self), fields(lock_key = %self.key, owner = %self.owner))]
     #[allow(dead_code)]
     pub async fn release(self) -> Result<()> {
         self.storage.release_lock(&self.key, &self.owner).await

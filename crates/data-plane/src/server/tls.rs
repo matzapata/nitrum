@@ -93,6 +93,7 @@ impl TlsState {
 
     /// Drive the ACME state machine. Returns `Ok(event)` on success, `Err` on failure.
     /// When `CertRenewed` is returned the `RustlsConfig` has already been hot-reloaded.
+    #[tracing::instrument(name = "tls_acme_next", skip(self))]
     pub async fn next(&mut self) -> Result<AcmeEvent> {
         let needs_provision = self
             .acme_state

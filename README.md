@@ -83,6 +83,6 @@ Nitrum is released under the **MIT** license. See `LICENSE` for details.
 TODO:
 
 - [ ] Egress whitelist
-- [ ] Logs, filter sensitive values, headers, etc?
+- [x] Logs, filter sensitive values, headers, etc? (see `crates/observability`)
 - [ ] Cloudformation template consolidation and export / import
 -->

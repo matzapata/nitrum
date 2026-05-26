@@ -761,7 +761,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e NITRUM_LOG_FORMAT=json -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]

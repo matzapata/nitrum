@@ -59,6 +59,7 @@ impl AcmeState {
     /// The ACME leader lock is taken only when storage is missing a cert/key pair or the stored
     /// leaf is due for renewal. While waiting for the lock, storage is re-polled so followers pick
     /// up a cert as soon as another instance writes it.
+    #[tracing::instrument(name = "acme_get_or_provision", skip(self), fields(domain = %self.domain))]
     pub async fn get_or_provision(&self) -> Result<(String, String)> {
         loop {
             if let Some(pair) = self.cert_storage.read_cert_pair().await? {
@@ -105,6 +106,7 @@ impl AcmeState {
     }
 
     /// Sleep until renewal time then renew. Call in a loop after `get_or_provision`.
+    #[tracing::instrument(name = "acme_next", skip(self), fields(domain = %self.domain))]
     pub async fn next(&mut self) -> Result<AcmeEvent> {
         let chain = self
             .current_chain

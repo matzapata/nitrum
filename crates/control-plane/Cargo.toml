@@ -14,13 +14,11 @@ enclave = []
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+observability = { path = "../observability" }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-cloudwatchlogs = "1"
 aws-sdk-s3 = "1"
-tracing-cloudwatch = { version = "0.4", features = ["awssdk"] }
 anyhow = "1"

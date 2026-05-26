@@ -6,11 +6,24 @@ use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum LogService {
+    /// Host control-plane (`/nitrum/{project}/control-plane`).
+    #[value(name = "control-plane")]
+    ControlPlane,
+    /// In-enclave data-plane (`/nitrum/{project}/data-plane`).
+    #[value(name = "data-plane")]
+    DataPlane,
+}
+
 #[derive(Args)]
 pub struct LogsArgs {
     /// Use this project name instead of `project.name` in nitrum.toml (CloudFormation/S3/SSM/Docker tag)
     #[arg(long = "as", value_name = "NAME")]
     pub as_name: Option<String>,
+    /// Which Nitrum service log group to tail.
+    #[arg(long = "service", value_enum, default_value_t = LogService::ControlPlane)]
+    pub service: LogService,
     /// Project directory (default: current directory)
     #[arg(short, long)]
     pub path: Option<PathBuf>,
@@ -37,7 +50,11 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 
     let aws_sdk_config = aws_config::load_from_env().await;
     let client = aws_sdk_cloudwatchlogs::Client::new(&aws_sdk_config);
-    let log_group = format!("/nitrum/{}/control-plane", config.project.name);
+    let suffix = match args.service {
+        LogService::ControlPlane => "control-plane",
+        LogService::DataPlane => "data-plane",
+    };
+    let log_group = format!("/nitrum/{}/{}", config.project.name, suffix);
 
     let now_ms = now_epoch_millis();
     let lookback_ms = (args.since_minutes.saturating_mul(60).saturating_mul(1000)).cast_signed();

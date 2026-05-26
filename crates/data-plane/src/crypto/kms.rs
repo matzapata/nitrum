@@ -46,6 +46,7 @@ impl Kms {
     }
 
     /// [`GenerateDataKeyWithoutPlaintext`](https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateDataKeyWithoutPlaintext.html) (AES-256). Persist the returned blob; recover bytes via [`Self::decrypt_with_attestation`].
+    #[tracing::instrument(name = "kms_generate_dek", skip(self), fields(key_id = %self.key_id))]
     pub async fn generate_dek_envelope(&self) -> Result<Vec<u8>> {
         let ctx = self.kms_call_context("GenerateDataKeyWithoutPlaintext");
         let resp = self
@@ -67,6 +68,7 @@ impl Kms {
     }
 
     /// Unwrap the stored envelope: **enclave** = attested `Decrypt` + CMS unwrap; **non-enclave** = plain `Decrypt`.
+    #[tracing::instrument(name = "kms_decrypt_dek", skip(self, ciphertext), fields(key_id = %self.key_id, ciphertext_len = ciphertext.len()))]
     pub async fn decrypt_with_attestation(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         #[cfg(feature = "enclave")]
         {

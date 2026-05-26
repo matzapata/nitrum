@@ -178,9 +178,86 @@ At runtime, the data-plane loads every parameter under that path at startup (unl
 
 ### `nitrum cloud logs`
 
-Stream or poll CloudWatch Logs for the deployed data-plane or control-plane (`--service data-plane` or `control-plane`).
+Stream or poll CloudWatch Logs for the deployed control-plane or data-plane:
+
+```bash
+nitrum cloud logs --service control-plane   # default
+nitrum cloud logs --service data-plane
+```
+
+Useful flags: `--follow`, `--since-minutes`, `--filter` (CloudWatch filter pattern).
 
 This is the main way to debug enclaves in the field: look for TLS/ACME, KMS, or app‑level errors in these streams.
+
+## Observability and logging
+
+Nitrum control-plane and data-plane share the [`observability`](../crates/observability) crate: structured fields, optional JSON output, CloudWatch export, and redaction of sensitive values before logs are written.
+
+### CloudWatch log groups
+
+| Group | Writer | Contents |
+|-------|--------|----------|
+| `/nitrum/{project}/control-plane` | Host Docker `control-plane` | gvproxy, enclave supervisor, platform stderr |
+| `/nitrum/{project}/data-plane` | In-enclave `data-plane` | Ingress, KMS, ACME, crypto API, and **app** stdout/stderr |
+
+Log streams are named `{service}-{suffix}` (for example `control-plane-12345` on the host, `data-plane-i-0abc-42` inside the enclave using instance id and PID).
+
+### Environment variables
+
+| Variable | Where | Meaning |
+|----------|--------|---------|
+| `RUST_LOG` | control-plane, data-plane | `tracing` filter (default `info`; e.g. `info,app=debug`) |
+| `NITRUM_LOG_FORMAT` | both | `json` (production) or `human` (local); data-plane images default to `json` |
+| `NITRUM_PROJECT_NAME` | control-plane host | Enables CloudWatch on the host when set (CloudFormation sets this to `project.name`) |
+
+The data-plane does not require `NITRUM_PROJECT_NAME`; it reads `project.name` from `nitrum.toml` bundled in the EIF and exports to `/nitrum/{project}/data-plane` when AWS credentials are available (IMDS inside the enclave).
+
+### Structured fields
+
+Every log line includes:
+
+- `project` — `project.name` from `nitrum.toml`
+- `component` — `control-plane`, `data-plane`, or `app`
+
+Ingress requests add `request_id` (from `x-request-id` or a generated UUID). Failures should include `error.kind` (for example `ingress_proxy`, `kms_decrypt`, `acme_state`).
+
+### Platform logs vs application logs
+
+The data-plane forwards user process stdout/stderr with `tracing` target `app`. Those events appear in the **same** log group as platform logs (`/nitrum/{project}/data-plane`) with `component=app`. Platform code uses `component=data-plane`.
+
+**CloudWatch Logs Insights — application only:**
+
+```
+fields @timestamp, project, component, request_id, @message
+| filter component = "app"
+| sort @timestamp desc
+| limit 50
+```
+
+**Platform / data-plane errors:**
+
+```
+fields @timestamp, `error.kind`, @message
+| filter component = "data-plane" and ispresent(`error.kind`)
+| sort @timestamp desc
+| limit 50
+```
+
+**Ingress by request id:**
+
+```
+fields @timestamp, request_id, @message
+| filter ispresent(request_id) and @message like /ingress/
+| sort @timestamp desc
+```
+
+### Redaction
+
+Logs never include plaintext DEK material, TLS private keys, `Authorization` / `Cookie` header values, or raw KMS ciphertext blobs in debug paths. Field names such as `plaintext`, `ciphertext`, and `private_key` are scrubbed. See unit tests in `crates/observability/src/redact.rs`.
+
+### Local development
+
+Without CloudWatch (no `NITRUM_PROJECT_NAME` on the host, or no AWS reachability in the enclave), logs go to stderr only. Use `nitrum local logs` for Compose output, or set `NITRUM_LOG_FORMAT=human` and `RUST_LOG=debug` for readable local traces.
 
 ### `nitrum describe`
 

@@ -26,7 +26,8 @@ use axum::{
     body::{Body, to_bytes},
     extract::{Query, State},
     http::{Request, StatusCode},
-    response::IntoResponse,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use axum_server::bind;
@@ -34,7 +35,7 @@ use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{Instrument, info, warn};
 
 // ── public entry point ────────────────────────────────────────────────────────
 
@@ -59,8 +60,12 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         tokio::spawn(async move {
             loop {
                 match tls_state.next().await {
-                    Ok(ok) => tracing::info!("event: {ok:?}"),
-                    Err(err) => tracing::error!("error: {err:?}"),
+                    Ok(event) => tracing::info!(acme_event = ?event, "ACME state transition"),
+                    Err(err) => tracing::error!(
+                        error.kind = "acme_state",
+                        error = %err,
+                        "ACME state machine error"
+                    ),
                 }
             }
         });
@@ -86,6 +91,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
             https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
     }
     let https_router = https_router
+        .layer(middleware::from_fn(request_id_middleware))
         .fallback(ingress_proxy)
         .with_state(state.clone());
 
@@ -109,6 +115,20 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
 
 // ── handlers ─────────────────────────────────────────────────────────────────
 
+async fn request_id_middleware(request: Request<Body>, next: Next) -> Response {
+    let request_id = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let span = tracing::info_span!("ingress", request_id = %request_id);
+    next.run(request).instrument(span).await
+}
+
+#[tracing::instrument(name = "ingress_status", skip_all)]
 async fn ingress_status() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -122,6 +142,7 @@ struct IngressAttestationQuery {
     nonce: Option<String>,
 }
 
+#[tracing::instrument(name = "ingress_attestation", skip(state, q))]
 async fn ingress_attestation(
     State(state): State<Arc<DataPlaneState>>,
     Query(q): Query<IngressAttestationQuery>,
@@ -149,7 +170,7 @@ async fn ingress_attestation(
         )
             .into_response(),
         Err(e) => {
-            tracing::error!(error = %e, "attestation failed");
+            tracing::error!(error.kind = "attestation", error = %e, "attestation failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [("content-type", "application/json")],
@@ -160,6 +181,7 @@ async fn ingress_attestation(
     }
 }
 
+#[tracing::instrument(name = "ingress_proxy", skip(state, req), fields(url))]
 async fn ingress_proxy(
     State(state): State<Arc<DataPlaneState>>,
     req: Request<Body>,
@@ -170,12 +192,13 @@ async fn ingress_proxy(
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
     let forward_to = format!("127.0.0.1:{}", state.config.nitrum.project.port);
     let url = format!("http://{forward_to}{path_and_query}");
-    info!(url = %url, "ingress: proxying to app");
+    tracing::Span::current().record("url", url.as_str());
+    info!("ingress: proxying to app");
 
     let client = match reqwest::Client::builder().build() {
         Ok(c) => c,
         Err(e) => {
-            warn!(error = %e, "ingress: failed to create reqwest client");
+            warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to create reqwest client");
             return (StatusCode::BAD_GATEWAY, "proxy client error").into_response();
         }
     };
@@ -184,7 +207,7 @@ async fn ingress_proxy(
     let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
-            warn!(error = %e, "ingress: failed to read request body");
+            warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to read request body");
             return (StatusCode::BAD_REQUEST, "body read error").into_response();
         }
     };
@@ -208,7 +231,7 @@ async fn ingress_proxy(
     let backend_resp = match backend_req.send().await {
         Ok(r) => r,
         Err(e) => {
-            warn!(url = %url, error = %e, "ingress: proxy request failed");
+            warn!(error.kind = "ingress_proxy", error = %e, "ingress: proxy request failed");
             return (StatusCode::BAD_GATEWAY, "backend unreachable").into_response();
         }
     };
@@ -218,7 +241,7 @@ async fn ingress_proxy(
     let body = match backend_resp.bytes().await {
         Ok(b) => b,
         Err(e) => {
-            warn!(error = %e, "ingress: failed to read backend body");
+            warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to read backend body");
             return (StatusCode::BAD_GATEWAY, "backend body error").into_response();
         }
     };
