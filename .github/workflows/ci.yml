@@ -75,7 +75,7 @@ jobs:
           node-version: "22"
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=optional
       - name: Lint
         run: npm run lint -w nitrum-node
       - name: Typecheck
