@@ -43,6 +43,11 @@ impl AcmeClient {
         }
     }
 
+    #[tracing::instrument(
+        name = "acme_load_or_create_account",
+        skip(self),
+        fields(directory_url = %self.directory_url)
+    )]
     pub(crate) async fn load_or_create_account(
         &self,
     ) -> Result<(Account, Option<AccountCredentials>)> {
@@ -90,6 +95,7 @@ impl AcmeClient {
         }
     }
 
+    #[tracing::instrument(name = "acme_save_account", skip(self, credentials))]
     pub(crate) async fn save_account(&self, credentials: &AccountCredentials) -> Result<()> {
         let data = serde_json::to_string_pretty(credentials).context("serialize account")?;
         let enc = self
@@ -102,6 +108,11 @@ impl AcmeClient {
             .context("write acme account to storage")
     }
 
+    #[tracing::instrument(
+        name = "acme_provision_cert",
+        skip(self, account, storage),
+        fields(domain = %domain)
+    )]
     pub(crate) async fn provision_cert(
         &self,
         account: Account,
@@ -166,6 +177,11 @@ impl AcmeClient {
         Ok((chain, private_key.serialize_pem()))
     }
 
+    #[tracing::instrument(
+        name = "acme_duration_until_renewal",
+        skip(self, chain_pem),
+        fields(chain_len = chain_pem.len())
+    )]
     pub(crate) fn duration_until_renewal(&self, chain_pem: &str) -> Result<Duration> {
         let certs = rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()?;

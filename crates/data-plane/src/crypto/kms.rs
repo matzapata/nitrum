@@ -10,6 +10,7 @@ use crate::config::RuntimeConfig;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;
+use tracing::warn;
 
 /// KMS client bound to a specific key ID.
 pub struct Kms {
@@ -34,6 +35,10 @@ impl Kms {
         }
     }
 
+    fn log_kms_failure(kind: &'static str, err: &impl std::fmt::Display) {
+        warn!(error.kind = kind, error = %err, "KMS call failed");
+    }
+
     fn kms_call_context(&self, operation: &str) -> String {
         format!(
             "KMS {operation} (key_id={}, region={}, endpoint={})",
@@ -56,15 +61,18 @@ impl Kms {
             .key_spec(DataKeySpec::Aes256)
             .send()
             .await
+            .map_err(anyhow::Error::from)
             .with_context(|| {
                 format!(
                     "{ctx}; CMK must be symmetric ENCRYPT_DECRYPT. IAM: kms:GenerateDataKeyWithoutPlaintext."
                 )
-            })?;
+            })
+            .inspect_err(|e| Self::log_kms_failure("kms_generate_dek", e))?;
 
         resp.ciphertext_blob()
             .map(|b| b.as_ref().to_vec())
             .with_context(|| format!("{ctx}; empty ciphertext_blob"))
+            .inspect_err(|e| Self::log_kms_failure("kms_generate_dek", e))
     }
 
     /// Unwrap the stored envelope: **enclave** = attested `Decrypt` + CMS unwrap; **non-enclave** = plain `Decrypt`.
@@ -94,9 +102,12 @@ impl Kms {
             .public_key_to_der()
             .context("OpenSSL: export SPKI DER for attestation public_key field")?;
 
-        let attestation_doc =
-            crate::crypto::attest::get_attestation_doc(None, Some(public_der), None)
-                .map_err(|e| anyhow::anyhow!("attestation failed: {e}"))?;
+        let attestation_doc = crate::crypto::attest::get_attestation_doc(None, Some(public_der), None)
+            .map_err(|e| {
+                let err = anyhow::anyhow!("attestation failed: {e}");
+                Self::log_kms_failure("kms_decrypt", &err);
+                err
+            })?;
 
         let recipient = RecipientInfo::builder()
             .key_encryption_algorithm(KeyEncryptionMechanism::RsaesOaepSha256)
@@ -112,20 +123,25 @@ impl Kms {
             .recipient(recipient)
             .send()
             .await
+            .map_err(anyhow::Error::from)
             .with_context(|| {
                 format!(
                     "{ctx}. If AccessDenied: kms:Decrypt, key policy, or attestation / recipient mismatch."
                 )
-            })?;
+            })
+            .inspect_err(|e| Self::log_kms_failure("kms_decrypt", e))?;
 
         let ciphertext_for_recipient = resp
             .ciphertext_for_recipient()
             .with_context(|| {
                 format!("{ctx}; Decrypt succeeded but ciphertext_for_recipient missing")
-            })?
+            })
+            .inspect_err(|e| Self::log_kms_failure("kms_decrypt", e))?
             .as_ref();
 
-        unwrap_ciphertext_for_recipient_cms(ciphertext_for_recipient, &pkey, &ctx)
+        unwrap_ciphertext_for_recipient_cms(ciphertext_for_recipient, &pkey, &ctx).inspect_err(
+            |e| Self::log_kms_failure("kms_decrypt", e),
+        )
     }
 
     #[cfg(not(feature = "enclave"))]
@@ -138,13 +154,16 @@ impl Kms {
             .ciphertext_blob(Blob::new(ciphertext))
             .send()
             .await
+            .map_err(anyhow::Error::from)
             .with_context(|| {
                 format!("{ctx}. IAM kms:Decrypt. CMK must match the key that wrapped the data key.")
-            })?;
+            })
+            .inspect_err(|e| Self::log_kms_failure("kms_decrypt", e))?;
 
         resp.plaintext()
             .map(|b| b.as_ref().to_vec())
             .with_context(|| format!("{ctx}; response had no plaintext"))
+            .inspect_err(|e| Self::log_kms_failure("kms_decrypt", e))
     }
 }
 

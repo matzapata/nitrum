@@ -38,6 +38,7 @@ const SENSITIVE_FIELD_NAMES: &[&str] = &[
     "ciphertext_blob",
     "securestring",
     "ssm_value",
+    "user_env",
     "password",
     "secret",
 ];
@@ -83,6 +84,16 @@ pub fn redact_str(input: &str) -> String {
     }
 
     out
+}
+
+/// Redacts a structured tracing field value using the field name and string content.
+#[must_use]
+pub fn redact_field(name: &str, value: &str) -> String {
+    if is_sensitive_field_name(name) {
+        REDACTED.to_string()
+    } else {
+        redact_str(value)
+    }
 }
 
 /// Heuristic: long base64-ish blobs often wrap KMS ciphertext in debug paths.
@@ -138,5 +149,20 @@ mod tests {
     fn redacts_sensitive_field_names() {
         assert_eq!(redact_str("plaintext_dek"), REDACTED);
         assert_eq!(redact_str("ciphertext"), REDACTED);
+    }
+
+    #[test]
+    fn redacts_ssm_value_field_payload() {
+        let secret = "postgresql://user:password@db.example.com/app";
+        assert_eq!(redact_field("ssm_value", secret), REDACTED);
+        assert_eq!(redact_field("securestring", secret), REDACTED);
+        assert!(!redact_field("ssm_value", secret).contains("password"));
+    }
+
+    #[test]
+    fn redacts_user_env_debug_dump() {
+        let dump = r#"{"DATABASE_URL": "postgres://secret", "API_KEY": "sk-live-abc123"}"#;
+        assert_eq!(redact_field("user_env", dump), REDACTED);
+        assert!(!redact_field("user_env", dump).contains("sk-live"));
     }
 }

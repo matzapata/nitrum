@@ -2,7 +2,7 @@
 
 use crate::Component;
 use crate::format::LogFormat;
-use crate::redact::{REDACTED_PLACEHOLDER, is_sensitive_field_name, redact_str};
+use crate::redact::redact_field;
 use crate::span::{COMPONENT, PROJECT};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -53,21 +53,13 @@ impl Visit for FieldCollector {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         let name = field.name().to_string();
         let rendered = format!("{value:?}");
-        let out = if is_sensitive_field_name(&name) {
-            REDACTED_PLACEHOLDER.to_string()
-        } else {
-            redact_str(&rendered)
-        };
+        let out = redact_field(&name, &rendered);
         self.fields.insert(name, out);
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         let name = field.name().to_string();
-        let out = if is_sensitive_field_name(&name) {
-            REDACTED_PLACEHOLDER.to_string()
-        } else {
-            redact_str(value)
-        };
+        let out = redact_field(&name, value);
         self.fields.insert(name, out);
     }
 }
@@ -165,11 +157,7 @@ impl<'writer> FormatFields<'writer> for RedactingFieldFormatter {
                 self.first = false;
                 let name = field.name();
                 let rendered = format!("{value:?}");
-                let out = if is_sensitive_field_name(name) {
-                    REDACTED_PLACEHOLDER.to_string()
-                } else {
-                    redact_str(&rendered)
-                };
+                let out = redact_field(name, &rendered);
                 let _ = write!(self.writer, "{name}={out}");
             }
 
@@ -179,11 +167,7 @@ impl<'writer> FormatFields<'writer> for RedactingFieldFormatter {
                 }
                 self.first = false;
                 let name = field.name();
-                let out = if is_sensitive_field_name(name) {
-                    REDACTED_PLACEHOLDER.to_string()
-                } else {
-                    redact_str(value)
-                };
+                let out = redact_field(name, value);
                 let _ = write!(self.writer, "{name}={out}");
             }
         }

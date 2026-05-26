@@ -31,7 +31,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 pub use format::LogFormat as LogOutputFormat;
-pub use redact::redact_str;
+pub use redact::{redact_field, redact_str};
 
 /// Nitrum runtime component for the `component` log field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
