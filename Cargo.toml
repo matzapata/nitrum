@@ -2,6 +2,12 @@
 members = ["crates/cli", "crates/control-plane", "crates/data-plane", "crates/config"]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+
 [workspace.lints.rust]
 # Public API helpers and feature-gated code trip this under `-D warnings`.
 dead_code = "allow"

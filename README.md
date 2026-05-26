@@ -64,6 +64,8 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
   [docs/networking.md](docs/networking.md)
 - **Usage** — CLI commands, configuration (`nitrum.toml`), and workflows for local and cloud deployments:  
   [docs/usage.md](docs/usage.md)
+- **Releases** — SemVer, CHANGELOG, CI gates, and `nitrum.toml` compatibility:  
+  [docs/releases.md](docs/releases.md)
 - **Contributing** — development environment, style, and CI details:  
   [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -83,5 +85,4 @@ TODO:
 - [ ] Egress whitelist
 - [ ] Logs, filter sensitive values, headers, etc?
 - [ ] Cloudformation template consolidation and export / import
-- [ ] Include build git hash in docker image as label
 -->

@@ -4,7 +4,7 @@ tag := "v0.1.0"
 # ── dev tools ─────────────────────────────────────────
 
 check:
-    cargo check --all-targets
+    cargo check --all-targets --all-features
 
 lint:
     cargo clippy --all-targets --all-features
@@ -21,7 +21,7 @@ generate-diagrams:
 build-nitro-cli no_cache="":
     docker build \
         --platform linux/amd64 \
-        -f crates/cli/Dockerfile \
+        -f crates/cli/nitro-cli.dockerfile \
         {{ if no_cache == "true" { "--no-cache" } else { "" } }} \
         -t {{ tag_prefix }}nitro-cli:{{tag}} \
         -t {{ tag_prefix }}nitro-cli:latest \

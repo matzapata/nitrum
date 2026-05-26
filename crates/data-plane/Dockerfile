@@ -72,6 +72,12 @@ RUN if [ -n "$FEATURES" ]; then \
 
 FROM alpine:3.20 AS runtime
 
+ARG GIT_SHA=unknown
+ARG VERSION=dev
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.version="${VERSION}" \
+      io.nitrum.git.sha="${GIT_SHA}"
+
 RUN apk update && apk upgrade && apk --no-cache add iproute2
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
