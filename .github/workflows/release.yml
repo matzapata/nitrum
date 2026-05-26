@@ -33,7 +33,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push control-plane
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/control-plane/Dockerfile
@@ -53,7 +53,7 @@ jobs:
             ${{ env.GHCR_PREFIX }}/control-plane:latest
 
       - name: Build and push data-plane
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/data-plane/Dockerfile
@@ -74,7 +74,7 @@ jobs:
             ${{ env.GHCR_PREFIX }}/data-plane:latest
 
       - name: Build and push data-plane (local / pebble)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/data-plane/Dockerfile
@@ -95,7 +95,7 @@ jobs:
             ${{ env.GHCR_PREFIX }}/data-plane:latest-dev
 
       - name: Build and push nitro-cli
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/cli/nitro-cli.dockerfile
