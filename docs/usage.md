@@ -204,6 +204,39 @@ Options are defined in the `shared` crate; the sample project comments point to 
 
 Edit `nitrum.toml` to match your app’s port, domain, and infrastructure expectations, then rebuild the EIF and redeploy when you change enclave-related settings.
 
+## Runtime image provenance
+
+Nitrum runtime images published to GHCR (from tagged releases) carry OCI labels for traceability:
+
+| Label | Meaning |
+|-------|---------|
+| `org.opencontainers.image.revision` | Git commit SHA built into the image |
+| `org.opencontainers.image.version` | Release tag (for example `v0.1.0`) |
+| `io.nitrum.git.sha` | Same commit SHA (Nitrum-specific) |
+
+Inspect labels on a pulled image:
+
+```bash
+docker inspect --format '{{ index .Config.Labels "io.nitrum.git.sha" }}' ghcr.io/OWNER/nitrum/data-plane:v0.1.0
+```
+
+**Prefer digest pinning** in `nitrum.toml` for `runtime.data_plane`, `runtime.control_plane`, and `runtime.nitro_cli`:
+
+```toml
+# Immutable reference (recommended for production)
+data_plane = "ghcr.io/OWNER/nitrum/data-plane@sha256:abcdef..."
+```
+
+- **`nitrum init`** resolves `:latest` runtime images to `@sha256:…` automatically when scaffolding a project.
+- To pin manually, pull by tag, read the digest, and update `nitrum.toml`:
+
+```bash
+docker pull ghcr.io/OWNER/nitrum/data-plane:v0.1.0
+docker inspect --format '{{ index .RepoDigests 0 }}' ghcr.io/OWNER/nitrum/data-plane:v0.1.0
+```
+
+Floating tags (`:latest`, `:latest-dev`) are convenient for local iteration; production stacks should use digests so deploys cannot shift underneath you. See [releases.md](releases.md) for versioning policy.
+
 ## Reproducible builds
 
 Because user trust attestation policies and KMS recipient conditions are typically pinned to specific EIF measurements, it is important that a given source tree and configuration always yields the same EIF hash. Nitrum leans on Docker for this, so you should:
@@ -244,5 +277,6 @@ After deploy, use `nitrum cloud logs` for production debugging and `nitrum descr
 ## Documentation map
 
 - [architecture.md](architecture.md) — how control-plane, data-plane, and AWS pieces fit together.
+- [releases.md](releases.md) — SemVer, CHANGELOG, CI/release gates, and `nitrum.toml` compatibility.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — developing and testing the Rust workspace.
 

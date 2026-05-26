@@ -4,7 +4,8 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 
 ## Development setup
 
-- **Rust**: A recent stable toolchain ([rustup](https://rustup.rs/)).
+- **Rust**: MSRV **1.95** ([rustup](https://rustup.rs/)); pinned in [`rust-toolchain.toml`](rust-toolchain.toml) and [`Cargo.toml`](Cargo.toml) `workspace.package.rust-version`.
+- **Node.js**: **22** recommended for `packages/nitrum-node` (engines: `>=18`).
 - **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum local` (Compose).
 - **Python**: `3.11+` for documentation tooling.
 - **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
@@ -14,8 +15,18 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 Clone the repo and run from the workspace root:
 
 ```bash
-cargo check --all-targets
+cargo check --all-targets --all-features
 cargo test --all-features
+cargo deny check
+```
+
+For the TypeScript verifier package:
+
+```bash
+npm ci
+npm run lint -w nitrum-node
+npm run typecheck -w nitrum-node
+npm test -w nitrum-node
 ```
 
 ### Render architecture diagrams
@@ -52,9 +63,15 @@ Before opening a pull request:
 ```bash
 cargo fmt --all
 cargo clippy --all-targets --all-features
+cargo deny check
+npm run lint -w nitrum-node
 ```
 
-CI runs `cargo fmt --check`, `cargo clippy … -- -D warnings`, `cargo check`, and `cargo test` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
+CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` lint/typecheck/test, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
+
+## Releases
+
+See [docs/releases.md](docs/releases.md) for SemVer, `nitrum.toml` breaking-change rules, CHANGELOG requirements, and how tag releases are gated on CI.
 
 ## Pull requests
 

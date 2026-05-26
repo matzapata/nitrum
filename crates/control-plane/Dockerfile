@@ -45,6 +45,12 @@ RUN cargo build --release -p control-plane --target x86_64-unknown-linux-musl
 
 FROM amazonlinux:2 AS runtime
 
+ARG GIT_SHA=unknown
+ARG VERSION=dev
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.version="${VERSION}" \
+      io.nitrum.git.sha="${GIT_SHA}"
+
 RUN amazon-linux-extras install aws-nitro-enclaves-cli -y \
     && yum install -y curl ca-certificates \
     && yum clean all

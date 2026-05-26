@@ -10,7 +10,11 @@ permissions:
   packages: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   docker-images:
+    needs: [ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +40,12 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            FEATURES=enclave
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha,scope=control-plane
           cache-to: type=gha,mode=max,scope=control-plane
           tags: |
@@ -52,6 +61,12 @@ jobs:
           push: true
           build-args: |
             FEATURES=enclave
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha,scope=data-plane
           cache-to: type=gha,mode=max,scope=data-plane
           tags: |
@@ -67,6 +82,12 @@ jobs:
           push: true
           build-args: |
             FEATURES=pebble
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha,scope=data-plane-dev
           cache-to: type=gha,mode=max,scope=data-plane-dev
           tags: |
@@ -80,6 +101,13 @@ jobs:
           file: crates/cli/nitro-cli.dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
           cache-from: type=gha,scope=nitro-cli
           cache-to: type=gha,mode=max,scope=nitro-cli
           tags: |
@@ -87,6 +115,7 @@ jobs:
             ${{ env.GHCR_PREFIX }}/nitro-cli:latest
 
   cli-binaries:
+    needs: [ci]
     strategy:
       fail-fast: false
       matrix:
@@ -130,7 +159,7 @@ jobs:
           path: dist/*
 
   github-release:
-    needs: [cli-binaries]
+    needs: [cli-binaries, docker-images]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
