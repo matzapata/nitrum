@@ -42,7 +42,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@peculiar/x509": "^1.12.3",
+    "@peculiar/x509": "^2.0.0",
     "cbor-x": "^1.6.0",
     "cose-js": "0.8.3"
   },
