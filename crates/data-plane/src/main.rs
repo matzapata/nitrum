@@ -1,6 +1,7 @@
 mod config;
 mod constants;
 mod crypto;
+mod health;
 mod server;
 mod state;
 mod storage;
@@ -32,6 +33,7 @@ struct Args {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() {
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -64,8 +66,10 @@ async fn main() {
         log_stream_suffix: stream_suffix,
         aws_config: Some(runtime_config.aws_sdk_config.clone()),
         cloudwatch: true,
+        instance_id: Some(runtime_config.instance_id.clone()),
     })
     .await;
+    let metrics = telemetry.metrics().clone();
 
     let user_command: Vec<String> = if cli_command.is_empty() {
         runtime_config.nitrum.project.start_command.clone()
@@ -74,12 +78,19 @@ async fn main() {
     };
 
     // Create storage client
-    let storage: Arc<StorageClient> = Arc::new(StorageClient::new(&runtime_config));
+    let storage: Arc<StorageClient> = Arc::new(StorageClient::new(
+        &runtime_config,
+        Some(metrics.clone()),
+    ));
 
     // Create crypto client
     let crypto = Arc::new(
-        CryptoClient::new(runtime_config.clone(), storage.clone())
-            .await
+        CryptoClient::new(
+            runtime_config.clone(),
+            storage.clone(),
+            Some(metrics.clone()),
+        )
+        .await
             .unwrap_or_else(|e| {
                 error!(
                     error.kind = "crypto_setup",
@@ -95,7 +106,14 @@ async fn main() {
         runtime_config.clone(),
         storage,
         crypto.clone(),
+        metrics.clone(),
     ));
+
+    let health_state = Arc::clone(&state);
+    let health_metrics = metrics.clone();
+    tokio::spawn(async move {
+        health::run_poller(health_state, health_metrics).await;
+    });
 
     // Kick off crypto api for internal usage
     let crypto_state = state.clone();

@@ -5,7 +5,9 @@
 //! Dropping [`LeaderGuard`] releases the lock (best-effort via a spawned task).
 
 use crate::storage::StorageClient;
+use crate::storage::keys::{ACME_LEADER_KEY, CRYPTO_LEADER_KEY};
 use anyhow::Result;
+use observability::MetricsHandle;
 use std::sync::Arc;
 
 // ── Leader ───────────────────────────────────────────────────────────────────
@@ -15,14 +17,30 @@ pub struct Leader {
     storage: Arc<StorageClient>,
     owner: String,
     key: String,
+    metrics: Option<MetricsHandle>,
+    lock_dim: &'static str,
 }
 
 impl Leader {
-    pub const fn new(storage: Arc<StorageClient>, owner: String, key: String) -> Self {
+    pub fn new(
+        storage: Arc<StorageClient>,
+        owner: String,
+        key: String,
+        metrics: Option<MetricsHandle>,
+    ) -> Self {
+        let lock_dim = if key == CRYPTO_LEADER_KEY {
+            "crypto"
+        } else if key == ACME_LEADER_KEY {
+            "acme"
+        } else {
+            "other"
+        };
         Self {
             storage,
             owner,
             key,
+            metrics,
+            lock_dim,
         }
     }
 
@@ -34,10 +52,15 @@ impl Leader {
             .try_acquire_lock(&self.key, &self.owner)
             .await?;
         Ok(if acquired {
+            if let Some(m) = &self.metrics {
+                m.gauge_dims("LeaderLockHeld", 1.0, &[("LockKey", self.lock_dim)]);
+            }
             Some(LeaderGuard {
                 storage: self.storage.clone(),
                 owner: self.owner.clone(),
                 key: self.key.clone(),
+                metrics: self.metrics.clone(),
+                lock_dim: self.lock_dim,
             })
         } else {
             None
@@ -52,6 +75,8 @@ pub struct LeaderGuard {
     storage: Arc<StorageClient>,
     owner: String,
     key: String,
+    metrics: Option<MetricsHandle>,
+    lock_dim: &'static str,
 }
 
 impl LeaderGuard {
@@ -65,6 +90,9 @@ impl LeaderGuard {
 
 impl Drop for LeaderGuard {
     fn drop(&mut self) {
+        if let Some(m) = &self.metrics {
+            m.gauge_dims("LeaderLockHeld", 0.0, &[("LockKey", self.lock_dim)]);
+        }
         let storage = self.storage.clone();
         let owner = self.owner.clone();
         let key = self.key.clone();

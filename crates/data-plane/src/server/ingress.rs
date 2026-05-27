@@ -199,6 +199,8 @@ async fn ingress_proxy(
         Ok(c) => c,
         Err(e) => {
             warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to create reqwest client");
+            state.metrics.counter("IngressRequests", 1);
+            state.metrics.counter("Ingress5xx", 1);
             return (StatusCode::BAD_GATEWAY, "proxy client error").into_response();
         }
     };
@@ -208,6 +210,7 @@ async fn ingress_proxy(
         Ok(b) => b,
         Err(e) => {
             warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to read request body");
+            state.metrics.counter("IngressRequests", 1);
             return (StatusCode::BAD_REQUEST, "body read error").into_response();
         }
     };
@@ -232,6 +235,8 @@ async fn ingress_proxy(
         Ok(r) => r,
         Err(e) => {
             warn!(error.kind = "ingress_proxy", error = %e, "ingress: proxy request failed");
+            state.metrics.counter("IngressRequests", 1);
+            state.metrics.counter("Ingress5xx", 1);
             return (StatusCode::BAD_GATEWAY, "backend unreachable").into_response();
         }
     };
@@ -242,9 +247,16 @@ async fn ingress_proxy(
         Ok(b) => b,
         Err(e) => {
             warn!(error.kind = "ingress_proxy", error = %e, "ingress: failed to read backend body");
+            state.metrics.counter("IngressRequests", 1);
+            state.metrics.counter("Ingress5xx", 1);
             return (StatusCode::BAD_GATEWAY, "backend body error").into_response();
         }
     };
+
+    state.metrics.counter("IngressRequests", 1);
+    if status.is_server_error() {
+        state.metrics.counter("Ingress5xx", 1);
+    }
 
     let mut resp = (status, body).into_response();
     for (name, value) in &headers {

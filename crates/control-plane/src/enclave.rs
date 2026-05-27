@@ -1,7 +1,9 @@
 use crate::artifact::EnclaveArtifact;
 use crate::constants::{ENCLAVE_CID, ENCLAVE_HEALTH_POLL, MAX_BACKOFF_SECS, NITRO_CLI};
+use observability::MetricsHandle;
 use serde_json::Value;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::{
@@ -73,7 +75,7 @@ impl Enclave {
     }
 
     /// Starts a supervisor task that keeps the Nitro enclave running.
-    pub fn run(&mut self) {
+    pub fn run(&mut self, metrics: Arc<MetricsHandle>) {
         if self.supervisor.is_some() {
             return;
         }
@@ -82,7 +84,9 @@ impl Enclave {
         let memory_mib = self.memory_mib;
         let artifact = self.artifact.clone();
         self.supervisor = Some(tokio::spawn(async move {
-            if let Err(e) = Self::run_loop(debug_mode, cpu_count, memory_mib, artifact).await {
+            if let Err(e) =
+                Self::run_loop(debug_mode, cpu_count, memory_mib, artifact, metrics).await
+            {
                 error!(error = %e, "enclave supervisor exited with error");
             }
         }));
@@ -93,6 +97,7 @@ impl Enclave {
         cpu_count: u32,
         memory_mib: u32,
         artifact: EnclaveArtifact,
+        metrics: Arc<MetricsHandle>,
     ) -> Result<(), EnclaveError> {
         let mut backoff_secs: u64 = 0;
         let eif_path = artifact.path().display().to_string();
@@ -104,6 +109,7 @@ impl Enclave {
                         let empty: Vec<Value> = vec![];
                         let enclaves_array = enclaves.as_array().unwrap_or(&empty);
                         if !enclaves_array.is_empty() {
+                            metrics.gauge("EnclaveRunning", 1.0);
                             backoff_secs = 1;
                             tokio::time::sleep(ENCLAVE_HEALTH_POLL).await;
                             continue;
@@ -122,6 +128,8 @@ impl Enclave {
                 }
             }
 
+            metrics.gauge("EnclaveRunning", 0.0);
+
             if backoff_secs > 0 {
                 info!(
                     seconds = backoff_secs.min(MAX_BACKOFF_SECS),
@@ -133,6 +141,7 @@ impl Enclave {
             match Self::run_enclave_once(debug_mode, cpu_count, memory_mib, eif_path.as_str()).await
             {
                 Ok(()) => {
+                    metrics.counter("EnclaveRestartCount", 1);
                     info!("Enclave started... Waiting 5 seconds for warmup.");
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     if debug_mode && let Err(e) = Self::send_debug_logs_to_stdout().await {

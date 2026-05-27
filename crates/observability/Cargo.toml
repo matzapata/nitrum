@@ -18,6 +18,7 @@ serde_json = "1"
 tracing = "0.1"
 tracing-cloudwatch = { version = "0.4", features = ["awssdk"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1", features = ["sync", "time", "rt"] }
 
 [dev-dependencies]
 tracing = "0.1"

@@ -3,6 +3,7 @@
 use crate::config::RuntimeConfig;
 use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
+use observability::MetricsHandle;
 use std::sync::{Arc, RwLock};
 
 /// Shared state for the data-plane: config and clients.
@@ -16,6 +17,8 @@ pub struct DataPlaneState {
     pub crypto: Arc<CryptoClient>,
     /// SHA-256 hash of the current TLS leaf certificate (DER). Set by the TLS layer on load/reload.
     pub tls_cert_hash: Arc<RwLock<Option<Vec<u8>>>>,
+    /// CloudWatch EMF metrics handle.
+    pub metrics: MetricsHandle,
 }
 
 impl DataPlaneState {
@@ -23,12 +26,14 @@ impl DataPlaneState {
         config: RuntimeConfig,
         storage: Arc<StorageClient>,
         crypto: Arc<CryptoClient>,
+        metrics: MetricsHandle,
     ) -> Self {
         Self {
             config,
             storage,
             crypto,
             tls_cert_hash: Arc::new(RwLock::new(None)),
+            metrics,
         }
     }
 }

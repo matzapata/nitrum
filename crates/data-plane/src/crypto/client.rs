@@ -3,6 +3,7 @@ use super::kms::Kms;
 use crate::config::RuntimeConfig;
 use crate::storage::{StorageClient, keys};
 use crate::utils::leader::Leader;
+use observability::MetricsHandle;
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},
@@ -21,14 +22,19 @@ pub struct CryptoClient {
 
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
-    #[tracing::instrument(name = "crypto_client_init", skip(config, storage))]
-    pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
-        let kms = Kms::new(&config);
+    #[tracing::instrument(name = "crypto_client_init", skip(config, storage, metrics))]
+    pub async fn new(
+        config: RuntimeConfig,
+        storage: Arc<StorageClient>,
+        metrics: Option<MetricsHandle>,
+    ) -> Result<Self> {
+        let kms = Kms::new(&config, metrics.clone());
 
         let leader = Leader::new(
             storage.clone(),
             config.instance_id.clone(),
             keys::CRYPTO_LEADER_KEY.to_string(),
+            metrics,
         );
 
         loop {

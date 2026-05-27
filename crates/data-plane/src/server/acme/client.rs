@@ -199,4 +199,21 @@ impl AcmeClient {
             .cast_signed();
         Ok(Duration::from_secs((renew_at - now).max(0).cast_unsigned()))
     }
+
+    /// Days until the leaf certificate `notAfter` (for CloudWatch `AcmeCertDaysRemaining`).
+    pub(crate) fn cert_days_remaining(chain_pem: &str) -> Option<f64> {
+        let certs = rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let leaf_der = certs.first()?;
+        let (_, cert) = parse_x509_certificate(leaf_der.as_ref()).ok()?;
+        let not_after = cert.validity().not_after.timestamp();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs()
+            .cast_signed();
+        let secs = (not_after - now).max(0);
+        Some(secs as f64 / 86_400.0)
+    }
 }

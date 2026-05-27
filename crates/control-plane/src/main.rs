@@ -87,7 +87,7 @@ async fn main() {
 
     info!("starting enclave");
     let mut enclave = Enclave::new(artifact, args.debug_mode, args.cpu_count, args.memory_mib);
-    enclave.run();
+    enclave.run(monitoring.metrics());
     info!("enclave started");
 
     info!("waiting for shutdown signal");

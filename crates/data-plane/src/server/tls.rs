@@ -60,6 +60,7 @@ impl TlsState {
             state.storage.clone(),
             state.config.instance_id.clone(),
             keys::ACME_LEADER_KEY.to_string(),
+            Some(state.metrics.clone()),
         ));
         let directory_url = std::env::var(ENV_ACME_DIRECTORY_URL)
             .unwrap_or_else(|_| LETS_ENCRYPT_PROD_DIRECTORY.to_string());
@@ -71,6 +72,7 @@ impl TlsState {
 
         let storage_for_acme = state.storage.clone();
         let crypto_for_acme = state.crypto.clone();
+        let metrics = Some(state.metrics.clone());
 
         Self {
             state,
@@ -82,6 +84,7 @@ impl TlsState {
                 acme_leader,
                 directory_url,
                 client_tls_config,
+                metrics,
             )),
         }
     }

@@ -209,8 +209,48 @@ Log streams are named `{service}-{suffix}` (for example `control-plane-12345` on
 | `RUST_LOG` | control-plane, data-plane | `tracing` filter (default `info`; e.g. `info,app=debug`) |
 | `NITRUM_LOG_FORMAT` | both | `json` (production) or `human` (local); data-plane images default to `json` |
 | `NITRUM_PROJECT_NAME` | control-plane host | Enables CloudWatch on the host when set (CloudFormation sets this to `project.name`) |
+| `NITRUM_INSTANCE_ID` | control-plane host | EC2 instance id metric dimension (userdata sets this from IMDS; default `local`) |
+| `NITRUM_METRICS_FLUSH_SECS` | both | EMF flush interval in seconds (default `60`) |
+| `NITRUM_PROMETHEUS` | control-plane host only | Set to `1` to expose Prometheus text on `NITRUM_PROMETHEUS_LISTEN` (default `127.0.0.1:9090`; not used in the enclave) |
+| `NITRUM_PROMETHEUS_LISTEN` | control-plane host | Listen address for `/metrics` when `NITRUM_PROMETHEUS=1` |
 
 The data-plane does not require `NITRUM_PROJECT_NAME`; it reads `project.name` from `nitrum.toml` bundled in the EIF and exports to `/nitrum/{project}/data-plane` when AWS credentials are available (IMDS inside the enclave).
+
+### CloudWatch custom metrics (EMF)
+
+Nitrum publishes custom metrics to namespace **`Nitrum/{project.name}`** using [Embedded Metric Format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html) on dedicated log streams (`{component}-{suffix}-metrics`). No `cloudwatch:PutMetricData` IAM permission is required—only the existing CloudWatch Logs policy.
+
+**Dimensions on every series:** `ProjectName`, `Component` (`control-plane` or `data-plane`), `InstanceId` (IMDS on EC2; `local` in Compose).
+
+| Metric | Component | Use |
+|--------|-----------|-----|
+| `EnclaveRunning` | control-plane | Gauge `0`/`1` from enclave supervisor poll |
+| `EnclaveRestartCount` | control-plane | Counter on each successful enclave (re)start |
+| `IngressRequests` | data-plane | Counter per proxied request |
+| `Ingress5xx` | data-plane | Counter when ingress returns HTTP 5xx |
+| `AcmeCertDaysRemaining` | data-plane | Gauge: days until leaf cert `notAfter` (when ACME enabled) |
+| `KmsErrors` | data-plane | Counter on KMS API failures |
+| `DynamoDbErrors` | data-plane | Counter on DynamoDB API failures (not lock contention) |
+| `LeaderLockHeld` | data-plane | Gauge `0`/`1` with dimension `LockKey` = `crypto` or `acme` |
+| `AppHealthCheckPass` | data-plane | Gauge `0`/`1` from `[health_check]` probe to the user app |
+
+**Dashboard:** CloudFormation creates **`{project.name}-ops`** (see [`crates/cli/dashboards/ops.json`](../crates/cli/dashboards/ops.json) for the widget layout). Open it in the CloudWatch console after deploy.
+
+**Alarm:** **`{project.name}-enclave-down`** fires when `EnclaveRunning` averages below `0.5` for five consecutive one-minute periods (`TreatMissingData: breaching`). Pass stack parameter **`AlarmEmail`** to subscribe an SNS email notification; leave empty to create the alarm without SNS.
+
+**NLB vs application health:** the NLB target group uses TCP checks on port 443. `AppHealthCheckPass` reflects your app’s `[health_check]` HTTP probe—use both to detect “TLS up but app broken” scenarios.
+
+#### Post-deploy verification
+
+1. Open the **`{project.name}-ops`** dashboard in CloudWatch (region matches your stack).
+2. Confirm **`EnclaveRunning`** is `1` on each instance after the enclave warms up (allow one to two EMF flush intervals, default 60s).
+3. Send HTTPS traffic through the NLB and confirm **`IngressRequests`** increases.
+4. With ACME enabled, confirm **`AcmeCertDaysRemaining`** is positive.
+5. Optional: stop the enclave (`nitro-cli terminate-enclave` on the host) and confirm **`EnclaveRunning`** drops to `0` and **`{project.name}-enclave-down`** enters `ALARM` after about five minutes.
+
+#### Local Prometheus (control-plane only)
+
+When running the control-plane binary with `NITRUM_PROMETHEUS=1`, scrape `http://127.0.0.1:9090/metrics` for the same in-process counters and gauges (development only; production uses CloudWatch EMF).
 
 ### Structured fields
 

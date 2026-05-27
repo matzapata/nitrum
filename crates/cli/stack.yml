@@ -129,12 +129,20 @@ Parameters:
       Principal allowed to administer this KMS key (Create*, Describe*, etc.). Use the default
       AWS_ACCOUNT_ROOT to allow the owning AWS account root ARN (typical). Otherwise pass a full IAM ARN.
 
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: >
+      Optional email for the enclave-down CloudWatch alarm (SNS subscription). Leave empty to create
+      the alarm without notifications.
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
 Conditions:
   RetainData: !Equals [!Ref Retain, 'true']
   KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -751,6 +759,8 @@ Resources:
 
               docker pull "${ControlPlaneImage}"
 
+              INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id || echo unknown)
+
               cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'
               [Unit]
               Description=Nitrum control-plane (gvproxy + enclave)
@@ -761,12 +771,14 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e NITRUM_LOG_FORMAT=json -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e NITRUM_INSTANCE_ID=__NITRUM_INSTANCE_ID__ -e NITRUM_LOG_FORMAT=json -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
               WantedBy=multi-user.target
               UNIT_EOF
+
+              sed -i "s/__NITRUM_INSTANCE_ID__/${INSTANCE_ID}/g" /etc/systemd/system/control-plane.service
 
               systemctl daemon-reload
               systemctl enable --now control-plane.service
@@ -869,6 +881,53 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref NitroTargetGroupHttp
 
+  # ── CloudWatch metrics dashboard and alarms (EMF from control/data-plane logs) ─
+  MetricsAlarmTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+    Properties:
+      TopicName: !Sub '${ProjectName}-nitrum-alarms'
+
+  MetricsAlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+      TopicArn: !Ref MetricsAlarmTopic
+
+  EnclaveDownAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-enclave-down'
+      AlarmDescription: >
+        EnclaveRunning average below 1 for five minutes (Nitrum/${ProjectName} namespace).
+      Namespace: !Sub 'Nitrum/${ProjectName}'
+      MetricName: EnclaveRunning
+      Dimensions:
+        - Name: Component
+          Value: control-plane
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 5
+      Threshold: 0.5
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: !If
+        - HasAlarmEmail
+        - [!Ref MetricsAlarmTopic]
+        - !Ref 'AWS::NoValue'
+
+  OpsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${ProjectName}-ops'
+      DashboardBody: !Sub
+        - |
+          {"widgets":[{"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Enclave running","view":"timeSeries","region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["Nitrum/${ProjectName}","EnclaveRunning","Component","control-plane"]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Ingress requests","view":"timeSeries","region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","IngressRequests","Component","data-plane"]]}},{"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"ACME cert days remaining","view":"timeSeries","region":"${AWS::Region}","period":300,"stat":"Minimum","metrics":[["Nitrum/${ProjectName}","AcmeCertDaysRemaining","Component","data-plane"]]}},{"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"Ingress 5xx","view":"timeSeries","region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","Ingress5xx","Component","data-plane"]]}},{"type":"metric","x":0,"y":12,"width":8,"height":6,"properties":{"title":"App health","view":"timeSeries","region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["Nitrum/${ProjectName}","AppHealthCheckPass","Component","data-plane"]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":8,"y":12,"width":8,"height":6,"properties":{"title":"KMS / DynamoDB errors","view":"timeSeries","stacked":true,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","KmsErrors","Component","data-plane"],[".","DynamoDbErrors",".","."]]}},{"type":"metric","x":16,"y":12,"width":8,"height":6,"properties":{"title":"Enclave restarts","view":"timeSeries","region":"${AWS::Region}","period":300,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","EnclaveRestartCount","Component","control-plane"]]}}]}
+        - ProjectName: !Ref ProjectName
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Outputs
 # ─────────────────────────────────────────────────────────────────────────────
@@ -910,3 +969,11 @@ Outputs:
   EifS3Uri:
     Description: S3 URI the control-plane uses to download the EIF at container startup
     Value: !Sub "s3://${EifS3Bucket}/${EifS3Key}"
+
+  OpsDashboardName:
+    Description: CloudWatch dashboard name (${ProjectName}-ops)
+    Value: !Sub '${ProjectName}-ops'
+
+  EnclaveDownAlarmName:
+    Description: CloudWatch alarm when EnclaveRunning is below 1 for five minutes
+    Value: !Ref EnclaveDownAlarm

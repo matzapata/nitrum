@@ -16,6 +16,7 @@ use aws_sdk_dynamodb::{
 
 use crate::config::RuntimeConfig;
 use crate::utils::time;
+use observability::MetricsHandle;
 
 const LOCK_TTL_SECS: u64 = 60;
 
@@ -25,11 +26,12 @@ const LOCK_TTL_SECS: u64 = 60;
 pub struct StorageClient {
     client: Client,
     table: String,
+    metrics: Option<MetricsHandle>,
 }
 
 impl StorageClient {
     /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
-    pub fn new(config: &RuntimeConfig) -> Self {
+    pub fn new(config: &RuntimeConfig, metrics: Option<MetricsHandle>) -> Self {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);
@@ -38,6 +40,13 @@ impl StorageClient {
         Self {
             client,
             table: config.dynamodb_table.clone(),
+            metrics,
+        }
+    }
+
+    fn record_dynamo_error(&self) {
+        if let Some(m) = &self.metrics {
+            m.counter("DynamoDbErrors", 1);
         }
     }
 
@@ -66,7 +75,10 @@ impl StorageClient {
         match result {
             Ok(_) => Ok(true),
             Err(e) if is_condition_failed(&e) => Ok(false),
-            Err(e) => Err(e).context("DynamoDB try_acquire_lock failed"),
+            Err(e) => {
+                self.record_dynamo_error();
+                Err(e).context("DynamoDB try_acquire_lock failed")
+            }
         }
     }
 
@@ -81,6 +93,7 @@ impl StorageClient {
             .expression_attribute_values(":owner", AttributeValue::S(owner.to_string()))
             .send()
             .await
+            .inspect_err(|_| self.record_dynamo_error())
             .context("DynamoDB release_lock failed")?;
         Ok(())
     }
@@ -94,6 +107,7 @@ impl StorageClient {
             .key("pk", AttributeValue::S(key.to_string()))
             .send()
             .await
+            .inspect_err(|_| self.record_dynamo_error())
             .with_context(|| format!("DynamoDB get_item({key}) failed"))?;
 
         match resp.item {
@@ -119,6 +133,7 @@ impl StorageClient {
             .item("value", AttributeValue::B(Blob::new(value)))
             .send()
             .await
+            .inspect_err(|_| self.record_dynamo_error())
             .with_context(|| format!("DynamoDB set_object({key}) failed"))?;
         Ok(())
     }
@@ -140,7 +155,10 @@ impl StorageClient {
         match result {
             Ok(_) => Ok(true),
             Err(e) if is_condition_failed(&e) => Ok(false),
-            Err(e) => Err(e).with_context(|| format!("DynamoDB put_object({key}) failed")),
+            Err(e) => {
+                self.record_dynamo_error();
+                Err(e).with_context(|| format!("DynamoDB put_object({key}) failed"))
+            }
         }
     }
 
@@ -152,6 +170,7 @@ impl StorageClient {
             .key("pk", AttributeValue::S(key.to_string()))
             .send()
             .await
+            .inspect_err(|_| self.record_dynamo_error())
             .with_context(|| format!("DynamoDB delete_object({key}) failed"))?;
         Ok(())
     }

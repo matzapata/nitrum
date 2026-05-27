@@ -7,6 +7,7 @@ use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
 use crate::utils::leader::Leader;
 use anyhow::Result;
+use observability::MetricsHandle;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -28,6 +29,7 @@ pub struct AcmeState {
     pub(crate) cert_store: CertStore,
     inner: AcmeClient,
     pub(crate) current_chain: Option<String>,
+    metrics: Option<MetricsHandle>,
 }
 
 impl AcmeState {
@@ -38,6 +40,7 @@ impl AcmeState {
         leader: Arc<Leader>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
+        metrics: Option<MetricsHandle>,
     ) -> Self {
         let cert_storage = AcmeStorage::new(storage.clone(), crypto.clone());
         Self {
@@ -47,6 +50,15 @@ impl AcmeState {
             cert_store: Arc::new(RwLock::new(None)),
             inner: AcmeClient::new(storage, crypto, directory_url, client_tls_config),
             current_chain: None,
+            metrics,
+        }
+    }
+
+    fn report_cert_days(chain: &str, metrics: Option<&MetricsHandle>) {
+        if let Some(m) = metrics
+            && let Some(days) = AcmeClient::cert_days_remaining(chain)
+        {
+            m.gauge("AcmeCertDaysRemaining", days);
         }
     }
 
@@ -67,6 +79,7 @@ impl AcmeState {
                     return Ok(pair);
                 }
                 if !Self::renewal_due(&self.inner, &pair.0) {
+                    Self::report_cert_days(&pair.0, self.metrics.as_ref());
                     return Ok(pair);
                 }
             }
@@ -91,6 +104,7 @@ impl AcmeState {
                     .provision_cert(account, &self.domain, self.cert_storage.as_ref())
                     .await?;
                 self.cert_storage.write_cert_pair(&chain, &key).await?;
+                Self::report_cert_days(&chain, self.metrics.as_ref());
                 return Ok((chain, key));
             }
 
@@ -128,6 +142,7 @@ impl AcmeState {
 
         let (chain, key) = self.get_or_provision().await?;
         self.current_chain = Some(chain.clone());
+        Self::report_cert_days(&chain, self.metrics.as_ref());
         *self.cert_store.write().await = Some((chain, key));
         Ok(AcmeEvent::CertRenewed)
     }
