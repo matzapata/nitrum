@@ -234,16 +234,16 @@ Nitrum publishes custom metrics to namespace **`Nitrum/{project.name}`** using [
 | `LeaderLockHeld` | data-plane | Gauge `0`/`1` with dimension `LockKey` = `crypto` or `acme` |
 | `AppHealthCheckPass` | data-plane | Gauge `0`/`1` from `[health_check]` probe to the user app |
 
-**Dashboard:** CloudFormation creates **`{project.name}-ops`** (see [`crates/cli/dashboards/ops.json`](../crates/cli/dashboards/ops.json) for the widget layout). Open it in the CloudWatch console after deploy.
+**Dashboard:** CloudFormation creates **`{project.name}-ops`**. The canonical widget definition is mirrored in [`crates/cli/dashboards/ops.json`](../crates/cli/dashboards/ops.json) and duplicated in `stack.yml` for CloudFormation deployment.
 
-**Alarm:** **`{project.name}-enclave-down`** fires when `EnclaveRunning` averages below `0.5` for five consecutive one-minute periods (`TreatMissingData: breaching`). Pass stack parameter **`AlarmEmail`** to subscribe an SNS email notification; leave empty to create the alarm without SNS.
+**Alarm:** **`{project.name}-enclave-down`** fires when `EnclaveRunning` averages below `0.5` for five consecutive one-minute periods (`TreatMissingData: breaching`). Pass stack parameter **`AlarmEmail`** to subscribe an SNS email notification; leave empty to create the alarm without SNS. After deploy, the recipient must confirm the SNS subscription email before notifications are delivered.
 
 **NLB vs application health:** the NLB target group uses TCP checks on port 443. `AppHealthCheckPass` reflects your app’s `[health_check]` HTTP probe—use both to detect “TLS up but app broken” scenarios.
 
 #### Post-deploy verification
 
 1. Open the **`{project.name}-ops`** dashboard in CloudWatch (region matches your stack).
-2. Confirm **`EnclaveRunning`** is `1` on each instance after the enclave warms up (allow one to two EMF flush intervals, default 60s).
+2. Confirm **`EnclaveRunning`** is `1` after the enclave warms up (allow one to two EMF flush intervals, default 60s).
 3. Send HTTPS traffic through the NLB and confirm **`IngressRequests`** increases.
 4. With ACME enabled, confirm **`AcmeCertDaysRemaining`** is positive.
 5. Optional: stop the enclave (`nitro-cli terminate-enclave` on the host) and confirm **`EnclaveRunning`** drops to `0` and **`{project.name}-enclave-down`** enters `ALARM` after about five minutes.

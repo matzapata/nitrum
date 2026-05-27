@@ -1,9 +1,12 @@
 //! Prometheus text exposition for local control-plane debugging (`NITRUM_PROMETHEUS=1`).
+//!
+//! This server is intentionally lightweight and intended for development use only.
 
 use crate::emf::{DIM_COMPONENT, DIM_INSTANCE, DIM_PROJECT};
 use crate::registry::{MetricKind, MetricsRegistry};
 use std::fmt::Write as _;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Render registry contents as Prometheus text format 0.0.4.
 #[must_use]
@@ -47,33 +50,34 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(listen_addr).await?;
     loop {
-        let (socket, _) = listener.accept().await?;
+        let (mut socket, _) = listener.accept().await?;
         let registry = Arc::clone(&registry);
         let project = project.clone();
         let component = component.clone();
         let instance_id = instance_id.clone();
         tokio::spawn(async move {
-            let mut buf = [0u8; 512];
-            let Ok(n) = socket.peek(&mut buf).await else {
+            let mut buf = vec![0_u8; 4096];
+            let Ok(n) = socket.read(&mut buf).await else {
                 return;
             };
+            if n == 0 {
+                return;
+            }
             let req = String::from_utf8_lossy(&buf[..n]);
-            let body = if req.starts_with("GET /metrics") {
-                render(&registry, &project, &component, &instance_id)
+            let (status, body) = if req.starts_with("GET /metrics") {
+                (
+                    "200 OK",
+                    render(&registry, &project, &component, &instance_id),
+                )
             } else {
-                String::from("Not Found\n")
-            };
-            let status = if req.starts_with("GET /metrics") {
-                "200 OK"
-            } else {
-                "404 Not Found"
+                ("404 Not Found", String::from("Not Found\n"))
             };
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
-            let _ = socket.writable().await;
-            let _ = socket.try_write(response.as_bytes());
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
         });
     }
 }

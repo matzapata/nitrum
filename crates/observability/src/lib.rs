@@ -39,6 +39,7 @@ use format::LogFormat;
 use registry::MetricsRegistry;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing_cloudwatch::CloudWatchWorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -173,6 +174,7 @@ impl Telemetry {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(60);
+        let log_sequence = Arc::new(Mutex::new(Option::<String>::None));
         let metrics_emitter = match MetricsEmitter::new(
             client.clone(),
             log_group.clone(),
@@ -181,6 +183,7 @@ impl Telemetry {
             config.component.as_str(),
             instance_id.clone(),
             Arc::clone(&registry),
+            Arc::clone(&log_sequence),
             Duration::from_secs(flush_secs),
         )
         .await
@@ -202,6 +205,7 @@ impl Telemetry {
                 config.project.clone(),
                 config.component.as_str().to_string(),
                 instance_id,
+                log_sequence,
             )
         } else {
             MetricsHandle::disabled()
@@ -211,7 +215,9 @@ impl Telemetry {
             client,
             tracing_cloudwatch::ExportConfig::default()
                 .with_log_group_name(&log_group)
-                .with_log_stream_name(&log_stream_suffix),
+                .with_log_stream_name(&log_stream_suffix)
+                .with_batch_size(50)
+                .with_interval(Duration::from_secs(1)),
         );
 
         Registry::default()

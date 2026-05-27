@@ -19,13 +19,16 @@
             "EnclaveRunning",
             "Component",
             "control-plane",
-            "InstanceId",
-            ".",
-            { "label": "EnclaveRunning" }
+            {
+              "label": "EnclaveRunning"
+            }
           ]
         ],
         "yAxis": {
-          "left": { "min": 0, "max": 1 }
+          "left": {
+            "min": 0,
+            "max": 1
+          }
         }
       }
     },
@@ -48,7 +51,9 @@
             "IngressRequests",
             "Component",
             "data-plane",
-            { "stat": "Sum" }
+            {
+              "stat": "Sum"
+            }
           ]
         ]
       }
@@ -72,7 +77,9 @@
             "AcmeCertDaysRemaining",
             "Component",
             "data-plane",
-            { "stat": "Minimum" }
+            {
+              "stat": "Minimum"
+            }
           ]
         ]
       }
@@ -96,7 +103,9 @@
             "Ingress5xx",
             "Component",
             "data-plane",
-            { "stat": "Sum" }
+            {
+              "stat": "Sum"
+            }
           ]
         ]
       }
@@ -120,11 +129,16 @@
             "AppHealthCheckPass",
             "Component",
             "data-plane",
-            { "stat": "Average" }
+            {
+              "stat": "Average"
+            }
           ]
         ],
         "yAxis": {
-          "left": { "min": 0, "max": 1 }
+          "left": {
+            "min": 0,
+            "max": 1
+          }
         }
       }
     },
@@ -147,14 +161,20 @@
             "KmsErrors",
             "Component",
             "data-plane",
-            { "stat": "Sum", "label": "KmsErrors" }
+            {
+              "stat": "Sum",
+              "label": "KmsErrors"
+            }
           ],
           [
             ".",
             "DynamoDbErrors",
             ".",
             ".",
-            { "stat": "Sum", "label": "DynamoDbErrors" }
+            {
+              "stat": "Sum",
+              "label": "DynamoDbErrors"
+            }
           ]
         ]
       }
@@ -178,7 +198,9 @@
             "EnclaveRestartCount",
             "Component",
             "control-plane",
-            { "stat": "Sum" }
+            {
+              "stat": "Sum"
+            }
           ]
         ]
       }

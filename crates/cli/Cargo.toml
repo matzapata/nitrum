@@ -10,8 +10,6 @@ include = [
     "src/**/*",
     "stack.yml",
     "dashboards/**/*",
-    "../../infra/cloudformation/template.yml",
-    "../../infra/docker/compose.yml",
     "../../samples/hello/Dockerfile",
     "../../samples/hello/package.json",
     "../../samples/hello/src/main.js",

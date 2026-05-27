@@ -6,6 +6,7 @@ use aws_sdk_cloudwatchlogs::Client;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 struct FlushContext {
@@ -16,6 +17,7 @@ struct FlushContext {
     project: String,
     component: String,
     instance_id: String,
+    sequence: Arc<Mutex<Option<String>>>,
 }
 
 /// Publishes metrics to a dedicated CloudWatch Logs stream using EMF.
@@ -28,6 +30,7 @@ pub struct MetricsEmitter {
     component: String,
     instance_id: String,
     registry: Arc<MetricsRegistry>,
+    sequence: Arc<Mutex<Option<String>>>,
     shutdown_tx: watch::Sender<bool>,
     flush_handle: Option<JoinHandle<()>>,
 }
@@ -43,6 +46,7 @@ impl MetricsEmitter {
         component: &str,
         instance_id: String,
         registry: Arc<MetricsRegistry>,
+        sequence: Arc<Mutex<Option<String>>>,
         flush_interval: Duration,
     ) -> Result<Self> {
         let log_stream = format!("{metrics_stream_suffix}-metrics");
@@ -59,6 +63,7 @@ impl MetricsEmitter {
             project: project.clone(),
             component: component.to_string(),
             instance_id: instance_id.clone(),
+            sequence: Arc::clone(&sequence),
         };
         let flush_handle =
             spawn_flush_task(ctx, Arc::clone(&registry), flush_interval, shutdown_rx);
@@ -72,6 +77,7 @@ impl MetricsEmitter {
             component: component.to_string(),
             instance_id,
             registry,
+            sequence,
             shutdown_tx,
             flush_handle: Some(flush_handle),
         })
@@ -88,6 +94,7 @@ impl MetricsEmitter {
                 project: self.project.clone(),
                 component: self.component.clone(),
                 instance_id: self.instance_id.clone(),
+                sequence: Arc::clone(&self.sequence),
             },
             &self.registry,
         )
@@ -140,25 +147,95 @@ async fn flush_once(ctx: &FlushContext, registry: &MetricsRegistry) -> Result<()
         return Ok(());
     };
 
+    put_emf_log_event(ctx, &body).await
+}
+
+async fn put_emf_log_event(ctx: &FlushContext, message: &str) -> Result<()> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64);
 
-    ctx.client
-        .put_log_events()
-        .log_group_name(&ctx.log_group)
-        .log_stream_name(&ctx.log_stream)
-        .log_events(
-            aws_sdk_cloudwatchlogs::types::InputLogEvent::builder()
-                .message(body)
-                .timestamp(ts)
-                .build()
-                .context("build InputLogEvent")?,
-        )
+    let max_attempts = 3_u8;
+    for attempt in 0..max_attempts {
+        let token = ctx.sequence.lock().await.clone();
+
+        let event = aws_sdk_cloudwatchlogs::types::InputLogEvent::builder()
+            .message(message)
+            .timestamp(ts)
+            .build()
+            .context("build InputLogEvent")?;
+
+        let mut req = ctx
+            .client
+            .put_log_events()
+            .log_group_name(&ctx.log_group)
+            .log_stream_name(&ctx.log_stream)
+            .log_events(event);
+
+        if let Some(ref t) = token {
+            req = req.sequence_token(t);
+        }
+
+        match req.send().await {
+            Ok(out) => {
+                if let Some(next) = out.next_sequence_token() {
+                    *ctx.sequence.lock().await = Some(next.to_string());
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                let refresh = put_needs_sequence_refresh(&e);
+                if refresh && attempt + 1 < max_attempts {
+                    let fresh = fetch_upload_sequence_token(
+                        &ctx.client,
+                        &ctx.log_group,
+                        &ctx.log_stream,
+                    )
+                    .await
+                    .unwrap_or(None);
+                    *ctx.sequence.lock().await = fresh;
+                    continue;
+                }
+                return Err(anyhow::Error::from(e)).context("PutLogEvents EMF");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn put_needs_sequence_refresh(
+    e: &aws_sdk_cloudwatchlogs::error::SdkError<
+        aws_sdk_cloudwatchlogs::operation::put_log_events::PutLogEventsError,
+    >,
+) -> bool {
+    use aws_sdk_cloudwatchlogs::error::ProvideErrorMetadata as _;
+    if e.code() == Some("InvalidSequenceTokenException") {
+        return true;
+    }
+    let s = format!("{e:?}");
+    s.contains("InvalidSequenceTokenException") || s.contains("invalid sequence token")
+}
+
+async fn fetch_upload_sequence_token(
+    client: &Client,
+    log_group: &str,
+    stream: &str,
+) -> Result<Option<String>> {
+    let out = client
+        .describe_log_streams()
+        .log_group_name(log_group)
+        .log_stream_name_prefix(stream)
         .send()
         .await
-        .context("PutLogEvents EMF")?;
-    Ok(())
+        .context("DescribeLogStreams (EMF sequence)")?;
+
+    for ls in out.log_streams() {
+        if ls.log_stream_name.as_deref() == Some(stream) {
+            return Ok(ls.upload_sequence_token().map(ToString::to_string));
+        }
+    }
+    Ok(None)
 }
 
 /// Handle passed to application code for recording metrics.
@@ -177,6 +254,7 @@ struct MetricsFlushTarget {
     project: String,
     component: String,
     instance_id: String,
+    sequence: Arc<Mutex<Option<String>>>,
 }
 
 impl MetricsHandle {
@@ -199,6 +277,7 @@ impl MetricsHandle {
         project: String,
         component: String,
         instance_id: String,
+        sequence: Arc<Mutex<Option<String>>>,
     ) -> Self {
         Self {
             registry,
@@ -210,6 +289,7 @@ impl MetricsHandle {
                 project,
                 component,
                 instance_id,
+                sequence,
             }),
         }
     }
@@ -252,6 +332,7 @@ impl MetricsHandle {
                     project: t.project.clone(),
                     component: t.component.clone(),
                     instance_id: t.instance_id.clone(),
+                    sequence: Arc::clone(&t.sequence),
                 },
                 &self.registry,
             )
