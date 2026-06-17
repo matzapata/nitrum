@@ -1,19 +1,5 @@
-mod config;
-mod constants;
-mod crypto;
-mod server;
-mod state;
-mod storage;
-mod utils;
-
-#[cfg(feature = "enclave")]
-mod networking;
-
-use crate::config::RuntimeConfig;
-use crate::crypto::CryptoClient;
-use crate::state::DataPlaneState;
-use crate::storage::StorageClient;
 use clap::Parser;
+use data_plane::{CryptoClient, DataPlaneState, RuntimeConfig, StorageClient};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -52,7 +38,7 @@ async fn main() {
     // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
     // when the parent runs gvproxy with `-ec2-metadata-access`.
     #[cfg(feature = "enclave")]
-    networking::init().await;
+    data_plane::networking::init().await;
     #[cfg(not(feature = "enclave"))]
     info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
 
@@ -98,7 +84,7 @@ async fn main() {
     let crypto_state = state.clone();
     tokio::spawn(async move {
         info!("API task starting");
-        if let Err(e) = crypto::api::run(crypto_state).await {
+        if let Err(e) = data_plane::crypto::api::run(crypto_state).await {
             error!(error = %e, "API task failed");
         }
         tracing::warn!("API task exited");
@@ -108,7 +94,7 @@ async fn main() {
     let ingress_state = state.clone();
     tokio::spawn(async move {
         info!("ingress task starting");
-        if let Err(e) = server::ingress::run(ingress_state).await {
+        if let Err(e) = data_plane::server::ingress::run(ingress_state).await {
             error!(error = %e, "ingress task failed");
         }
         tracing::warn!("ingress task exited");
@@ -122,7 +108,7 @@ async fn main() {
         0
     } else {
         tokio::select! {
-            result = server::runner::run(&user_command, &runtime_config.user_env) => {
+            result = data_plane::server::runner::run(&user_command, &runtime_config.user_env) => {
                 result.unwrap_or_else(|e| {
                     tracing::error!(error = %e, "failed to run user process");
                     1

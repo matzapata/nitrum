@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+name = "data_plane"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
@@ -54,3 +58,18 @@ serde_bytes = { version = "0.11", optional = true }
 openssl = { version = "0.10", features = ["vendored"], optional = true }
 sha2 = "0.10"
 hex = "0.4"
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "crypto"
+harness = false
+
+[[bench]]
+name = "ingress"
+harness = false
+
+[[bench]]
+name = "tls_handshake"
+harness = false
