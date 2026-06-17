@@ -76,18 +76,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         (tls_config, None)
     };
 
-    // HTTPS router
-    let mut https_router = Router::new();
-    if state.config.well_known.enclave_status {
-        https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
-    }
-    if state.config.well_known.enclave_attestation {
-        https_router =
-            https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
-    }
-    let https_router = https_router
-        .fallback(ingress_proxy)
-        .with_state(state.clone());
+    let https_router = build_https_router(state.clone());
 
     // Bind the ingress server
     let ingress_addr = state.config.ingress_listen_addr;
@@ -105,6 +94,22 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         None => ingress.await.context("Ingress server stopped")?,
     }
     Ok(())
+}
+
+/// Build the HTTPS ingress router (well-known routes + proxy fallback).
+#[doc(hidden)]
+pub fn build_https_router(state: Arc<DataPlaneState>) -> Router {
+    let mut https_router = Router::new();
+    if state.config.well_known.enclave_status {
+        https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
+    }
+    if state.config.well_known.enclave_attestation {
+        https_router =
+            https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
+    }
+    https_router
+        .fallback(ingress_proxy)
+        .with_state(state)
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────────

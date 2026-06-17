@@ -30,4 +30,4 @@ unnecessary_wraps = "allow"
 unused_self = "allow"
 
 [workspace.dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
