@@ -136,6 +136,29 @@ Parameters:
       Optional email for the enclave-down CloudWatch alarm (SNS subscription). Leave empty to create
       the alarm without notifications.
 
+  AsgScalePolicy:
+    Type: String
+    Default: none
+    AllowedValues: [none, cpu, ingress]
+    Description: >
+      Target-tracking autoscaling when max > min. none keeps static capacity from nitrum.toml.
+      cpu tracks ASGAverageCPUUtilization on the ASG. ingress tracks Nitrum IngressRequests (sum).
+
+  AsgScaleCpuTarget:
+    Type: Number
+    Default: 70
+    MinValue: 20
+    MaxValue: 90
+    Description: Target average CPU percent when AsgScalePolicy is cpu.
+
+  AsgScaleIngressTarget:
+    Type: Number
+    Default: 500
+    MinValue: 1
+    Description: >
+      Target sum of IngressRequests per minute (Nitrum/${ProjectName}, Component=data-plane)
+      when AsgScalePolicy is ingress.
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,6 +166,14 @@ Conditions:
   RetainData: !Equals [!Ref Retain, 'true']
   KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  HasMultipleReplicas: !Not [!Equals [!Ref AsgMaxSize, 1]]
+  AsgCanScale: !Not [!Equals [!Ref AsgMinSize, !Ref AsgMaxSize]]
+  ScaleOnCpu: !And
+    - !Condition AsgCanScale
+    - !Equals [!Ref AsgScalePolicy, cpu]
+  ScaleOnIngress: !And
+    - !Condition AsgCanScale
+    - !Equals [!Ref AsgScalePolicy, ingress]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -797,8 +828,11 @@ Resources:
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MaxBatchSize: 1
-        MinInstancesInService: 0
-        PauseTime: PT0S
+        MinInstancesInService: !If [HasMultipleReplicas, 1, 0]
+        PauseTime: !If [HasMultipleReplicas, PT5M, PT0S]
+        SuspendProcesses:
+          - AlarmNotification
+          - ScheduledActions
     Properties:
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
@@ -814,6 +848,35 @@ Resources:
         - Key: Name
           Value: !Ref ProjectName
           PropagateAtLaunch: true
+
+  NitrumCpuScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Condition: ScaleOnCpu
+    Properties:
+      AutoScalingGroupName: !Ref NitroASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: !Ref AsgScaleCpuTarget
+        DisableScaleIn: false
+
+  NitrumIngressScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Condition: ScaleOnIngress
+    Properties:
+      AutoScalingGroupName: !Ref NitroASG
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        CustomizedMetricSpecification:
+          Namespace: !Sub 'Nitrum/${ProjectName}'
+          MetricName: IngressRequests
+          Statistic: Sum
+          Dimensions:
+            - Name: Component
+              Value: data-plane
+        TargetValue: !Ref AsgScaleIngressTarget
+        DisableScaleIn: false
 
   # ── Network Load Balancer ────────────────────────────────────────────────────
   NitroNLB:
@@ -906,17 +969,17 @@ Resources:
     Properties:
       AlarmName: !Sub '${ProjectName}-enclave-down'
       AlarmDescription: >
-        EnclaveRunning average below 1 for five minutes (Nitrum/${ProjectName} namespace).
+        EnclaveRunning minimum across instances below 1 for five minutes (any replica unhealthy).
       Namespace: !Sub 'Nitrum/${ProjectName}'
       MetricName: EnclaveRunning
       Dimensions:
         - Name: Component
           Value: control-plane
-      Statistic: Average
+      Statistic: Minimum
       Period: 60
       EvaluationPeriods: 5
       DatapointsToAlarm: 5
-      Threshold: 0.5
+      Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: breaching
       AlarmActions: !If
@@ -930,7 +993,7 @@ Resources:
       DashboardName: !Sub '${ProjectName}-ops'
       DashboardBody: !Sub
         - |
-          {"widgets":[{"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Enclave running (per instance)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["Nitrum/${ProjectName}","EnclaveRunning","Component","control-plane",{"label":"EnclaveRunning"}]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Ingress requests (sum / 1m)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","IngressRequests","Component","data-plane",{"stat":"Sum"}]]}},{"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"ACME cert days remaining (minimum)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Minimum","metrics":[["Nitrum/${ProjectName}","AcmeCertDaysRemaining","Component","data-plane",{"stat":"Minimum"}]]}},{"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"Ingress 5xx (sum / 1m)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","Ingress5xx","Component","data-plane",{"stat":"Sum"}]]}},{"type":"metric","x":0,"y":12,"width":8,"height":6,"properties":{"title":"App health check pass","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["Nitrum/${ProjectName}","AppHealthCheckPass","Component","data-plane",{"stat":"Average"}]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":8,"y":12,"width":8,"height":6,"properties":{"title":"KMS / DynamoDB errors","view":"timeSeries","stacked":true,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","KmsErrors","Component","data-plane",{"stat":"Sum","label":"KmsErrors"}],[".","DynamoDbErrors",".",".",{"stat":"Sum","label":"DynamoDbErrors"}]]}},{"type":"metric","x":16,"y":12,"width":8,"height":6,"properties":{"title":"Enclave restarts","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","EnclaveRestartCount","Component","control-plane",{"stat":"Sum"}]]}}]}
+          {"widgets":[{"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Enclave running (per instance)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"metrics":[[{"expression":"SEARCH('{Nitrum/${ProjectName},Component,InstanceId} MetricName=\"EnclaveRunning\"', 'Average', 60)","label":"EnclaveRunning","id":"e1"}]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Ingress requests (sum / 1m, all instances)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","IngressRequests","Component","data-plane",{"stat":"Sum"}]]}},{"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"Ingress requests (per instance)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"metrics":[[{"expression":"SEARCH('{Nitrum/${ProjectName},Component,InstanceId} MetricName=\"IngressRequests\"', 'Sum', 60)","label":"IngressRequests","id":"i1"}]]}},{"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"ACME cert days remaining (minimum)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"stat":"Minimum","metrics":[["Nitrum/${ProjectName}","AcmeCertDaysRemaining","Component","data-plane",{"stat":"Minimum"}]]}},{"type":"metric","x":0,"y":12,"width":12,"height":6,"properties":{"title":"Ingress 5xx (sum / 1m)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","Ingress5xx","Component","data-plane",{"stat":"Sum"}]]}},{"type":"metric","x":12,"y":12,"width":12,"height":6,"properties":{"title":"Leader lock held (per instance)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"metrics":[[{"expression":"SEARCH('{Nitrum/${ProjectName},Component,InstanceId,LockKey} MetricName=\"LeaderLockHeld\"', 'Maximum', 60)","label":"LeaderLockHeld","id":"l1"}]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":0,"y":18,"width":8,"height":6,"properties":{"title":"App health check pass","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["Nitrum/${ProjectName}","AppHealthCheckPass","Component","data-plane",{"stat":"Average"}]],"yAxis":{"left":{"min":0,"max":1}}}},{"type":"metric","x":8,"y":18,"width":8,"height":6,"properties":{"title":"KMS / DynamoDB errors","view":"timeSeries","stacked":true,"region":"${AWS::Region}","period":60,"stat":"Sum","metrics":[["Nitrum/${ProjectName}","KmsErrors","Component","data-plane",{"stat":"Sum","label":"KmsErrors"}],[".","DynamoDbErrors",".",".",{"stat":"Sum","label":"DynamoDbErrors"}]]}},{"type":"metric","x":16,"y":18,"width":8,"height":6,"properties":{"title":"Enclave restarts (per instance)","view":"timeSeries","stacked":false,"region":"${AWS::Region}","period":300,"metrics":[[{"expression":"SEARCH('{Nitrum/${ProjectName},Component,InstanceId} MetricName=\"EnclaveRestartCount\"', 'Sum', 300)","label":"EnclaveRestartCount","id":"r1"}]]}}]}
         - ProjectName: !Ref ProjectName
 
 # ─────────────────────────────────────────────────────────────────────────────

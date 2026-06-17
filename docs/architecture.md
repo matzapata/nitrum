@@ -324,6 +324,44 @@ sequenceDiagram
 
 
 
+## Horizontal scaling and performance
+
+### Capacity and coordination
+
+Replica count comes from `[scaling]` in `nitrum.toml` and maps to CloudFormation `AsgMinSize`, `AsgMaxSize`, and `AsgDesiredCapacity`. The Network Load Balancer is **TCP passthrough** with cross-zone enabled; **sticky sessions are not required** — TLS identity, the DEK, and ACME material live in DynamoDB + KMS, coordinated by DynamoDB leader locks (`lock:crypto`, `lock:acme`, 60s TTL). Only one instance provisions at a time; followers read encrypted blobs after the leader completes.
+
+Optional target-tracking policies (when `max_replicas` > `min_replicas`):
+
+| `scale_policy` | Signal | Tradeoffs |
+| -------------- | ------ | --------- |
+| `none` (default) | Static desired capacity | Predictable cost; you scale by editing `desired_replicas` and redeploying, or by changing ASG desired capacity in the console/API. |
+| `cpu` | `ASGAverageCPUUtilization` on the ASG | Measures **host** CPU, not enclave CPU; Nitro allocates a fixed enclave size, so CPU can look low while the enclave is saturated. Simple and works without custom metrics. |
+| `ingress` | Sum of `IngressRequests` (`Nitrum/{project}`, `Component=data-plane`) | Tracks real request volume through the data-plane; tune `AsgScaleIngressTarget` in the stack (default 500/min). EMF flush interval (60s) adds lag. |
+
+Watch **`AWS/AutoScaling` → `GroupInServiceInstances`** (or the ops dashboard per-instance `EnclaveRunning` series) after changing capacity. The **`{project}-enclave-down`** alarm uses **Minimum** `EnclaveRunning` across instances so any unhealthy replica breaches.
+
+### Rolling updates (`EifVersionLabel`)
+
+Each `nitrum cloud deploy` sets **`EifVersionLabel`** to the first 12 hex characters of the EIF SHA-256. That label is part of the launch template name, so a new EIF forces a **rolling instance refresh**:
+
+1. CloudFormation updates the launch template and ASG (rolling update: `MaxBatchSize: 1`, `MinInstancesInService: 1` when `max_replicas` > 1, `PauseTime: PT5M` for enclave warmup).
+2. New instances run userdata → Docker control-plane → download `s3://{bucket}/{label}.eif` → `nitro-cli run-enclave`.
+3. `control-plane` stops gracefully on instance termination (`docker stop -t 10`, `TimeoutStopSec: 30` in systemd).
+4. Existing instances keep serving until replaced; NLB drains unhealthy targets via TCP health checks on port 443.
+
+To roll without a new EIF build, change only runtime images or enclave CPU/RAM in `nitrum.toml` and redeploy (launch template user-data still updates).
+
+### Performance notes
+
+Sizing is driven by `[scaling]` **`num_cpus`** and **`ram_size_mib`** (nitro allocator + `nitro-cli --cpu-count` / `--memory`). These must fit the chosen EC2 instance type and leave headroom for the parent (gvproxy, Docker, nitro-cli).
+
+- **Enclave RAM/CPU:** Undersizing causes OOM or slow crypto; oversizing reduces replicas per host. Default `4320` MiB / `2` vCPU matches the sample stack.
+- **Connection limits:** Each replica terminates TLS in the enclave; throughput is bounded by enclave vCPU, rustls, and your app on `127.0.0.1`. NLB adds another TCP hop but no TLS termination.
+- **gvproxy bottleneck:** All ingress and egress (including ACME and KMS via IMDS) crosses gvproxy VSOCK/TAP on the parent. High RPS or large bodies show up as host network CPU before enclave CPU in some profiles.
+- **DynamoDB locks:** Followers poll every ~2s while waiting for DEK/ACME; negligible at steady state, visible only during cold start or leader failure (up to lock TTL).
+
+See [usage.md](usage.md) for the multi-replica verification checklist.
+
 ## Secrets and configuration
 
 Runtime and deployment parameters live in `nitrum.toml` at the project root (`[project]`, `[runtime]`, service port, health checks, scaling hints, TLS, egress options). The `config` crate defines the schema; see [usage.md](usage.md) for a short reference.

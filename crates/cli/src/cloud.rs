@@ -100,6 +100,10 @@ impl EnclaveCloudStack {
                 scaling.ram_size_mib.to_string(),
             ),
             (
+                "AsgScalePolicy".to_string(),
+                scaling.scale_policy.as_deploy_param().to_string(),
+            ),
+            (
                 "ControlPlaneImage".to_string(),
                 config.runtime.control_plane.clone(),
             ),

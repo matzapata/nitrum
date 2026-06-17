@@ -19,6 +19,8 @@ pub struct NitrumEventFormat {
     project: Arc<str>,
     /// Default component when the event target is not `app`.
     default_component: Component,
+    /// EC2 instance id (or `local`) for multi-replica log correlation.
+    instance_id: Arc<str>,
     /// Underlying JSON or human formatter.
     log_format: LogFormat,
 }
@@ -27,11 +29,13 @@ impl NitrumEventFormat {
     pub fn new(
         project: impl Into<Arc<str>>,
         default_component: Component,
+        instance_id: impl Into<Arc<str>>,
         log_format: LogFormat,
     ) -> Self {
         Self {
             project: project.into(),
             default_component,
+            instance_id: instance_id.into(),
             log_format,
         }
     }
@@ -105,6 +109,10 @@ where
                     COMPONENT.to_string(),
                     serde_json::Value::String(component.to_string()),
                 );
+                map.insert(
+                    "instance_id".to_string(),
+                    serde_json::Value::String(self.instance_id.to_string()),
+                );
                 for (k, v) in collector.fields {
                     map.insert(k, serde_json::Value::String(v));
                 }
@@ -115,9 +123,10 @@ where
             LogFormat::Human => {
                 write!(
                     writer,
-                    "{} {PROJECT}={} {COMPONENT}={component} target={target} ",
+                    "{} {PROJECT}={} {COMPONENT}={component} instance_id={} target={target} ",
                     event.metadata().level(),
                     self.project,
+                    self.instance_id,
                 )?;
                 ctx.field_format().format_fields(writer.by_ref(), event)?;
                 writeln!(writer)?;

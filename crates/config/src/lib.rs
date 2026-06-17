@@ -72,6 +72,39 @@ impl HealthCheck {
     }
 }
 
+/// Autoscaling policy wired to CloudFormation when `max_replicas` > `min_replicas`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScalePolicy {
+    /// Static capacity only (`AsgDesiredCapacity` from `desired_replicas`).
+    None,
+    /// Target-tracking on `ASGAverageCPUUtilization` (host EC2 CPU).
+    Cpu,
+    /// Target-tracking on summed `IngressRequests` (Nitrum EMF metric).
+    Ingress,
+}
+
+impl Default for ScalePolicy {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl ScalePolicy {
+    /// CloudFormation `AsgScalePolicy` parameter value.
+    #[must_use]
+    pub const fn as_deploy_param(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Cpu => "cpu",
+            Self::Ingress => "ingress",
+        }
+    }
+}
+
+/// Maximum `max_replicas` when ACME is enabled (Let's Encrypt rate limits on churn).
+pub const ACME_MAX_REPLICAS: u32 = 10;
+
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Scaling {
     /// Desired number of replicas.
@@ -88,6 +121,10 @@ pub struct Scaling {
 
     /// RAM size in MB for the enclave.
     pub ram_size_mib: u32,
+
+    /// Optional target-tracking autoscaling (`none`, `cpu`, `ingress`). Requires `max_replicas` > `min_replicas`.
+    #[serde(default)]
+    pub scale_policy: ScalePolicy,
 }
 
 impl Default for Scaling {
@@ -98,6 +135,7 @@ impl Default for Scaling {
             min_replicas: 1,
             num_cpus: 2,
             ram_size_mib: 4320,
+            scale_policy: ScalePolicy::None,
         }
     }
 }
@@ -126,6 +164,27 @@ impl Scaling {
         }
         if self.ram_size_mib == 0 {
             return Err("`scaling.ram_size_mib` must be greater than 0".to_string());
+        }
+        if self.scale_policy != ScalePolicy::None && self.min_replicas >= self.max_replicas {
+            return Err(format!(
+                "`scaling.scale_policy` is {} but min_replicas ({}) must be < max_replicas ({}) for autoscaling",
+                self.scale_policy.as_deploy_param(),
+                self.min_replicas,
+                self.max_replicas
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates scaling together with TLS settings (ACME rate-limit guardrail).
+    pub fn validate_with_tls(&self, tls: &TlsTermination) -> Result<(), String> {
+        self.validate()?;
+        if tls.acme && self.max_replicas > ACME_MAX_REPLICAS {
+            return Err(format!(
+                "with `tls_termination.acme = true`, `scaling.max_replicas` ({}) must be <= {ACME_MAX_REPLICAS} \
+                 (Let's Encrypt rate limits; only one ACME leader provisions per domain)",
+                self.max_replicas
+            ));
         }
         Ok(())
     }
@@ -286,7 +345,7 @@ impl NitrumConfig {
         self.project.validate()?;
         self.runtime.validate()?;
         self.health_check.validate()?;
-        self.scaling.validate()?;
+        self.scaling.validate_with_tls(&self.tls_termination)?;
         self.tls_termination.validate()?;
         Ok(())
     }
@@ -391,5 +450,56 @@ impl TryFrom<&std::path::Path> for NitrumConfig {
                 message,
             })?;
         Ok(cfg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_scaling() -> Scaling {
+        Scaling {
+            desired_replicas: 2,
+            max_replicas: 2,
+            min_replicas: 2,
+            num_cpus: 2,
+            ram_size_mib: 4320,
+            scale_policy: ScalePolicy::None,
+        }
+    }
+
+    #[test]
+    fn scaling_two_replicas_valid() {
+        sample_scaling().validate().expect("valid two-replica scaling");
+    }
+
+    #[test]
+    fn scale_policy_requires_headroom() {
+        let mut s = sample_scaling();
+        s.scale_policy = ScalePolicy::Cpu;
+        s.max_replicas = 2;
+        s.min_replicas = 2;
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn acme_caps_max_replicas() {
+        let mut s = sample_scaling();
+        s.max_replicas = ACME_MAX_REPLICAS + 1;
+        let tls = TlsTermination {
+            acme: true,
+            domain: "example.com".to_string(),
+        };
+        assert!(s.validate_with_tls(&tls).is_err());
+    }
+
+    #[test]
+    fn acme_allows_multiple_replicas_within_cap() {
+        let s = sample_scaling();
+        let tls = TlsTermination {
+            acme: true,
+            domain: "example.com".to_string(),
+        };
+        s.validate_with_tls(&tls).expect("two replicas with ACME is ok");
     }
 }

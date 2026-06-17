@@ -119,7 +119,9 @@ impl Telemetry {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         let project = Arc::<str>::from(config.project.as_str());
-        let event_format = NitrumEventFormat::new(project.clone(), config.component, log_format);
+        let instance_id = resolve_instance_id(config.instance_id);
+        let event_format =
+            NitrumEventFormat::new(project.clone(), config.component, instance_id.clone(), log_format);
 
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_ansi(matches!(log_format, LogFormat::Human))
@@ -129,7 +131,6 @@ impl Telemetry {
         let cloudwatch_enabled = config.cloudwatch
             && (std::env::var("NITRUM_PROJECT_NAME").is_ok() || !config.project.is_empty());
 
-        let instance_id = resolve_instance_id(config.instance_id);
         let registry = Arc::new(MetricsRegistry::new());
 
         if !cloudwatch_enabled {
@@ -240,7 +241,9 @@ impl Telemetry {
         let env_filter =
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
         let project = Arc::<str>::from(project.unwrap_or("local"));
-        let event_format = NitrumEventFormat::new(project, default_component, log_format);
+        let instance_id = resolve_instance_id(None);
+        let event_format =
+            NitrumEventFormat::new(project, default_component, instance_id, log_format);
 
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_ansi(matches!(log_format, LogFormat::Human))

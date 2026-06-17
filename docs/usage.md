@@ -243,10 +243,45 @@ Nitrum publishes custom metrics to namespace **`Nitrum/{project.name}`** using [
 #### Post-deploy verification
 
 1. Open the **`{project.name}-ops`** dashboard in CloudWatch (region matches your stack).
-2. Confirm **`EnclaveRunning`** is `1` after the enclave warms up (allow one to two EMF flush intervals, default 60s).
+2. Confirm **`EnclaveRunning`** is `1` per instance after warmup (allow one to two EMF flush intervals, default 60s). With multiple replicas, use the per-instance SEARCH widgets or filter metrics by **`InstanceId`**.
 3. Send HTTPS traffic through the NLB and confirm **`IngressRequests`** increases.
 4. With ACME enabled, confirm **`AcmeCertDaysRemaining`** is positive.
 5. Optional: stop the enclave (`nitro-cli terminate-enclave` on the host) and confirm **`EnclaveRunning`** drops to `0` and **`{project.name}-enclave-down`** enters `ALARM` after about five minutes.
+
+#### Multi-replica verification checklist
+
+Use this after setting **`desired_replicas = max_replicas = min_replicas = 2`** (and redeploying). NLB sticky sessions are **not** required.
+
+**`nitrum.toml` example:**
+
+```toml
+[scaling]
+desired_replicas = 2
+max_replicas = 2
+min_replicas = 2
+num_cpus = 2
+ram_size_mib = 4320
+scale_policy = "none"   # or "cpu" / "ingress" when max > min
+```
+
+| Step | Check | How |
+| ---- | ----- | --- |
+| 1 | Two healthy targets | `aws elbv2 describe-target-health --target-group-arn …` or EC2 console → Target groups → both **healthy** |
+| 2 | Two enclaves in metrics | CloudWatch → `Nitrum/{project}` → `EnclaveRunning`, dimension **`InstanceId`** → two series at `1` |
+| 3 | Same TLS identity | Fetch `/.well-known/enclave/attestation` via each instance (see script below) and compare cert hash / attestation binding |
+| 4 | Single ACME leader | `LeaderLockHeld` with `LockKey=acme` at `1` on **one** `InstanceId` only (dashboard widget) |
+| 5 | Single DEK bootstrap | CloudWatch Logs Insights: at most one `"generating a new one (leader)"` per deploy; no duplicate `GenerateDataKey` errors |
+| 6 | Leader failover (manual) | Terminate the leader instance; after lock TTL (~60s) another instance should provision or reuse stored cert/DEK |
+
+Automated helpers (no deploy): from repo root, after you deploy with two replicas:
+
+```bash
+./tests/e2e/multi_replica_verify.sh --stack-name nitrum-myproject --region us-east-1
+```
+
+**Manual scale-out without autoscaling:** raise **`AsgDesiredCapacity`** in the ASG console or set `desired_replicas` and run `nitrum cloud deploy`. Watch **`GroupInServiceInstances`** and per-instance **`EnclaveRunning`**.
+
+**Autoscaling:** set `min_replicas` < `max_replicas` and `scale_policy = "cpu"` or `"ingress"`. Watch the chosen policy metric and `GroupInServiceInstances`.
 
 #### Local Prometheus (control-plane only)
 
@@ -258,6 +293,7 @@ Every log line includes:
 
 - `project` — `project.name` from `nitrum.toml`
 - `component` — `control-plane`, `data-plane`, or `app`
+- `instance_id` — EC2 instance id from IMDS (or `local` in Compose)
 
 Ingress requests add `request_id` (from `x-request-id` or a generated UUID). Failures should include `error.kind` (for example `ingress_proxy`, `kms_decrypt`, `acme_state`).
 
@@ -315,7 +351,7 @@ Options are defined in the `shared` crate; the sample project comments point to 
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
 - `[well_known]` — `enclave_status` / `enclave_attestation` toggle the `/.well-known/enclave/*` routes on the TLS listener (defaults: enabled).
 - `[health_check]` — path, port, and interval for health checks.
-- `[scaling]` — replica hints and enclave CPU/RAM (used in deployment templates).
+- `[scaling]` — `desired_replicas`, `min_replicas`, `max_replicas`, enclave `num_cpus` / `ram_size_mib`, and optional `scale_policy` (`none` | `cpu` | `ingress`). With ACME enabled, `max_replicas` is capped at 10. See [architecture.md](architecture.md#horizontal-scaling-and-performance).
 - `[tls_termination]` — `acme` and `domain` for certificates.
 - `[egress]` — `enabled` and `destinations` for outbound restrictions (see code and templates for current behavior).
 
