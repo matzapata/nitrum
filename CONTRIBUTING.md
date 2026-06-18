@@ -10,7 +10,7 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 - **Python**: `3.11+` for documentation tooling.
 - **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
 - **Poetry**: Python dependency manager used for docs diagram generation.
-- **just** (optional): Recipes in the [`justfile`](justfile) mirror common commands (`check`, `lint`, `format`, Docker image builds, docs diagram generation).
+- **make** (optional): Targets in the [`Makefile`](Makefile) mirror common commands (`lint`, `format`, Docker image builds, docs diagram generation).
 
 Clone the repo and run from the workspace root:
 
@@ -48,7 +48,7 @@ brew install graphviz poetry
 Generate diagrams:
 
 ```bash
-just generate-diagrams
+make docs-diagrams
 ```
 
 This command installs the Poetry diagram dependencies (if needed) and renders:

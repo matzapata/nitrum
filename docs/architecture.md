@@ -2,7 +2,7 @@
 
 Nitrum is a Rust workspace for building and running workloads in AWS Nitro Enclaves, with a CLI for local development, enclave builds, and CloudFormation-based deployment. This document explains how the platform achieves TLS termination inside the enclave, how TLS certificates and encryption keys are stored and synchronized , which APIs the data-plane exposes, how secrets are handled, and how the CLI deploy flow ties everything together.
 
-The generated diagrams used in this document are stored in `docs/diagrams/output/` and can be refreshed with `just generate-diagrams`.
+The generated diagrams used in this document are stored in `docs/diagrams/output/` and can be refreshed with `make docs-diagrams`.
 
 ## Workspace layout
 
