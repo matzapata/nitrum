@@ -187,7 +187,7 @@ async fn ingress_proxy(
     let mut backend_req = state
         .proxy_client
         .request(parts.method.clone(), &url)
-        .body(body_bytes.to_vec());
+        .body(body_bytes);
     for (name, value) in &parts.headers {
         let name_str = name.as_str();
         if name_str.eq_ignore_ascii_case("connection")
