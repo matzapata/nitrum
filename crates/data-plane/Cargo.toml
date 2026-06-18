@@ -63,7 +63,7 @@ hex = "0.4"
 [dev-dependencies]
 criterion = { workspace = true }
 tower = "0.5"
-toml = "0.8"
+toml = "1.1"
 
 [[bench]]
 name = "crypto"
