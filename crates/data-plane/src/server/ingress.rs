@@ -107,9 +107,7 @@ pub fn build_https_router(state: Arc<DataPlaneState>) -> Router {
         https_router =
             https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
     }
-    https_router
-        .fallback(ingress_proxy)
-        .with_state(state)
+    https_router.fallback(ingress_proxy).with_state(state)
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────────

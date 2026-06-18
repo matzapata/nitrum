@@ -173,10 +173,7 @@ fn ephemeral_server_config(domains: &[String]) -> (Arc<ServerConfig>, Vec<u8>) {
 
 /// Build a rustls [`ServerConfig`] from PEM-encoded certificate chain and private key.
 #[doc(hidden)]
-pub fn build_server_config_from_pem(
-    chain_pem: &str,
-    key_pem: &str,
-) -> Result<Arc<ServerConfig>> {
+pub fn build_server_config_from_pem(chain_pem: &str, key_pem: &str) -> Result<Arc<ServerConfig>> {
     let certs: Vec<CertificateDer<'static>> =
         rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()

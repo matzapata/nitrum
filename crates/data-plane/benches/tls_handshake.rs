@@ -1,6 +1,6 @@
 //! TLS `ServerConfig` build from PEM and full loopback handshakes.
 
-use criterion::{black_box, Criterion};
+use criterion::{Criterion, black_box};
 use data_plane::server::tls::build_server_config_from_pem;
 use std::sync::Arc;
 use std::sync::Once;
@@ -51,11 +51,10 @@ fn tls_handshake(c: &mut Criterion, fixture: &PemFixture) {
         build_server_config_from_pem(&fixture.chain_pem, &fixture.key_pem).expect("server config");
 
     let mut roots = RootCertStore::empty();
-    let certs: Vec<_> = rustls_pemfile::certs(&mut std::io::BufReader::new(
-        fixture.chain_pem.as_bytes(),
-    ))
-    .collect::<Result<Vec<_>, _>>()
-    .expect("parse certs");
+    let certs: Vec<_> =
+        rustls_pemfile::certs(&mut std::io::BufReader::new(fixture.chain_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse certs");
     for cert in certs {
         roots.add(cert).expect("add cert to roots");
     }

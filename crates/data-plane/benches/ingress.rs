@@ -9,9 +9,7 @@ use axum::http::{Method, Request, StatusCode};
 use config::{NitrumConfig, WellKnown};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, black_box};
 use data_plane::server::ingress::build_https_router;
-use data_plane::{
-    CryptoClient, DataPlaneState, StorageClient, runtime_config, with_backend_port,
-};
+use data_plane::{CryptoClient, DataPlaneState, StorageClient, runtime_config, with_backend_port};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
@@ -69,7 +67,9 @@ fn spawn_mock_backend(rt: &tokio::runtime::Runtime) -> u16 {
         let app = Router::new().fallback(|_: Request<Body>| async { (StatusCode::OK, "ok") });
 
         tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("mock backend serve");
+            axum::serve(listener, app)
+                .await
+                .expect("mock backend serve");
         });
 
         addr.port()
