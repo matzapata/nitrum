@@ -102,27 +102,29 @@ fn ingress_benches(c: &mut Criterion) {
         },
     ];
 
-    let mut group = c.benchmark_group("ingress");
-    for case in &cases {
-        if !case.body.is_empty() {
-            group.throughput(Throughput::Bytes(case.body.len() as u64));
+    {
+        let mut group = c.benchmark_group("ingress");
+        for case in &cases {
+            if !case.body.is_empty() {
+                group.throughput(Throughput::Bytes(case.body.len() as u64));
+            }
+            let app = env.app.clone();
+            group.bench_with_input(BenchmarkId::new("proxy", case.name), case, |b, case| {
+                b.to_async(&rt).iter_batched(
+                    || build_request(case),
+                    |req| {
+                        let app = app.clone();
+                        async move {
+                            let resp = app.oneshot(req).await.expect("oneshot");
+                            black_box(resp.status())
+                        }
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
         }
-        let app = env.app.clone();
-        group.bench_with_input(BenchmarkId::new("proxy", case.name), case, |b, case| {
-            b.to_async(&rt).iter_batched(
-                || build_request(case),
-                |req| {
-                    let app = app.clone();
-                    async move {
-                        let resp = app.oneshot(req).await.expect("oneshot");
-                        black_box(resp.status())
-                    }
-                },
-                BatchSize::SmallInput,
-            );
-        });
+        group.finish();
     }
-    group.finish();
 }
 
 fn main() {

@@ -41,6 +41,7 @@ pub struct TlsState {
 impl TlsState {
     /// Build the TLS state. Use `.rustls_config()` for the server and spawn
     /// `.next()` in a loop to drive provisioning/renewal and log events.
+    #[must_use]
     pub fn new(state: Arc<DataPlaneState>) -> Self {
         let domain = state.config.tls_termination.domain.clone();
         let acme_enabled = state.config.tls_termination.acme;
@@ -87,6 +88,7 @@ impl TlsState {
     }
 
     /// `RustlsConfig` to pass to `bind_rustls`. Hot-reloaded when ACME renews.
+    #[must_use]
     pub fn rustls_config(&self) -> RustlsConfig {
         self.rustls_config.clone()
     }
@@ -152,6 +154,7 @@ impl TlsState {
 // ---------------------------------------------------------------------------
 
 /// Returns SHA-256 hash of the first (leaf) certificate in a PEM chain.
+#[must_use]
 pub fn cert_hash_from_chain_pem(chain_pem: &str) -> Option<Vec<u8>> {
     let certs: Vec<CertificateDer<'static>> =
         rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))

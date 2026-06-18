@@ -15,28 +15,32 @@ const SIZES: &[(u64, &str)] = &[
 fn crypto_benches(c: &mut Criterion) {
     let client = CryptoClient::from_dek(&DEK).expect("valid DEK");
 
-    let mut encrypt_group = c.benchmark_group("encrypt");
-    for &(size, label) in SIZES {
-        let payload = vec![0xABu8; size as usize];
-        encrypt_group.throughput(Throughput::Bytes(size));
-        encrypt_group.bench_with_input(BenchmarkId::new("encrypt", label), &payload, |b, data| {
-            b.iter(|| client.encrypt(black_box(data)).expect("encrypt"))
-        });
+    {
+        let mut encrypt_group = c.benchmark_group("encrypt");
+        for &(size, label) in SIZES {
+            let payload = vec![0xABu8; size as usize];
+            encrypt_group.throughput(Throughput::Bytes(size));
+            encrypt_group.bench_with_input(BenchmarkId::new("encrypt", label), &payload, |b, data| {
+                b.iter(|| client.encrypt(black_box(data)).expect("encrypt"));
+            });
+        }
+        encrypt_group.finish();
     }
-    encrypt_group.finish();
 
-    let mut decrypt_group = c.benchmark_group("decrypt");
-    for &(size, label) in SIZES {
-        let payload = vec![0xABu8; size as usize];
-        let ciphertext = client.encrypt(&payload).expect("encrypt for setup");
-        decrypt_group.throughput(Throughput::Bytes(size));
-        decrypt_group.bench_with_input(
-            BenchmarkId::new("decrypt", label),
-            &ciphertext,
-            |b, data| b.iter(|| client.decrypt(black_box(data)).expect("decrypt")),
-        );
+    {
+        let mut decrypt_group = c.benchmark_group("decrypt");
+        for &(size, label) in SIZES {
+            let payload = vec![0xABu8; size as usize];
+            let ciphertext = client.encrypt(&payload).expect("encrypt for setup");
+            decrypt_group.throughput(Throughput::Bytes(size));
+            decrypt_group.bench_with_input(
+                BenchmarkId::new("decrypt", label),
+                &ciphertext,
+                |b, data| b.iter(|| client.decrypt(black_box(data)).expect("decrypt")),
+            );
+        }
+        decrypt_group.finish();
     }
-    decrypt_group.finish();
 }
 
 fn main() {

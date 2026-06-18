@@ -6,9 +6,13 @@ use std::process::Stdio;
 use tracing::info;
 
 /// Spawn the user command and stream its stdout/stderr to the tracing log (target "app").
+///
 /// `child_env` is the child's full environment (e.g. [`RuntimeConfig::user_env`](crate::config::RuntimeConfig::structfield.user_env) from SSM only).
 /// Returns the process exit code when the child exits.
-pub async fn run(command: &[String], child_env: &HashMap<String, String>) -> Result<i32> {
+pub async fn run<S: std::hash::BuildHasher + Sync>(
+    command: &[String],
+    child_env: &HashMap<String, String, S>,
+) -> Result<i32> {
     if command.is_empty() {
         return Ok(0);
     }

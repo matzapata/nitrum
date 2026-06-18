@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 /// Build a [`RuntimeConfig`] with inert infra placeholders for offline benchmarks.
 #[doc(hidden)]
+#[must_use]
 pub fn runtime_config(nitrum: NitrumConfig) -> RuntimeConfig {
     let aws_sdk_config = Arc::new(
         aws_config::SdkConfig::builder()
@@ -40,7 +41,8 @@ pub fn runtime_config(nitrum: NitrumConfig) -> RuntimeConfig {
 
 /// Set the backend port on an existing [`RuntimeConfig`].
 #[doc(hidden)]
-pub fn with_backend_port(mut config: RuntimeConfig, port: u16) -> RuntimeConfig {
+#[must_use]
+pub const fn with_backend_port(mut config: RuntimeConfig, port: u16) -> RuntimeConfig {
     config.nitrum.project.port = port;
     config
 }

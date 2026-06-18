@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tracing::info;
 
+#[must_use]
 pub fn challenge_handler(
     State(state): State<Arc<DataPlaneState>>,
     Path(token): Path<String>,

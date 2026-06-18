@@ -19,6 +19,7 @@ pub struct DataPlaneState {
 }
 
 impl DataPlaneState {
+    #[must_use]
     pub fn new(
         config: RuntimeConfig,
         storage: Arc<StorageClient>,
