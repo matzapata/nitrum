@@ -3,9 +3,6 @@ tag := "v0.1.0"
 
 # ── dev tools ─────────────────────────────────────────
 
-check:
-    cargo check --all-targets --all-features
-
 lint:
     cargo clippy --all-targets --all-features -- -D warnings
 
