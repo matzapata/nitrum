@@ -14,6 +14,8 @@ pub struct DataPlaneState {
     pub storage: Arc<StorageClient>,
     /// Crypto client for encrypting/decrypting data.
     pub crypto: Arc<CryptoClient>,
+    /// Reused HTTP client for ingress reverse-proxy requests to the user application.
+    pub proxy_client: reqwest::Client,
     /// SHA-256 hash of the current TLS leaf certificate (DER). Set by the TLS layer on load/reload.
     pub tls_cert_hash: Arc<RwLock<Option<Vec<u8>>>>,
 }
@@ -29,6 +31,7 @@ impl DataPlaneState {
             config,
             storage,
             crypto,
+            proxy_client: reqwest::Client::new(),
             tls_cert_hash: Arc::new(RwLock::new(None)),
         }
     }

@@ -1,7 +1,7 @@
 //! Ingress proxy routing via `tower::ServiceExt::oneshot` against a mock loopback backend.
 //!
-//! Measures the full proxy path, including per-request `reqwest::Client` construction,
-//! request body buffering, and backend round-trip — not router dispatch alone.
+//! Measures the full proxy path, including request body buffering and backend
+//! round-trip — not router dispatch alone.
 
 use axum::Router;
 use axum::body::Body;
