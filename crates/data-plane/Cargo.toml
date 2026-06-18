@@ -57,7 +57,7 @@ aws-sdk-ssm = "1"
 aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
 serde_bytes = { version = "0.11", optional = true }
 openssl = { version = "0.10", features = ["vendored"], optional = true }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 [dev-dependencies]
