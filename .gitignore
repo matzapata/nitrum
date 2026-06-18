@@ -6,7 +6,6 @@
 .nitrum
 node_modules/
 dist
-.cursor
 .venv/
 .venv-diagrams/
 __pycache__/

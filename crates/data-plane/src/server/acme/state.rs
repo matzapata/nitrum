@@ -31,6 +31,7 @@ pub struct AcmeState {
 }
 
 impl AcmeState {
+    #[must_use]
     pub fn new(
         domain: String,
         storage: Arc<StorageClient>,
@@ -50,6 +51,7 @@ impl AcmeState {
         }
     }
 
+    #[must_use]
     pub fn cert_store(&self) -> CertStore {
         self.cert_store.clone()
     }

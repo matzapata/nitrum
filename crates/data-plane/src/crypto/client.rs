@@ -88,6 +88,15 @@ impl CryptoClient {
         }
     }
 
+    /// Build a client from a raw 32-byte DEK (benchmarks and tests only).
+    #[cfg(any(test, feature = "bench"))]
+    #[doc(hidden)]
+    pub fn from_dek(dek: &[u8; 32]) -> Result<Self> {
+        let cipher =
+            Aes256Gcm::new_from_slice(dek).map_err(|e| anyhow::anyhow!("invalid key: {e}"))?;
+        Ok(Self { cipher })
+    }
+
     /// Encrypt `data` with the DEK. Returns `nonce (12 bytes) || ciphertext+tag`.
     pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);

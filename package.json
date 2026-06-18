@@ -8,5 +8,11 @@
   "optionalDependencies": {
     "@biomejs/cli-linux-x64": "2.4.10",
     "@rollup/rollup-linux-x64-gnu": "4.60.1"
+  },
+  "devDependencies": {
+    "husky": "9.1.7"
+  },
+  "scripts": {
+    "prepare": "husky"
   }
 }

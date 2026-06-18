@@ -29,6 +29,7 @@ pub struct StorageClient {
 
 impl StorageClient {
     /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
+    #[must_use]
     pub fn new(config: &RuntimeConfig) -> Self {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.dynamodb_endpoint {

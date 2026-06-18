@@ -6,10 +6,15 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+name = "data_plane"
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 
 [features]
+bench = []
 pebble = []
 enclave = [
     "dep:aws-nitro-enclaves-nsm-api",
@@ -54,3 +59,23 @@ serde_bytes = { version = "0.11", optional = true }
 openssl = { version = "0.10", features = ["vendored"], optional = true }
 sha2 = "0.10"
 hex = "0.4"
+
+[dev-dependencies]
+criterion = { workspace = true }
+tower = "0.5"
+toml = "0.8"
+
+[[bench]]
+name = "crypto"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "ingress"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "tls_handshake"
+harness = false
+required-features = ["bench"]
