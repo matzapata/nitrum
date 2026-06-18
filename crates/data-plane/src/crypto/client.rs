@@ -11,6 +11,8 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 
 const NONCE_LEN: usize = 12;
+/// AES-GCM authentication tag length in bytes.
+const GCM_TAG_LEN: usize = 16;
 
 // ── CryptoClient ────────────────────────────────────────────────────────────────────
 
@@ -105,7 +107,8 @@ impl CryptoClient {
             .encrypt(&nonce, data)
             .map_err(|e| anyhow::anyhow!("AES-GCM encrypt error: {e}"))?;
 
-        let mut out = nonce.to_vec();
+        let mut out = Vec::with_capacity(NONCE_LEN + data.len() + GCM_TAG_LEN);
+        out.extend_from_slice(&nonce);
         out.extend_from_slice(&ciphertext);
         Ok(out)
     }

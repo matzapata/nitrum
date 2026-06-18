@@ -175,14 +175,6 @@ async fn ingress_proxy(
     let url = format!("http://{forward_to}{path_and_query}");
     info!(url = %url, "ingress: proxying to app");
 
-    let client = match reqwest::Client::builder().build() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(error = %e, "ingress: failed to create reqwest client");
-            return (StatusCode::BAD_GATEWAY, "proxy client error").into_response();
-        }
-    };
-
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
@@ -192,9 +184,10 @@ async fn ingress_proxy(
         }
     };
 
-    let mut backend_req = client
+    let mut backend_req = state
+        .proxy_client
         .request(parts.method.clone(), &url)
-        .body(body_bytes.to_vec());
+        .body(body_bytes);
     for (name, value) in &parts.headers {
         let name_str = name.as_str();
         if name_str.eq_ignore_ascii_case("connection")

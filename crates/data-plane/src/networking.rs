@@ -247,6 +247,76 @@ fn write_all_raw(fd: libc::c_int, buf: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Writes all bytes from `bufs` to `fd`, coalescing slices into one `writev` per attempt.
+fn write_all_vectored_raw(fd: libc::c_int, bufs: &[&[u8]]) -> std::io::Result<()> {
+    let mut head = 0usize;
+    let mut offset = 0usize;
+
+    while head < bufs.len() {
+        let iovecs: Vec<libc::iovec> = bufs[head..]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slice)| {
+                let slice_offset = if i == 0 { offset } else { 0 };
+                if slice_offset >= slice.len() {
+                    return None;
+                }
+                Some(libc::iovec {
+                    iov_base: slice[slice_offset..].as_ptr().cast_mut().cast(),
+                    iov_len: slice.len() - slice_offset,
+                })
+            })
+            .collect();
+
+        if iovecs.is_empty() {
+            break;
+        }
+
+        let n = unsafe {
+            libc::writev(
+                fd,
+                iovecs.as_ptr(),
+                libc::c_int::try_from(iovecs.len()).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "too many iovecs for writev",
+                    )
+                })?,
+            )
+        };
+        if n < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "writev returned 0",
+            ));
+        }
+
+        let mut remaining = usize::try_from(n).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "negative write size encountered",
+            )
+        })?;
+
+        while remaining > 0 {
+            let slice_len = bufs[head].len() - offset;
+            if remaining < slice_len {
+                offset += remaining;
+                remaining = 0;
+            } else {
+                remaining -= slice_len;
+                head += 1;
+                offset = 0;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// TAP → VSOCK: read raw Ethernet frames from the TAP device, prepend a
 /// 2-byte LE length header, and write to the VSOCK stream.
 fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: &Arc<AtomicBool>) {
@@ -266,9 +336,8 @@ fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: &Arc<AtomicBool>
             })
             .unwrap()
             .to_le_bytes();
-        if write_all_raw(vsock_fd, &len).is_err()
-            || write_all_raw(vsock_fd, &buf[..n.cast_unsigned()]).is_err()
-        {
+        let frame = &buf[..n.cast_unsigned()];
+        if write_all_vectored_raw(vsock_fd, &[&len, frame]).is_err() {
             error!("VSOCK write error");
             break;
         }
