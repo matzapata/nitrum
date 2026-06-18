@@ -2,6 +2,7 @@
 
 use crate::crypto::CryptoClient;
 use crate::storage::{StorageClient, keys};
+use crate::utils::ascii::{ASCII_ALNUM_OR_PATH_EXTRA, bytes_all_allowed};
 use anyhow::Context;
 use std::sync::Arc;
 use thiserror::Error;
@@ -52,10 +53,7 @@ impl EnclaveKvStore {
                 "key exceeds maximum length of {MAX_LOGICAL_KEY_LEN} bytes"
             )));
         }
-        if !logical_key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '@' | '.' | '/' | '-'))
-        {
+        if !bytes_all_allowed(logical_key.as_bytes(), &ASCII_ALNUM_OR_PATH_EXTRA) {
             return Err(KvStoreError::BadRequest(
                 "key may only contain ASCII letters, digits, and _ : @ . / -".into(),
             ));

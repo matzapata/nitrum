@@ -1,3 +1,4 @@
+pub mod ascii;
 pub mod imds;
 pub mod leader;
 #[cfg(feature = "enclave")]
