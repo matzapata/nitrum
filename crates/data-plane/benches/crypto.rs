@@ -20,9 +20,13 @@ fn crypto_benches(c: &mut Criterion) {
         for &(size, label) in SIZES {
             let payload = vec![0xABu8; size as usize];
             encrypt_group.throughput(Throughput::Bytes(size));
-            encrypt_group.bench_with_input(BenchmarkId::new("encrypt", label), &payload, |b, data| {
-                b.iter(|| client.encrypt(black_box(data)).expect("encrypt"));
-            });
+            encrypt_group.bench_with_input(
+                BenchmarkId::new("encrypt", label),
+                &payload,
+                |b, data| {
+                    b.iter(|| client.encrypt(black_box(data)).expect("encrypt"));
+                },
+            );
         }
         encrypt_group.finish();
     }
