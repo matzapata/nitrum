@@ -15,6 +15,9 @@
 #   NITRUM_CLOUD_WAIT_ACTIVE_TIMEOUT_SECONDS    default 300 (5 minutes)
 #   NITRUM_CLOUD_WAIT_ACTIVE_POLL_SECONDS       default 5
 #   NITRUM_CLOUD_LOGS_SINCE_MINUTES             default 15
+#   NITRUM_E2E_RUNTIME_CONTROL_PLANE            optional; override nitrum.toml control_plane after init
+#   NITRUM_E2E_RUNTIME_DATA_PLANE               optional; override nitrum.toml data_plane after init
+#   NITRUM_E2E_RUNTIME_NITRO_CLI                optional; override nitrum.toml nitro_cli after init
 #
 # Usage: from repo root, `./tests/e2e/cloud.sh`
 
@@ -53,10 +56,24 @@ nitrum() {
     fi
 }
 
+override_runtime_image() {
+    local key="$1" value="$2" toml="${PROJECT}/nitrum.toml"
+    [[ -n "$value" && -f "$toml" ]] || return 0
+    echo "=== init: overriding ${key} with ${value} ==="
+    sed -i.bak "s|^${key} = .*|${key} = \"${value}\"|" "$toml" && rm -f "${toml}.bak"
+}
+
+apply_runtime_overrides() {
+    override_runtime_image control_plane "${NITRUM_E2E_RUNTIME_CONTROL_PLANE:-}"
+    override_runtime_image data_plane "${NITRUM_E2E_RUNTIME_DATA_PLANE:-}"
+    override_runtime_image nitro_cli "${NITRUM_E2E_RUNTIME_NITRO_CLI:-}"
+}
+
 step_init() {
     mkdir -p "${PARENT}"
     if [[ -f "${PROJECT}/nitrum.toml" ]]; then
         echo "=== init: skip (found nitrum.toml) ==="
+        apply_runtime_overrides
         return 0
     fi
     if [[ -e "${PROJECT}" ]]; then
@@ -65,6 +82,7 @@ step_init() {
     fi
     echo "=== init: ${NAME} in ${PARENT} ==="
     (cd "${PARENT}" && nitrum init "${NAME}")
+    apply_runtime_overrides
 }
 
 step_build() {
