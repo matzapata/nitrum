@@ -60,6 +60,7 @@ COPY Cargo.toml Cargo.toml
 COPY crates/config/src      crates/config/src
 COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/src  crates/data-plane/src
+COPY crates/data-plane/benches crates/data-plane/benches
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/cli/Cargo.toml  crates/cli/Cargo.toml

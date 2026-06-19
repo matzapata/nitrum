@@ -68,15 +68,18 @@ toml = "0.8"
 
 [[bench]]
 name = "crypto"
+path = "benches/crypto.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "ingress"
+path = "benches/ingress.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "tls_handshake"
+path = "benches/tls_handshake.rs"
 harness = false
 required-features = ["bench"]

@@ -29,10 +29,13 @@ COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
 
 # Stub sources so workspace members parse (control-plane depends on config; cli/data-plane are workspace members).
-RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src \
-&& echo 'fn main() {}' > crates/cli/src/main.rs \
-&& echo 'fn main() {}' > crates/data-plane/src/main.rs \
-&& echo 'fn main() {}' > crates/control-plane/src/main.rs
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/data-plane/benches \
+    && echo 'fn main() {}' > crates/cli/src/main.rs \
+    && echo 'fn main() {}' > crates/data-plane/src/main.rs \
+    && echo 'fn main() {}' > crates/control-plane/src/main.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/crypto.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/ingress.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/tls_handshake.rs
 
 COPY crates/config/src crates/config/src
 COPY crates/control-plane/src crates/control-plane/src
