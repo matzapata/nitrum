@@ -98,6 +98,13 @@ describe("nitrum project (integration)", () => {
     assert.ok("origin" in data || "ip" in data);
   });
 
+  it("GET /egress-blocked is denied when example.com is not whitelisted", async () => {
+    const data = await fetchJson(`${baseUrl}/egress-blocked`);
+    assert.ok(data && typeof data === "object");
+    assert.equal(data.ok, false);
+    assert.ok(typeof data.error === "string" && data.error.length > 0);
+  });
+
   it("POST /crypto round-trips plaintext", async () => {
     const data = await fetchJson(`${baseUrl}/crypto`, {
       method: "POST",

@@ -2,7 +2,7 @@
 # chef — installs cargo-chef once, reused by both planner and builder
 ################################################################################
 
-FROM rust:1.92-slim AS chef
+FROM rust:1.95-slim AS chef
 
 WORKDIR /build
 
@@ -28,9 +28,13 @@ COPY crates/cli/Cargo.toml            crates/cli/Cargo.toml
 
 # Stub all workspace members so `cargo chef prepare` can resolve the full graph
 RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/config/src \
+    crates/data-plane/benches \
     && echo 'fn main() {}' > crates/cli/src/main.rs \
     && echo 'fn main() {}' > crates/control-plane/src/main.rs \
     && echo 'fn main() {}' > crates/data-plane/src/main.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/crypto.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/ingress.rs \
+    && echo 'fn main() {}' > crates/data-plane/benches/tls_handshake.rs \
     && touch crates/config/src/lib.rs
 
 RUN cargo chef prepare --recipe-path recipe.json
@@ -78,7 +82,7 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${VERSION}" \
       io.nitrum.git.sha="${GIT_SHA}"
 
-RUN apk update && apk upgrade && apk --no-cache add iproute2
+RUN apk update && apk upgrade && apk --no-cache add iproute2 iptables
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
 RUN chmod +x /app/data-plane

@@ -4,6 +4,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info};
 
+#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+async fn setup_egress_if_enabled(runtime_config: &RuntimeConfig) {
+    if let Err(error) = data_plane::egress::init(
+        &runtime_config.egress,
+        &runtime_config.tls_termination,
+        Some(&runtime_config.aws_region),
+    )
+    .await
+    {
+        error!(
+            error = %format!("{error:#}"),
+            "egress whitelist setup failed"
+        );
+        std::process::exit(1);
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "data-plane")]
 struct Args {
@@ -50,6 +67,9 @@ async fn main() {
         );
         std::process::exit(1);
     });
+
+    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+    setup_egress_if_enabled(&runtime_config).await;
 
     let user_command: Vec<String> = if cli_command.is_empty() {
         runtime_config.nitrum.project.start_command.clone()
@@ -120,6 +140,11 @@ async fn main() {
             }
         }
     };
+
+    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+    if runtime_config.egress.enabled {
+        data_plane::egress::teardown();
+    }
 
     std::process::exit(exit_code);
 }

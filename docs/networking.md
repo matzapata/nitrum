@@ -84,6 +84,8 @@ sequenceDiagram
 
 When the app or data-plane needs egress (for example KMS, DynamoDB, S3, ACME), traffic leaves via `tap0`, crosses `gvproxy` on the host, then exits through normal host networking.
 
+When `[egress].enabled` is true in `nitrum.toml`, the data-plane installs in-enclave DNS and transparent TCP proxies plus iptables `OUTPUT` rules before application startup. Allowed hostnames from `destinations` (plus implicit platform allows) are resolved and relayed; blocked destinations receive NXDOMAIN or dropped TCP connections. See [usage.md](usage.md) for configuration details.
+
 ```mermaid
 sequenceDiagram
     autonumber
