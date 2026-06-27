@@ -83,7 +83,13 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${VERSION}" \
       io.nitrum.git.sha="${GIT_SHA}"
 
-RUN apk update && apk upgrade && apk --no-cache add iproute2 iptables
+# Nitro enclave kernels expose legacy netfilter tables reliably; Alpine's default
+# `iptables` (nf_tables) often fails inside the EIF (see Evervault installer).
+# The `iptables-legacy` package installs the binaries under /sbin; point the
+# default `iptables`/`ip6tables` names at the legacy backend.
+RUN apk update && apk upgrade && apk --no-cache add iproute2 iptables iptables-legacy \
+    && ln -sf /sbin/iptables-legacy /usr/sbin/iptables \
+    && ln -sf /sbin/ip6tables-legacy /usr/sbin/ip6tables
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/data-plane /app/data-plane
 RUN chmod +x /app/data-plane

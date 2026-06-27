@@ -10,7 +10,7 @@ use tokio::io;
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tracing::{debug, info, warn};
 
-use super::constants::{EGRESS_SOCKET_MARK, TCP_PROXY_PORT};
+use super::constants::{EGRESS_BYPASS_SOURCE_IP, EGRESS_SOCKET_MARK, TCP_PROXY_PORT};
 use super::filter::EgressFilter;
 use super::ip_cache::IpCache;
 use super::platform;
@@ -21,8 +21,23 @@ const SO_MARK: libc::c_int = 36;
 
 async fn connect_upstream(dst: SocketAddrV4, mark: u32) -> io::Result<TcpStream> {
     let socket = TcpSocket::new_v4()?;
+    // SO_MARK is a core socket option (works even where the `xt_mark` match is absent); it lets
+    // the `-m mark` RETURN rule exclude this socket on full kernels (local Compose).
     set_socket_mark(socket.as_raw_fd(), mark)?;
+    // Source-IP bypass: bind to the dedicated egress IP so the redirect NAT excludes this upstream
+    // via a core `-s` RETURN rule. Best-effort: absent in environments without the bypass address.
+    bind_bypass_source(&socket);
     socket.connect(SocketAddr::V4(dst)).await
+}
+
+/// Bind `socket` to the egress bypass source IP (port 0) so transparent-redirect NAT skips it.
+///
+/// Failures are ignored: the address only exists on the enclave TAP fabric, and other environments
+/// rely on the `SO_MARK` bypass instead.
+fn bind_bypass_source(socket: &TcpSocket) {
+    if let Ok(ip) = EGRESS_BYPASS_SOURCE_IP.parse() {
+        let _ = socket.bind(SocketAddr::V4(SocketAddrV4::new(ip, 0)));
+    }
 }
 
 fn set_socket_mark(fd: std::os::unix::io::RawFd, mark: u32) -> io::Result<()> {

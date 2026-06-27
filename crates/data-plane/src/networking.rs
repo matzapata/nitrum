@@ -2,11 +2,13 @@ use crate::constants::HOST_PROXY_PORT;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 const TAP_DEVICE_NAME: &str = "tap0";
 const TAP_IP_CIDR: &str = "192.168.127.2/24";
 const TAP_GATEWAY: &str = "192.168.127.1";
+/// EC2 IMDS link-local address; must be routed via gvproxy (not treated as on-link on `tap0`).
+const IMDS_HOST_ROUTE: &str = "169.254.169.254/32";
 const TAP_MAC: &str = "ba:aa:ad:c0:ff:ee";
 const TAP_MTU: &str = "1500";
 
@@ -123,6 +125,35 @@ fn configure_tap() {
         "dev",
         TAP_DEVICE_NAME,
     ]);
+    // Without this, Linux may ARP for 169.254.169.254 on tap0 instead of forwarding to gvproxy.
+    add_imds_route();
+}
+
+fn add_imds_route() {
+    let status = Command::new("ip")
+        .args([
+            "route",
+            "add",
+            IMDS_HOST_ROUTE,
+            "via",
+            TAP_GATEWAY,
+            "dev",
+            TAP_DEVICE_NAME,
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) if s.code() == Some(2) => {
+            // EEXIST: route already present (e.g. warm restart).
+        }
+        Ok(s) => {
+            warn!(
+                exit_code = ?s.code(),
+                "ip route add for IMDS failed; metadata may be unreachable"
+            );
+        }
+        Err(e) => warn!(error = %e, "failed to run ip route add for IMDS"),
+    }
 }
 
 fn run_ip(args: &[&str]) {
