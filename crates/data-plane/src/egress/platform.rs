@@ -1,7 +1,7 @@
 //! Implicit platform allow patterns and bootstrap IP addresses.
 
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::time::Duration;
 
 use config::{Egress, TlsTermination};

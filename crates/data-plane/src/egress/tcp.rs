@@ -46,7 +46,7 @@ fn set_socket_mark(fd: std::os::unix::io::RawFd, mark: u32) -> io::Result<()> {
             fd,
             libc::SOL_SOCKET,
             SO_MARK,
-            &mark as *const u32 as *const libc::c_void,
+            (&raw const mark).cast::<libc::c_void>(),
             size_of::<u32>() as libc::socklen_t,
         )
     };
@@ -66,7 +66,7 @@ fn get_original_dst(stream: &TcpStream) -> io::Result<SocketAddrV4> {
             stream.as_raw_fd(),
             SOL_IP,
             SO_ORIGINAL_DST,
-            &raw mut addr as *mut _ as *mut libc::c_void,
+            (&raw mut addr).cast::<libc::c_void>(),
             &raw mut len,
         )
     };

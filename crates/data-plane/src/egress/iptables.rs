@@ -370,8 +370,7 @@ fn ip6_chain_exists() -> bool {
     Command::new(ip6tables_bin())
         .args(["-t", "filter", "-L", IPTABLES_CHAIN])
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 /// Whether OUTPUT already jumps into the egress chain in the IPv6 filter table (best-effort).
@@ -379,8 +378,7 @@ fn ip6_chain_jump_exists() -> bool {
     Command::new(ip6tables_bin())
         .args(["-t", "filter", "-C", "OUTPUT", "-j", IPTABLES_CHAIN])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn run_iptables(args: &[&str]) -> anyhow::Result<()> {

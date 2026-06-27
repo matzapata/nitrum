@@ -55,7 +55,9 @@ impl IpCache {
             guard.remove(&ip);
             return None;
         }
-        Some(entry.hostname.clone())
+        let hostname = entry.hostname.clone();
+        drop(guard);
+        Some(hostname)
     }
 }
 
