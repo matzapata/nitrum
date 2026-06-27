@@ -78,6 +78,25 @@ impl ImdsClient {
     // ── internal helpers ────────────────────────────────────────────────────
 
     async fn get_token(&self) -> Result<String> {
+        const ATTEMPTS: u32 = 4;
+        const RETRY_DELAY: Duration = Duration::from_millis(250);
+
+        let mut last_err = None;
+        for attempt in 1..=ATTEMPTS {
+            match self.fetch_token_once().await {
+                Ok(token) => return Ok(token),
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < ATTEMPTS {
+                        tokio::time::sleep(RETRY_DELAY).await;
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap())
+    }
+
+    async fn fetch_token_once(&self) -> Result<String> {
         let base = &self.latest_base;
         self.http
             .put(format!("{base}/api/token"))

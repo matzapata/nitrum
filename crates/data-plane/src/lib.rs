@@ -12,6 +12,9 @@ mod utils;
 #[doc(hidden)]
 pub use bench::{runtime_config, with_backend_port};
 
+#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+pub mod egress;
+
 #[cfg(feature = "enclave")]
 pub mod networking;
 

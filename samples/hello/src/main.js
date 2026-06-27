@@ -14,11 +14,22 @@ app.get("/health", (_req, res) => {
 
 app.get("/egress", async (_req, res) => {
   try {
-    const { data } = await axios.get("https://httpbin.org/ip");
+    const { data } = await axios.get("https://api.ipify.org?format=json", {
+      timeout: 15_000,
+    });
     res.json(data);
   } catch (err) {
     console.error(`[server] egress error: ${err.message}`);
     res.status(502).json({ error: err.message });
+  }
+});
+
+app.get("/egress-blocked", async (_req, res) => {
+  try {
+    await axios.get("https://example.com", { timeout: 5000 });
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
   }
 });
 

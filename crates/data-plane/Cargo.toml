@@ -59,6 +59,7 @@ serde_bytes = { version = "0.11", optional = true }
 openssl = { version = "0.10", features = ["vendored"], optional = true }
 sha2 = "0.10"
 hex = "0.4"
+regex = "1"
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -67,15 +68,18 @@ toml = "0.8"
 
 [[bench]]
 name = "crypto"
+path = "benches/crypto.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "ingress"
+path = "benches/ingress.rs"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "tls_handshake"
+path = "benches/tls_handshake.rs"
 harness = false
 required-features = ["bench"]

@@ -3,7 +3,7 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    HealthCheck, NitrumConfig, Project, Runtime, Scaling, TlsTermination, WellKnown,
+    Egress, HealthCheck, NitrumConfig, Project, Runtime, Scaling, TlsTermination, WellKnown,
     validate_project_name,
 };
 use futures_util::future::try_join3;
@@ -79,6 +79,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),
         tls_termination: TlsTermination::default(),
+        egress: Egress {
+            enabled: true,
+            destinations: vec!["ipify\\.org$".to_string()],
+        },
     };
 
     let writes: Vec<(&str, String)> = vec![

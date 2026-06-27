@@ -218,6 +218,8 @@ services:
     image: ${ENCLAVE_IMAGE}
     platform: linux/amd64
     pull_policy: never
+    cap_add:
+      - NET_ADMIN
     build:
       context: ..
       args:

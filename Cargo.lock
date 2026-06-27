@@ -1237,6 +1237,7 @@ name = "config"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "regex",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -1505,6 +1506,7 @@ dependencies = [
  "openssl",
  "rand 0.8.6",
  "rcgen",
+ "regex",
  "reqwest",
  "rustls 0.23.40",
  "rustls-pemfile",

@@ -1,7 +1,4 @@
-TAG_PREFIX ?= matzapata/
-TAG ?= v0.1.0
-
-.PHONY: lint format docs-diagrams
+.PHONY: lint format check docs-diagrams
 
 # ── dev tools ─────────────────────────────────────────
 
@@ -10,6 +7,8 @@ lint:
 
 format:
 	cargo fmt --all
+
+check: lint format
 
 docs-diagrams:
 	poetry install --no-root --with diagrams

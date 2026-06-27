@@ -2,22 +2,46 @@ use crate::constants::HOST_PROXY_PORT;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+/// The name of the TAP network device created inside the enclave.
 const TAP_DEVICE_NAME: &str = "tap0";
+
+/// IPv4 address and netmask (CIDR) assigned to the TAP device inside the enclave.
 const TAP_IP_CIDR: &str = "192.168.127.2/24";
+
+/// The IPv4 gateway address used for the TAP device's route table.
 const TAP_GATEWAY: &str = "192.168.127.1";
+
+/// The IPv4 host route (link-local) for EC2 Instance Metadata Service (IMDS).
+/// Traffic to this address is routed via gvproxy.
+const IMDS_HOST_ROUTE: &str = "169.254.169.254/32";
+
+/// The MAC address assigned to the TAP device. Used for interface configuration.
 const TAP_MAC: &str = "ba:aa:ad:c0:ff:ee";
+
+/// The Maximum Transmission Unit (MTU) for the TAP interface.
 const TAP_MTU: &str = "1500";
 
+/// The parent context ID (CID) used for VSOCK communication with the host (always 3 in Nitro enclaves).
 const PARENT_CID: u32 = 3;
+
+/// Maximum size (in bytes) for a L2 frame (largest allowed Ethernet frame size).
 const MAX_FRAME_SIZE: usize = 65535;
+
+/// Number of bytes used to represent frame length prefix for each transferred frame.
 const FRAME_LEN_SIZE: usize = 2;
 
+/// Flag used with TUN/TAP ioctls: designates a TAP (Ethernet) device.
 const IFF_TAP: libc::c_short = 0x0002;
+
+/// Flag used with TUN/TAP ioctls: disables packet information prepending (raw Ethernet).
 const IFF_NO_PI: libc::c_short = 0x1000;
+
+/// ioctl request code for creating/configuring a TUN/TAP device.
 const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
 
+/// Socket domain constant for VSOCK (host/guest communication).
 const AF_VSOCK: libc::c_int = 40;
 
 /// Set up enclave networking via TAP device + VSOCK to gvproxy on the host.
@@ -123,6 +147,35 @@ fn configure_tap() {
         "dev",
         TAP_DEVICE_NAME,
     ]);
+    // Without this, Linux may ARP for 169.254.169.254 on tap0 instead of forwarding to gvproxy.
+    add_imds_route();
+}
+
+fn add_imds_route() {
+    let status = Command::new("ip")
+        .args([
+            "route",
+            "add",
+            IMDS_HOST_ROUTE,
+            "via",
+            TAP_GATEWAY,
+            "dev",
+            TAP_DEVICE_NAME,
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) if s.code() == Some(2) => {
+            // EEXIST: route already present (e.g. warm restart).
+        }
+        Ok(s) => {
+            warn!(
+                exit_code = ?s.code(),
+                "ip route add for IMDS failed; metadata may be unreachable"
+            );
+        }
+        Err(e) => warn!(error = %e, "failed to run ip route add for IMDS"),
+    }
 }
 
 fn run_ip(args: &[&str]) {

@@ -200,7 +200,12 @@ Options are defined in the `shared` crate; the sample project comments point to 
 - `[health_check]` — path, port, and interval for health checks.
 - `[scaling]` — replica hints and enclave CPU/RAM (used in deployment templates).
 - `[tls_termination]` — `acme` and `domain` for certificates.
-- `[egress]` — `enabled` and `destinations` for outbound restrictions (see code and templates for current behavior).
+- `[egress]` — outbound whitelist enforced inside the data-plane when `enabled = true`:
+  - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.
+  - **Implicit allows** (always merged when egress is enabled): IMDS (`169.254.169.254`), hostnames from `NITRUM_IMDS_BASE_URL` and `NITRUM_*_ENDPOINT_URL`, ACME directory host when `tls_termination.acme` or `NITRUM_ACME_DIRECTORY_URL` is set, and regional AWS API endpoints (`kms`, `ssm`, `dynamodb`) using the AWS region resolved during data-plane bootstrap.
+  - **Environment:** `NITRUM_EGRESS_UPSTREAM_DNS` overrides the upstream resolver (`host:port`) used by the in-enclave DNS proxy (default: first `nameserver` from `/etc/resolv.conf`, typically gvproxy `192.168.127.1:53` on Nitro or Docker `127.0.0.11:53` locally).
+  - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the data-plane image after changes (`NITRUM_E2E_REBUILD_DATA_PLANE=1 ./tests/e2e/local.sh`).
+  - **Limits:** UDP egress other than DNS is not filtered; IPv6 TCP is not redirected by the transparent proxy and may bypass the whitelist; connections to raw IPs that never went through an allowed DNS lookup are blocked unless they match implicit platform IPs.
 
 Edit `nitrum.toml` to match your app’s port, domain, and infrastructure expectations, then rebuild the EIF and redeploy when you change enclave-related settings.
 
