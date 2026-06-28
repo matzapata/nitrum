@@ -92,6 +92,7 @@ impl AcmeState {
                     .provision_cert(account, &self.domain, self.cert_storage.as_ref())
                     .await?;
                 self.cert_storage.write_cert_pair(&chain, &key).await?;
+                self.record_cert_metrics("issued", &chain);
                 return Ok((chain, key));
             }
 
@@ -127,8 +128,20 @@ impl AcmeState {
         tokio::time::sleep(sleep_dur).await;
 
         let (chain, key) = self.get_or_provision().await?;
+        self.record_cert_metrics("renewed", &chain);
         self.current_chain = Some(chain.clone());
         *self.cert_store.write().await = Some((chain, key));
         Ok(AcmeEvent::CertRenewed)
+    }
+
+    /// Record an ACME lifecycle `event` and update the certificate expiry gauge.
+    ///
+    /// `chain` is the freshly issued/renewed leaf chain (PEM); expiry parse
+    /// failures are ignored so metrics never affect certificate provisioning.
+    fn record_cert_metrics(&self, event: &'static str, chain: &str) {
+        telemetry::metrics::record_acme_event(event);
+        if let Ok(remaining) = self.inner.duration_until_expiry(chain) {
+            telemetry::metrics::set_cert_expiry_seconds(&self.domain, remaining.as_secs_f64());
+        }
     }
 }

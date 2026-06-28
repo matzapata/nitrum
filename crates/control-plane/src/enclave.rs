@@ -133,6 +133,7 @@ impl Enclave {
             match Self::run_enclave_once(debug_mode, cpu_count, memory_mib, eif_path.as_str()).await
             {
                 Ok(()) => {
+                    telemetry::metrics::record_enclave_restart("started");
                     info!("Enclave started... Waiting 5 seconds for warmup.");
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     if debug_mode && let Err(e) = Self::send_debug_logs_to_stdout().await {
@@ -141,6 +142,7 @@ impl Enclave {
                     backoff_secs = 1;
                 }
                 Err(e) => {
+                    telemetry::metrics::record_enclave_restart("failed");
                     warn!(error = %e, "run-enclave failed");
                     Self::advance_backoff(&mut backoff_secs);
                 }

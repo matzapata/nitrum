@@ -119,6 +119,27 @@ The request may be empty or use `Content-Type: application/json` with an optiona
 
 The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `samples/wallet/enclave/src/main.js` sample uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext` while still returning it in the HTTP response for the client-driven signing flow.
 
+## Observability
+
+Nitrum emits telemetry through a single path: OpenTelemetry. Both the control-plane (on the EC2 host) and the data-plane (inside the enclave) always write structured logs to stdout and, when an OTLP collector endpoint is configured, additionally export **traces, metrics, and logs** over OTLP/gRPC to a local OpenTelemetry Collector. The collector (the AWS Distro for OpenTelemetry, ADOT, on the EC2 host) is the only component that knows about AWS: it translates OTLP into CloudWatch metrics (`Nitrum` namespace via EMF), CloudWatch Logs (`/nitrum/{project}/data-plane` and `/nitrum/{project}/control-plane`), and X-Ray traces. There is no AWS-specific telemetry code in the binaries, so moving to another platform (e.g. Kubernetes) is a collector swap, not a code change.
+
+### `NITRUM_OTLP_ENDPOINT`
+
+Selects the OTLP/gRPC collector endpoint.
+
+- **Unset (or empty)** — stdout-only. No collector is contacted; `nitrum local` and tests work without one.
+- **Set** — also export OTLP to that endpoint. On the deployed stack:
+  - control-plane: `http://127.0.0.1:4317` (collector shares the control-plane container's network namespace).
+  - data-plane (enclave): `http://192.168.127.1:4317` — the gvproxy gateway, which NATs to the host/container loopback where the collector listens. Set this in your enclave image (`ENV NITRUM_OTLP_ENDPOINT=...`) to enable OTLP from inside the enclave; leave it unset for stdout-only.
+
+`RUST_LOG` controls the log/trace filter (default `info`) for both stdout and OTLP.
+
+When egress enforcement is enabled (`[egress].enabled`), an IP-based `NITRUM_OTLP_ENDPOINT` is automatically added to the allowlist and excluded from the transparent proxy (mirroring the IMDS bypass) so OTLP export is not dropped.
+
+### Redaction
+
+Telemetry only ever carries low-cardinality, non-sensitive attributes: service name, matched **route template** (never the raw URL), HTTP method, status class, and operation names (e.g. KMS `decrypt`). Request and response **headers, bodies, query strings, and secrets are never recorded** in logs, spans, or metrics.
+
 ## Commands
 
 ### `nitrum init [NAME]`
@@ -202,7 +223,7 @@ Options are defined in the `shared` crate; the sample project comments point to 
 - `[tls_termination]` — `acme` and `domain` for certificates.
 - `[egress]` — outbound whitelist enforced inside the data-plane when `enabled = true`:
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.
-  - **Implicit allows** (always merged when egress is enabled): IMDS (`169.254.169.254`), hostnames from `NITRUM_IMDS_BASE_URL` and `NITRUM_*_ENDPOINT_URL`, ACME directory host when `tls_termination.acme` or `NITRUM_ACME_DIRECTORY_URL` is set, and regional AWS API endpoints (`kms`, `ssm`, `dynamodb`) using the AWS region resolved during data-plane bootstrap.
+  - **Implicit allows** (always merged when egress is enabled): IMDS (`169.254.169.254`), hostnames from `NITRUM_IMDS_BASE_URL` and `NITRUM_*_ENDPOINT_URL`, ACME directory host when `tls_termination.acme` or `NITRUM_ACME_DIRECTORY_URL` is set, regional AWS API endpoints (`kms`, `ssm`, `dynamodb`) using the AWS region resolved during data-plane bootstrap, and the OTLP collector from `NITRUM_OTLP_ENDPOINT` (an IP endpoint is also excluded from the transparent proxy, like IMDS).
   - **Environment:** `NITRUM_EGRESS_UPSTREAM_DNS` overrides the upstream resolver (`host:port`) used by the in-enclave DNS proxy (default: first `nameserver` from `/etc/resolv.conf`, typically gvproxy `192.168.127.1:53` on Nitro or Docker `127.0.0.11:53` locally).
   - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the data-plane image after changes (`NITRUM_E2E_REBUILD_DATA_PLANE=1 ./tests/e2e/local.sh`).
   - **Limits:** UDP egress other than DNS is not filtered; IPv6 TCP is not redirected by the transparent proxy and may bypass the whitelist; connections to raw IPs that never went through an allowed DNS lookup are blocked unless they match implicit platform IPs.

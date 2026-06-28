@@ -51,6 +51,7 @@ pub async fn init(
 
     let platform = build_platform_allows(egress, tls, aws_region).await?;
     let pattern_count = platform.patterns.len();
+    let collector_bypass = platform.collector_bypass_ip;
     let filter = Arc::new(Filter::new(true, &platform.patterns));
     let ip_cache = Arc::new(IpCache::new());
     let platform_ips = Arc::new(platform.allowed_ips);
@@ -62,7 +63,7 @@ pub async fn init(
     let dns_socket = bind_dns_proxy(dns_listen).await?;
     let tcp_listener = bind_tcp_proxy().await?;
 
-    if let Err(error) = install_iptables(upstream_dns) {
+    if let Err(error) = install_iptables(upstream_dns, collector_bypass) {
         log_missing_capability(&error);
         return Err(error);
     }

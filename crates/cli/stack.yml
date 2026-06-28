@@ -115,6 +115,14 @@ Parameters:
     Default: ""
     Description: Optional control-plane debug CLI arg (`--debug-mode` or empty).
 
+  OtelCollectorImage:
+    Type: String
+    Default: public.ecr.aws/aws-observability/aws-otel-collector:latest
+    Description: >
+      ADOT (AWS Distro for OpenTelemetry) Collector image run on the EC2 host. Receives OTLP from
+      the control-plane and the enclave data-plane and exports to CloudWatch (EMF), CloudWatch Logs,
+      and X-Ray.
+
   EifImageSha384:
     Type: String
     Description: >
@@ -604,6 +612,16 @@ Resources:
       LogGroupName: !Sub "/nitrum/${ProjectName}/control-plane"
       RetentionInDays: 7
 
+  # Target log group for the ADOT collector's awsemf exporter (CloudWatch extracts metrics from
+  # the EMF documents written here into the "Nitrum" namespace).
+  MetricsLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      LogGroupName: !Sub "/nitrum/${ProjectName}/metrics"
+      RetentionInDays: 7
+
   # ── IAM (CloudFormation-generated physical names) ────────────────────────────
   InstanceRole:
     Type: AWS::IAM::Role
@@ -652,14 +670,28 @@ Resources:
               - Sid: CloudWatchLogs
                 Effect: Allow
                 Action:
+                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                   - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
                 Resource:
                   - !GetAtt DataPlaneLogGroup.Arn
                   - !Sub "${DataPlaneLogGroup.Arn}:*"
                   - !GetAtt ControlPlaneLogGroup.Arn
                   - !Sub "${ControlPlaneLogGroup.Arn}:*"
+                  - !GetAtt MetricsLogGroup.Arn
+                  - !Sub "${MetricsLogGroup.Arn}:*"
+
+              # X-Ray ingestion for the ADOT collector's awsxray exporter (trace segments).
+              - Sid: XRayTraceIngestion
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
 
               - Sid: SsmParams
                 Effect: Allow
@@ -761,7 +793,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -e NITRUM_OTLP_ENDPOINT=http://127.0.0.1:4317 -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
@@ -770,6 +802,68 @@ Resources:
 
               systemctl daemon-reload
               systemctl enable --now control-plane.service
+
+              # ── OpenTelemetry Collector (ADOT) ─────────────────────────────────────────────
+              # Receives OTLP/gRPC on :4317 and exports to CloudWatch (EMF metrics in the
+              # "Nitrum" namespace), CloudWatch Logs (per-service log groups), and X-Ray.
+              # Runs in the control-plane container's network namespace so it is reachable at
+              # 127.0.0.1:4317 from the control-plane and, via the gvproxy gateway NAT, at
+              # 192.168.127.1:4317 from the enclave data-plane.
+              mkdir -p /opt/nitrum
+              cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
+              receivers:
+                otlp:
+                  protocols:
+                    grpc:
+                      endpoint: 0.0.0.0:4317
+              processors:
+                batch:
+              exporters:
+                awsemf:
+                  namespace: Nitrum
+                  log_group_name: "/nitrum/${ProjectName}/metrics"
+                  log_stream_name: "{ServiceName}"
+                awscloudwatchlogs:
+                  log_group_name: "/nitrum/${ProjectName}/{ServiceName}"
+                  log_stream_name: "otel"
+                awsxray: {}
+              service:
+                pipelines:
+                  traces:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsxray]
+                  metrics:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsemf]
+                  logs:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awscloudwatchlogs]
+              OTEL_EOF
+
+              docker pull "${OtelCollectorImage}"
+
+              cat > /etc/systemd/system/otel-collector.service <<'UNIT_EOF'
+              [Unit]
+              Description=Nitrum OpenTelemetry Collector (ADOT)
+              After=control-plane.service
+              BindsTo=control-plane.service
+              [Service]
+              Type=simple
+              Restart=always
+              RestartSec=10
+              ExecStartPre=-/usr/bin/docker rm -f otel-collector
+              ExecStart=/usr/bin/docker run --rm --name otel-collector --network container:control-plane -e AWS_REGION=${AWS::Region} -v /opt/nitrum/otelcol-config.yaml:/etc/otelcol/config.yaml ${OtelCollectorImage} --config /etc/otelcol/config.yaml
+              ExecStop=/usr/bin/docker stop -t 10 otel-collector
+              TimeoutStopSec=30
+              [Install]
+              WantedBy=multi-user.target
+              UNIT_EOF
+
+              systemctl daemon-reload
+              systemctl enable --now otel-collector.service
 
               --//--
 

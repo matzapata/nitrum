@@ -48,18 +48,24 @@ impl Kms {
     /// [`GenerateDataKeyWithoutPlaintext`](https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateDataKeyWithoutPlaintext.html) (AES-256). Persist the returned blob; recover bytes via [`Self::decrypt_with_attestation`].
     pub async fn generate_dek_envelope(&self) -> Result<Vec<u8>> {
         let ctx = self.kms_call_context("GenerateDataKeyWithoutPlaintext");
+        let start = std::time::Instant::now();
         let resp = self
             .client
             .generate_data_key_without_plaintext()
             .key_id(&self.key_id)
             .key_spec(DataKeySpec::Aes256)
             .send()
-            .await
-            .with_context(|| {
-                format!(
-                    "{ctx}; CMK must be symmetric ENCRYPT_DECRYPT. IAM: kms:GenerateDataKeyWithoutPlaintext."
-                )
-            })?;
+            .await;
+        telemetry::metrics::record_kms(
+            "generate_data_key",
+            start.elapsed().as_secs_f64() * 1000.0,
+            resp.is_ok(),
+        );
+        let resp = resp.with_context(|| {
+            format!(
+                "{ctx}; CMK must be symmetric ENCRYPT_DECRYPT. IAM: kms:GenerateDataKeyWithoutPlaintext."
+            )
+        })?;
 
         resp.ciphertext_blob()
             .map(|b| b.as_ref().to_vec())
@@ -68,14 +74,17 @@ impl Kms {
 
     /// Unwrap the stored envelope: **enclave** = attested `Decrypt` + CMS unwrap; **non-enclave** = plain `Decrypt`.
     pub async fn decrypt_with_attestation(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
+        let start = std::time::Instant::now();
         #[cfg(feature = "enclave")]
-        {
-            self.decrypt_with_attestation_enclave(ciphertext).await
-        }
+        let result = self.decrypt_with_attestation_enclave(ciphertext).await;
         #[cfg(not(feature = "enclave"))]
-        {
-            self.decrypt_symmetric_envelope_plain(ciphertext).await
-        }
+        let result = self.decrypt_symmetric_envelope_plain(ciphertext).await;
+        telemetry::metrics::record_kms(
+            "decrypt",
+            start.elapsed().as_secs_f64() * 1000.0,
+            result.is_ok(),
+        );
+        result
     }
 
     #[cfg(feature = "enclave")]

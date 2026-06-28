@@ -50,6 +50,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
             )
             .fallback(|_: Request<Body>| async { (StatusCode::NOT_FOUND, "Not found") })
             .with_state(state.clone());
+        let acme_router = telemetry::http::instrument_router(acme_router, "data-plane.ingress");
 
         // TLS state machine
         let mut tls_state = TlsState::new(state.clone());
@@ -76,7 +77,8 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         (tls_config, None)
     };
 
-    let https_router = build_https_router(state.clone());
+    let https_router =
+        telemetry::http::instrument_router(build_https_router(state.clone()), "data-plane.ingress");
 
     // Bind the ingress server
     let ingress_addr = state.config.ingress_listen_addr;

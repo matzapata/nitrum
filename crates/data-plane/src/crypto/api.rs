@@ -35,6 +35,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         .route("/kv/set", post(kv_set))
         .route("/kv/get", post(kv_get))
         .with_state(state);
+    let router = telemetry::http::instrument_router(router, "data-plane.crypto-api");
 
     axum::serve(listener, router)
         .await

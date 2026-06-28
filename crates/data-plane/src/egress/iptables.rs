@@ -44,8 +44,8 @@ fn ip6tables_bin() -> &'static str {
 /// - Filter default-drop (IPv4, best-effort): block non-DNS UDP that the NAT stage does not
 ///   capture. Defense-in-depth; a missing `filter` table must not brick egress.
 /// - Filter default-drop (IPv6, best-effort): block all v6 egress since no v6 proxy exists.
-pub fn install(upstream_dns: SocketAddr) -> anyhow::Result<()> {
-    install_nat_redirects(upstream_dns)?;
+pub fn install(upstream_dns: SocketAddr, collector_bypass: Option<IpAddr>) -> anyhow::Result<()> {
+    install_nat_redirects(upstream_dns, collector_bypass)?;
     install_udp_filter();
     install_ipv6_drop();
     info!("egress iptables rules installed");
@@ -53,7 +53,13 @@ pub fn install(upstream_dns: SocketAddr) -> anyhow::Result<()> {
 }
 
 /// Install the IPv4 NAT chain redirecting DNS and TCP through the egress proxies.
-fn install_nat_redirects(upstream_dns: SocketAddr) -> anyhow::Result<()> {
+///
+/// `collector_bypass`, when an IPv4 address, is excluded from the TCP redirect so OTLP telemetry
+/// reaches the host collector directly (mirrors the IMDS bypass).
+fn install_nat_redirects(
+    upstream_dns: SocketAddr,
+    collector_bypass: Option<IpAddr>,
+) -> anyhow::Result<()> {
     ensure_chain("nat")?;
 
     run_iptables(&[
@@ -130,6 +136,20 @@ fn install_nat_redirects(upstream_dns: SocketAddr) -> anyhow::Result<()> {
         "-j",
         "RETURN",
     ])?;
+
+    // OTLP collector: do not transparent-proxy IP-based telemetry egress (mirrors IMDS).
+    if let Some(IpAddr::V4(collector)) = collector_bypass {
+        run_iptables(&[
+            "-t",
+            "nat",
+            "-A",
+            IPTABLES_CHAIN,
+            "-d",
+            &format!("{collector}/32"),
+            "-j",
+            "RETURN",
+        ])?;
+    }
 
     install_loop_prevention();
 

@@ -51,7 +51,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let monitoring = Monitoring::init().await;
+    let monitoring = Monitoring::init();
 
     let sdk = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let artifact = if let Some(path) = args.eif {

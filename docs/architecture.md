@@ -340,6 +340,16 @@ Application secrets are kept separate from platform encryption keys and certific
 
 This split keeps your application’s own secrets easy to reason about (just environment variables), while Nitrum manages long‑lived platform material (TLS, internal keys) with a stricter lifecycle.
 
+## Observability
+
+Nitrum is instrumented with OpenTelemetry as the single export path. The `telemetry` crate is generic infrastructure (no AWS-specific code) consumed by both binaries; AWS translation happens entirely in a collector.
+
+- **Emission.** Both binaries initialize telemetry once at startup (`telemetry::init`). They always log structured records to stdout. When `NITRUM_OTLP_ENDPOINT` is set, they additionally export traces, metrics, and logs over OTLP/gRPC, and flush on graceful shutdown. The data-plane runs no log-reload and has no AWS dependency for telemetry.
+- **Instrumented paths.** HTTP request count/latency on the ingress (`data-plane.ingress`) and crypto API (`data-plane.crypto-api`) routers (by matched route template, method, status class); KMS call latency and errors; ACME issue/renew events and a certificate-expiry gauge; and control-plane enclave (re)start counts.
+- **Collector (ADOT).** An OpenTelemetry Collector runs on the EC2 host (in the control-plane container's network namespace) listening on `:4317`. It exports metrics to CloudWatch via `awsemf` (namespace `Nitrum`, into `/nitrum/{project}/metrics`), logs via `awscloudwatchlogs` (per-service into `/nitrum/{project}/data-plane` and `/control-plane`), and traces via `awsxray`. Because all backend specifics live in the collector configuration, adding another platform later (e.g. Kubernetes) is a collector swap rather than a code change.
+- **Enclave path.** The control-plane reaches the collector at `127.0.0.1:4317`. The enclave data-plane egresses only through gvproxy: it reaches the collector at the gvproxy gateway `192.168.127.1:4317`, which NATs to the host/container loopback where the collector listens. When egress enforcement is on, the collector endpoint is allowlisted and (for an IP endpoint) excluded from the transparent proxy, mirroring the IMDS bypass.
+- **Redaction.** Only low-cardinality, non-sensitive attributes are recorded (service, route template, method, status class, operation names). Request/response headers, bodies, query strings, and secrets are never captured.
+
 ## Further reading
 
 - [usage.md](usage.md) — CLI commands, config, and reproducible build guidance.

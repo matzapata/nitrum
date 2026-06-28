@@ -39,13 +39,15 @@ async fn main() {
         .install_default()
         .expect("failed to install default rustls crypto provider");
 
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // OTLP export to the host collector when `NITRUM_OTLP_ENDPOINT` is set
+    // (e.g. `http://192.168.127.1:4317`, the gvproxy gateway to the host);
+    // stdout only otherwise so `nitrum local` works without a collector.
+    let telemetry_guard = telemetry::init(telemetry::TelemetryConfig {
+        service_name: "data-plane".to_string(),
+        resource_attributes: Vec::new(),
+        otlp_endpoint: std::env::var("NITRUM_OTLP_ENDPOINT").ok(),
+    });
+    telemetry::metrics::init_instruments();
 
     let Args {
         config,
@@ -145,6 +147,9 @@ async fn main() {
     if runtime_config.egress.enabled {
         data_plane::egress::teardown();
     }
+
+    // Flush traces/metrics/logs to the collector before exiting (normal path).
+    telemetry_guard.shutdown().await;
 
     std::process::exit(exit_code);
 }
