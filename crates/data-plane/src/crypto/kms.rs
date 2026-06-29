@@ -10,6 +10,7 @@ use crate::config::RuntimeConfig;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;
+use tracing::instrument;
 
 /// KMS client bound to a specific key ID.
 pub struct Kms {
@@ -46,6 +47,7 @@ impl Kms {
     }
 
     /// [`GenerateDataKeyWithoutPlaintext`](https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateDataKeyWithoutPlaintext.html) (AES-256). Persist the returned blob; recover bytes via [`Self::decrypt_with_attestation`].
+    #[instrument(name = "kms.generate_data_key", skip(self), fields(otel.kind = "client"), err)]
     pub async fn generate_dek_envelope(&self) -> Result<Vec<u8>> {
         let ctx = self.kms_call_context("GenerateDataKeyWithoutPlaintext");
         let start = std::time::Instant::now();
@@ -73,6 +75,7 @@ impl Kms {
     }
 
     /// Unwrap the stored envelope: **enclave** = attested `Decrypt` + CMS unwrap; **non-enclave** = plain `Decrypt`.
+    #[instrument(name = "kms.decrypt", skip(self, ciphertext), fields(otel.kind = "client"), err)]
     pub async fn decrypt_with_attestation(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         let start = std::time::Instant::now();
         #[cfg(feature = "enclave")]

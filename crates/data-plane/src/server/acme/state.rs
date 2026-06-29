@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, instrument};
 
 /// In-memory cert store (chain PEM, key PEM). Used by ACME renewal loop.
 pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
@@ -61,6 +61,7 @@ impl AcmeState {
     /// The ACME leader lock is taken only when storage is missing a cert/key pair or the stored
     /// leaf is due for renewal. While waiting for the lock, storage is re-polled so followers pick
     /// up a cert as soon as another instance writes it.
+    #[instrument(name = "acme.get_or_provision", skip(self), fields(domain = %self.domain), err)]
     pub async fn get_or_provision(&self) -> Result<(String, String)> {
         loop {
             if let Some(pair) = self.cert_storage.read_cert_pair().await? {
