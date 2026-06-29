@@ -21,6 +21,9 @@
 # Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
 #   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 #
+# Observability: the data-plane exports OTLP to the `observability` service (Grafana LGTM stack).
+# Open Grafana at http://localhost:3000 to explore metrics, traces, and logs.
+#
 # Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
 # Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
 # `.nitrum/local-stack.yml` to refresh this template after upgrading the CLI.
@@ -214,6 +217,19 @@ services:
     environment:
       PEBBLE_VA_NOSLEEP: "1"
 
+  # All-in-one Grafana observability backend (OpenTelemetry Collector + Prometheus +
+  # Tempo + Loki + Grafana) for local dev. Mirrors the role the ADOT collector plays in
+  # production (crates/cli/stack.yml): receives OTLP from the data-plane and renders it as
+  # metrics, traces, and logs. Open the Grafana UI at http://localhost:3000 (anonymous,
+  # admin) to explore dashboards.
+  observability:
+    image: grafana/otel-lgtm:latest
+    platform: linux/amd64
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP/gRPC (data-plane export target)
+      - "4318:4318" # OTLP/HTTP
+
   enclave:
     image: ${ENCLAVE_IMAGE}
     platform: linux/amd64
@@ -239,11 +255,15 @@ services:
         condition: service_started
       pebble:
         condition: service_started
+      observability:
+        condition: service_started
     environment:
       RUST_LOG: info
 
       # Only for local dev
       NITRUM_IMDS_BASE_URL: http://imds:1338/latest
+      # Export traces/metrics/logs over OTLP to the local Grafana stack (service `observability`).
+      NITRUM_OTLP_ENDPOINT: http://observability:4317
       NITRUM_SSM_ENDPOINT_URL: http://aws:4566
       NITRUM_DYNAMODB_ENDPOINT_URL: http://aws:4566
       NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"

@@ -25,9 +25,11 @@ COPY crates/control-plane/Cargo.toml crates/control-plane/Cargo.toml
 COPY crates/config/Cargo.toml         crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml     crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml            crates/cli/Cargo.toml
+COPY crates/telemetry/Cargo.toml      crates/telemetry/Cargo.toml
 
 # Stub all workspace members so `cargo chef prepare` can resolve the full graph
 RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/config/src \
+    crates/telemetry/src \
     crates/data-plane/benches \
     && echo 'fn main() {}' > crates/cli/src/main.rs \
     && echo 'fn main() {}' > crates/control-plane/src/main.rs \
@@ -35,7 +37,8 @@ RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crate
     && echo 'fn main() {}' > crates/data-plane/benches/crypto.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/ingress.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/tls_handshake.rs \
-    && touch crates/config/src/lib.rs
+    && touch crates/config/src/lib.rs \
+    && touch crates/telemetry/src/lib.rs
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -59,6 +62,8 @@ RUN if [ -n "$FEATURES" ]; then \
 COPY Cargo.toml Cargo.toml
 COPY crates/config/src      crates/config/src
 COPY crates/config/Cargo.toml crates/config/Cargo.toml
+COPY crates/telemetry/src   crates/telemetry/src
+COPY crates/telemetry/Cargo.toml crates/telemetry/Cargo.toml
 COPY crates/data-plane/src  crates/data-plane/src
 COPY crates/data-plane/benches crates/data-plane/benches
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
