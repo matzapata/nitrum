@@ -793,7 +793,7 @@ Resources:
               Restart=always
               RestartSec=10
               ExecStartPre=-/usr/bin/docker rm -f control-plane
-              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -e NITRUM_OTLP_ENDPOINT=http://127.0.0.1:4317 -p 80:80 -p 443:443 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -e NITRUM_OTLP_ENDPOINT=http://127.0.0.1:4317 -p 80:80 -p 443:443 -p 4317:4317 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
               ExecStop=/usr/bin/docker stop -t 10 control-plane
               TimeoutStopSec=30
               [Install]
@@ -806,9 +806,9 @@ Resources:
               # ── OpenTelemetry Collector (ADOT) ─────────────────────────────────────────────
               # Receives OTLP/gRPC on :4317 and exports to CloudWatch (EMF metrics in the
               # "Nitrum" namespace), CloudWatch Logs (per-service log groups), and X-Ray.
-              # Runs in the control-plane container's network namespace so it is reachable at
-              # 127.0.0.1:4317 from the control-plane and, via the gvproxy gateway NAT, at
-              # 192.168.127.1:4317 from the enclave data-plane.
+              # Runs in the control-plane container's network namespace. The control-plane
+              # reaches it at 127.0.0.1:4317, and Docker publishes the same port on the
+              # parent host so the enclave can reach it via the parent private IPv4 from IMDS.
               mkdir -p /opt/nitrum
               cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
               receivers:

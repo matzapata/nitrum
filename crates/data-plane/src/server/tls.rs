@@ -22,8 +22,6 @@ use super::acme::{AcmeEvent, AcmeState};
 #[cfg(feature = "pebble")]
 use super::acme::pebble_client_tls_config;
 
-use crate::constants::{ENV_ACME_DIRECTORY_URL, LETS_ENCRYPT_PROD_DIRECTORY};
-
 /// Re-export for ingress (`tls::challenge_handler`).
 pub use super::acme::challenge_handler;
 
@@ -62,8 +60,7 @@ impl TlsState {
             state.config.instance_id.clone(),
             keys::ACME_LEADER_KEY.to_string(),
         ));
-        let directory_url = std::env::var(ENV_ACME_DIRECTORY_URL)
-            .unwrap_or_else(|_| LETS_ENCRYPT_PROD_DIRECTORY.to_string());
+        let directory_url = crate::constants::acme_directory_url();
 
         #[cfg(feature = "pebble")]
         let client_tls_config = Some(pebble_client_tls_config().expect("pebble_client_tls_config"));

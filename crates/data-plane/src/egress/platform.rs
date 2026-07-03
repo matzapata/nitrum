@@ -8,14 +8,10 @@ use config::{Egress, TlsTermination};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::constants::{
-    DEFAULT_IMDS_LATEST_BASE_URL, ENV_ACME_DIRECTORY_URL, LETS_ENCRYPT_PROD_DIRECTORY,
-};
+use crate::constants::{DEFAULT_IMDS_LATEST_BASE_URL, ENV_ACME_DIRECTORY_URL};
 use crate::utils::imds::ImdsClient;
 
-use super::constants::{
-    AWS_REGION_FETCH_ATTEMPTS, AWS_REGION_FETCH_INITIAL_BACKOFF_MS, ENV_OTLP_ENDPOINT,
-};
+use super::constants::{AWS_REGION_FETCH_ATTEMPTS, AWS_REGION_FETCH_INITIAL_BACKOFF_MS};
 
 /// Platform bootstrap data merged with user `[egress].destinations`.
 pub struct PlatformAllows {
@@ -25,8 +21,9 @@ pub struct PlatformAllows {
     pub allowed_ips: HashSet<IpAddr>,
     /// OTLP collector IP to exclude from transparent proxying (IP-based endpoint only).
     ///
-    /// `None` when `NITRUM_OTLP_ENDPOINT` is unset or uses a hostname (in which case it is
-    /// allowed through the normal DNS/pattern path instead of a static proxy bypass).
+    /// `None` when the resolved OTLP endpoint uses a hostname (in which case it is allowed
+    /// through the normal DNS/pattern path instead of a static proxy bypass), or when OTLP is
+    /// explicitly disabled with `NITRUM_OTLP_ENDPOINT=""`.
     pub collector_bypass_ip: Option<IpAddr>,
 }
 
@@ -40,6 +37,7 @@ pub async fn build_platform_allows(
     egress: &Egress,
     tls: &TlsTermination,
     aws_region: Option<&str>,
+    otlp_endpoint: Option<&str>,
 ) -> anyhow::Result<PlatformAllows> {
     let mut patterns = egress.destinations.clone();
     let mut allowed_ips = HashSet::new();
@@ -64,15 +62,15 @@ pub async fn build_platform_allows(
         &std::env::var("NITRUM_DYNAMODB_ENDPOINT_URL").unwrap_or_default(),
     );
 
-    let acme_directory = std::env::var(ENV_ACME_DIRECTORY_URL)
-        .unwrap_or_else(|_| LETS_ENCRYPT_PROD_DIRECTORY.to_string());
+    let acme_directory = crate::constants::acme_directory_url();
     if tls.acme || std::env::var(ENV_ACME_DIRECTORY_URL).is_ok() {
         append_hostname_pattern_from_url(&mut patterns, &acme_directory);
     }
 
     // OTLP telemetry collector: an IP endpoint is excluded from transparent proxying and added to
     // the allowlist; a hostname endpoint is allowed via the normal pattern + DNS path.
-    let collector_bypass_ip = resolve_otlp_collector_allow(&mut patterns, &mut allowed_ips);
+    let collector_bypass_ip =
+        resolve_otlp_collector_allow(&mut patterns, &mut allowed_ips, otlp_endpoint);
 
     let region = resolve_aws_region(aws_region).await?;
     if let Some(region) = region {
@@ -102,15 +100,17 @@ pub async fn build_platform_allows(
     })
 }
 
-/// Permit the OTLP collector endpoint from `NITRUM_OTLP_ENDPOINT` through egress.
+/// Permit the resolved OTLP collector endpoint (see [`crate::constants::otlp_endpoint`])
+/// through egress so telemetry export is not dropped.
 ///
 /// Returns the collector IP to bypass transparent proxying when the endpoint is IP-based;
 /// for a hostname endpoint, a hostname pattern is appended instead and `None` is returned.
 fn resolve_otlp_collector_allow(
     patterns: &mut Vec<String>,
     allowed_ips: &mut HashSet<IpAddr>,
+    endpoint: Option<&str>,
 ) -> Option<IpAddr> {
-    let endpoint = std::env::var(ENV_OTLP_ENDPOINT).ok()?;
+    let endpoint = endpoint?;
     let host = extract_host(&endpoint)?;
     if let Ok(ip) = host.parse::<IpAddr>() {
         allowed_ips.insert(ip);

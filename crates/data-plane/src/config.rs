@@ -14,7 +14,7 @@ use tracing::info;
 
 use crate::constants::{
     DEFAULT_IMDS_LATEST_BASE_URL, app_env_parameter_name, data_plane_dynamodb_parameter_name,
-    data_plane_kms_parameter_name,
+    data_plane_kms_parameter_name, default_otlp_endpoint_for_host,
 };
 use crate::utils::imds::{EnclaveProvider, ImdsClient};
 use crate::utils::ssm::SsmParameters;
@@ -71,10 +71,7 @@ impl RuntimeConfig {
         let nitrum = NitrumConfig::try_from(config_path)?;
 
         info!("loading IMDS config");
-        let imds_latest_base_url = std::env::var("NITRUM_IMDS_BASE_URL")
-            .unwrap_or_else(|_| DEFAULT_IMDS_LATEST_BASE_URL.to_string())
-            .trim_end_matches('/')
-            .to_string();
+        let imds_latest_base_url = imds_latest_base_url();
         let imds = Arc::new(ImdsClient::new(&imds_latest_base_url).context("IMDS client init")?);
 
         info!(
@@ -161,4 +158,29 @@ impl RuntimeConfig {
             user_env,
         })
     }
+}
+
+/// Resolve the IMDS base URL from the environment or the Nitro default.
+#[must_use]
+pub fn imds_latest_base_url() -> String {
+    std::env::var("NITRUM_IMDS_BASE_URL")
+        .unwrap_or_else(|_| DEFAULT_IMDS_LATEST_BASE_URL.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Resolve the default in-enclave OTLP collector endpoint from parent instance metadata.
+///
+/// Requires enclave TAP/gvproxy networking to be initialized first, because IMDS
+/// is reached through the same path.
+///
+/// # Errors
+///
+/// Returns an error when the IMDS client cannot be built or `local-ipv4` cannot
+/// be fetched.
+pub async fn default_otlp_endpoint_from_imds() -> Result<String> {
+    let imds_base = imds_latest_base_url();
+    let imds = ImdsClient::new(&imds_base).context("IMDS client init for OTLP endpoint")?;
+    let parent_ipv4 = imds.local_ipv4().await?;
+    Ok(default_otlp_endpoint_for_host(&parent_ipv4))
 }

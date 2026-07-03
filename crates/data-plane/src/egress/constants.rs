@@ -39,13 +39,6 @@ pub const EGRESS_BYPASS_TAP_DEVICE: &str = "tap0";
 /// proxy bypass minimal; the platform allowlist still governs what IMDS can reach.
 pub const EGRESS_IMDS_BYPASS_IP: &str = "169.254.169.254/32";
 
-/// Environment variable holding the OTLP/gRPC telemetry collector endpoint
-/// (e.g. `http://192.168.127.1:4317`, the gvproxy gateway to the host collector).
-///
-/// When set to an IP-based endpoint, that address is added to the egress allowlist and excluded
-/// from transparent proxying (mirroring [`EGRESS_IMDS_BYPASS_IP`]) so OTLP export is not dropped.
-pub const ENV_OTLP_ENDPOINT: &str = "NITRUM_OTLP_ENDPOINT";
-
 /// Maximum concurrent upstream DNS exchanges handled by the egress DNS proxy.
 pub const DNS_MAX_CONCURRENT_QUERIES: usize = 64;
 

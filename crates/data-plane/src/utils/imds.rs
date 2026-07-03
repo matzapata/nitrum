@@ -157,6 +157,13 @@ impl ImdsClient {
             .context("IMDS instance-id request failed")
     }
 
+    /// Returns the parent EC2 instance's private IPv4 address.
+    pub async fn local_ipv4(&self) -> Result<String> {
+        self.get_meta("meta-data/local-ipv4")
+            .await
+            .context("IMDS local-ipv4 request failed")
+    }
+
     /// Fetch temporary IAM role credentials, refreshing only when the time bucket rolls over.
     pub async fn get_cached_role_credentials(&self) -> Result<Credentials> {
         let bucket = Self::ttl_bucket();

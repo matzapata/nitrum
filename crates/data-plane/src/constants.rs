@@ -10,10 +10,20 @@ pub const ACME_LOCK_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 pub const CERTIFICATE_RENEWAL_FRACTION: f64 = 2.0 / 3.0;
 
 /// Default Let's Encrypt production directory.
-pub const LETS_ENCRYPT_PROD_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.org/directory";
+pub const DEFAULT_ACME_DIRECTORY_URL: &str = "https://acme-v02.api.letsencrypt.org/directory";
 
 /// Environment variable for the ACME directory URL.
 pub const ENV_ACME_DIRECTORY_URL: &str = "NITRUM_ACME_DIRECTORY_URL";
+
+/// Environment variable holding the OTLP/gRPC telemetry collector endpoint.
+///
+/// When set (e.g. `http://observability:4317` under local Compose) it overrides
+/// the platform default; an empty value disables OTLP and keeps stdout-only
+/// logging.
+pub const ENV_OTLP_ENDPOINT: &str = "NITRUM_OTLP_ENDPOINT";
+
+/// Default OTLP/gRPC port exposed by the parent host's ADOT collector.
+pub const DEFAULT_OTLP_PORT: u16 = 4317;
 
 /// Default IMDS base URL when `NITRUM_IMDS_BASE_URL` is unset (includes `/latest`, no trailing slash).
 ///
@@ -25,16 +35,48 @@ pub const ENV_ACME_DIRECTORY_URL: &str = "NITRUM_ACME_DIRECTORY_URL";
 pub const DEFAULT_IMDS_LATEST_BASE_URL: &str = "http://169.254.169.254/latest";
 
 /// SSM path for KMS key ID under `/nitrum/{project name}/data-plane/kms_key_id`.
+#[must_use]
 pub fn data_plane_kms_parameter_name(project_name: &str) -> String {
     format!("/nitrum/{project_name}/data-plane/kms_key_id")
 }
 
 /// SSM path for `DynamoDB` table name under `/nitrum/{project name}/data-plane/dynamodb_table`.
+#[must_use]
 pub fn data_plane_dynamodb_parameter_name(project_name: &str) -> String {
     format!("/nitrum/{project_name}/data-plane/dynamodb_table")
 }
 
 /// SSM path for app env under `/nitrum/{project name}/env/`.
+#[must_use]
 pub fn app_env_parameter_name(project_name: &str) -> String {
     format!("/nitrum/{project_name}/env/")
+}
+
+/// Build the default OTLP/gRPC collector endpoint for a parent host address.
+///
+/// In Nitro enclave deployments, `host` is the parent instance private IPv4
+/// address from IMDS (`meta-data/local-ipv4`).
+#[must_use]
+pub fn default_otlp_endpoint_for_host(host: &str) -> String {
+    format!("http://{host}:{DEFAULT_OTLP_PORT}")
+}
+
+/// Effective OTLP/gRPC collector endpoint for both telemetry export and the
+/// egress allowance that keeps that export from being dropped.
+///
+/// Returns [`ENV_OTLP_ENDPOINT`] when set, otherwise `default_endpoint`.
+/// `None` when the variable is set to an empty value, or when no explicit value
+/// and no platform default are available.
+#[must_use]
+pub fn otlp_endpoint(default_endpoint: Option<&str>) -> Option<String> {
+    let endpoint = std::env::var(ENV_OTLP_ENDPOINT)
+        .unwrap_or_else(|_| default_endpoint.unwrap_or_default().to_string());
+    (!endpoint.is_empty()).then_some(endpoint)
+}
+
+/// Effective ACME directory URL: [`ENV_ACME_DIRECTORY_URL`] when set, otherwise
+/// [`DEFAULT_ACME_DIRECTORY_URL`] (Let's Encrypt production).
+#[must_use]
+pub fn acme_directory_url() -> String {
+    std::env::var(ENV_ACME_DIRECTORY_URL).unwrap_or_else(|_| DEFAULT_ACME_DIRECTORY_URL.to_string())
 }

@@ -38,6 +38,7 @@ pub async fn init(
     egress: &Egress,
     tls: &TlsTermination,
     aws_region: Option<&str>,
+    otlp_endpoint: Option<&str>,
 ) -> anyhow::Result<()> {
     if !egress.enabled {
         info!("egress whitelist disabled");
@@ -49,7 +50,7 @@ pub async fn init(
         "egress whitelist enabled"
     );
 
-    let platform = build_platform_allows(egress, tls, aws_region).await?;
+    let platform = build_platform_allows(egress, tls, aws_region, otlp_endpoint).await?;
     let pattern_count = platform.patterns.len();
     let collector_bypass = platform.collector_bypass_ip;
     let filter = Arc::new(Filter::new(true, &platform.patterns));
