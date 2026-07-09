@@ -1,26 +1,10 @@
 use clap::Parser;
-use data_plane::{CryptoClient, DataPlaneState, RuntimeConfig, StorageClient};
-use std::path::PathBuf;
+use data_plane::{ConfigBootstrap, CryptoClient, DataPlaneState, RuntimeConfig, StorageClient};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use telemetry::TelemetryGuard;
 use tracing::{error, info};
-
-#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-async fn setup_egress_if_enabled(runtime_config: &RuntimeConfig, otlp_endpoint: Option<&str>) {
-    if let Err(error) = data_plane::egress::init(
-        &runtime_config.egress,
-        &runtime_config.tls_termination,
-        Some(&runtime_config.aws_region),
-        otlp_endpoint,
-    )
-    .await
-    {
-        error!(
-            error = %format!("{error:#}"),
-            "egress whitelist setup failed"
-        );
-        std::process::exit(1);
-    }
-}
 
 #[derive(Parser)]
 #[command(name = "data-plane")]
@@ -34,26 +18,81 @@ struct Args {
     command: Vec<String>,
 }
 
-#[cfg(feature = "enclave")]
-async fn resolve_otlp_endpoint() -> Option<String> {
-    if std::env::var(data_plane::constants::ENV_OTLP_ENDPOINT).is_ok() {
-        return data_plane::constants::otlp_endpoint(None);
-    }
+async fn load_runtime(
+    config_path: &Path,
+) -> Result<(RuntimeConfig, TelemetryGuard), anyhow::Error> {
+    #[cfg(feature = "enclave")]
+    data_plane::networking::init().await;
 
-    match data_plane::default_otlp_endpoint_from_imds().await {
-        Ok(endpoint) => data_plane::constants::otlp_endpoint(Some(&endpoint)),
-        Err(error) => {
-            eprintln!(
-                "telemetry: failed to resolve default OTLP endpoint from IMDS ({error:#}); falling back to stdout-only logging"
-            );
-            None
+    let bootstrap = ConfigBootstrap::bootstrap(config_path).await?;
+    let telemetry_guard = telemetry::init(telemetry::TelemetryConfig {
+        service_name: "data-plane".to_string(),
+        resource_attributes: Vec::new(),
+        otlp_endpoint: bootstrap.otlp_endpoint().map(str::to_string),
+    });
+    telemetry::metrics::init_instruments();
+
+    #[cfg(not(feature = "enclave"))]
+    info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
+
+    let runtime_config = bootstrap.into_runtime_config().await?;
+
+    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+    data_plane::egress::init(&runtime_config).await?;
+
+    Ok((runtime_config, telemetry_guard))
+}
+
+fn spawn_servers(state: Arc<DataPlaneState>) {
+    let crypto_state = state.clone();
+    tokio::spawn(async move {
+        info!("API task starting");
+        if let Err(e) = data_plane::crypto::api::run(crypto_state).await {
+            error!(error = %e, "API task failed");
         }
+        tracing::warn!("API task exited");
+    });
+
+    tokio::spawn(async move {
+        info!("ingress task starting");
+        if let Err(e) = data_plane::server::ingress::run(state).await {
+            error!(error = %e, "ingress task failed");
+        }
+        tracing::warn!("ingress task exited");
+    });
+}
+
+fn resolve_start_command(cli_start_command: Vec<String>, config: &RuntimeConfig) -> Vec<String> {
+    if cli_start_command.is_empty() {
+        config.nitrum.project.start_command.clone()
+    } else {
+        cli_start_command
     }
 }
 
-#[cfg(not(feature = "enclave"))]
-fn resolve_otlp_endpoint() -> Option<String> {
-    data_plane::constants::otlp_endpoint(None)
+async fn run_until_exit(
+    effective_start_command: &[String],
+    user_env: &HashMap<String, String>,
+) -> i32 {
+    if effective_start_command.is_empty() {
+        info!("no command provided, running until SIGINT");
+        let _ = tokio::signal::ctrl_c().await;
+        info!("received SIGINT, shutting down");
+        return 0;
+    }
+
+    tokio::select! {
+        result = data_plane::server::runner::run(effective_start_command, user_env) => {
+            result.unwrap_or_else(|e| {
+                tracing::error!(error = %e, "failed to run user process");
+                1
+            })
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("received SIGINT, shutting down");
+            0
+        }
+    }
 }
 
 #[tokio::main]
@@ -64,50 +103,22 @@ async fn main() {
 
     let Args {
         config,
-        command: cli_command,
+        command: cli_start_command,
     } = Args::parse();
 
-    // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
-    // when the parent runs gvproxy with `-ec2-metadata-access`.
-    #[cfg(feature = "enclave")]
-    data_plane::networking::init().await;
-    #[cfg(not(feature = "enclave"))]
-    info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
-
-    #[cfg(feature = "enclave")]
-    let otlp_endpoint = resolve_otlp_endpoint().await;
-    #[cfg(not(feature = "enclave"))]
-    let otlp_endpoint = resolve_otlp_endpoint();
-    let telemetry_guard = telemetry::init(telemetry::TelemetryConfig {
-        service_name: "data-plane".to_string(),
-        resource_attributes: Vec::new(),
-        otlp_endpoint: otlp_endpoint.clone(),
-    });
-    telemetry::metrics::init_instruments();
-
-    let runtime_config = RuntimeConfig::load(&config).await.unwrap_or_else(|e| {
-        eprintln!("failed to load runtime config: {e:#}");
+    let (runtime_config, telemetry_guard) = load_runtime(&config).await.unwrap_or_else(|e| {
+        eprintln!("failed to start data-plane: {e:#}");
         error!(
             error = %format!("{:#}", e),
             config_path = %config.display(),
-            "failed to load runtime config"
+            "failed to start data-plane"
         );
         std::process::exit(1);
     });
 
-    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-    setup_egress_if_enabled(&runtime_config, otlp_endpoint.as_deref()).await;
+    let effective_start_command = resolve_start_command(cli_start_command, &runtime_config);
 
-    let user_command: Vec<String> = if cli_command.is_empty() {
-        runtime_config.nitrum.project.start_command.clone()
-    } else {
-        cli_command
-    };
-
-    // Create storage client
     let storage: Arc<StorageClient> = Arc::new(StorageClient::new(&runtime_config));
-
-    // Create crypto client
     let crypto = Arc::new(
         CryptoClient::new(runtime_config.clone(), storage.clone())
             .await
@@ -119,61 +130,21 @@ async fn main() {
                 std::process::exit(1);
             }),
     );
-
-    // Create shared data plane state
     let state = Arc::new(DataPlaneState::new(
         runtime_config.clone(),
         storage,
-        crypto.clone(),
+        crypto,
     ));
 
-    // Kick off crypto api for internal usage
-    let crypto_state = state.clone();
-    tokio::spawn(async move {
-        info!("API task starting");
-        if let Err(e) = data_plane::crypto::api::run(crypto_state).await {
-            error!(error = %e, "API task failed");
-        }
-        tracing::warn!("API task exited");
-    });
+    spawn_servers(state);
 
-    // Kick off ingress for external usage
-    let ingress_state = state.clone();
-    tokio::spawn(async move {
-        info!("ingress task starting");
-        if let Err(e) = data_plane::server::ingress::run(ingress_state).await {
-            error!(error = %e, "ingress task failed");
-        }
-        tracing::warn!("ingress task exited");
-    });
-
-    // Run user process if provided, otherwise run until SIGINT
-    let exit_code = if user_command.is_empty() {
-        info!("no command provided, running until SIGINT");
-        let _ = tokio::signal::ctrl_c().await;
-        info!("received SIGINT, shutting down");
-        0
-    } else {
-        tokio::select! {
-            result = data_plane::server::runner::run(&user_command, &runtime_config.user_env) => {
-                result.unwrap_or_else(|e| {
-                    tracing::error!(error = %e, "failed to run user process");
-                    1
-                })
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("received SIGINT, shutting down");
-                0
-            }
-        }
-    };
+    let exit_code = run_until_exit(&effective_start_command, &runtime_config.user_env).await;
 
     #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
     if runtime_config.egress.enabled {
         data_plane::egress::teardown();
     }
 
-    // Flush traces/metrics/logs to the collector before exiting (normal path).
     telemetry_guard.shutdown().await;
 
     std::process::exit(exit_code);

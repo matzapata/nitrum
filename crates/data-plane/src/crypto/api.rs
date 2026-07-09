@@ -19,7 +19,7 @@ use tracing::{info, warn};
 
 /// Run the crypto API server (attestation, encrypt, decrypt, KV) until the process exits.
 pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
-    let addr = state.config.crypto_api_listen_addr;
+    let addr = state.config.listen_addrs.crypto_api_listen_addr;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind API server on {addr}"))?;

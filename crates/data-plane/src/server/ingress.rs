@@ -67,7 +67,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         });
 
         // Bind the ACME HTTP-01 server
-        let acme_http_addr = state.config.acme_http01_listen_addr;
+        let acme_http_addr = state.config.listen_addrs.acme_http01_listen_addr;
         info!(acme_http_addr = %acme_http_addr, "ACME HTTP-01 server listening");
         let challenge_server = bind(acme_http_addr).serve(acme_router.into_make_service());
 
@@ -81,7 +81,7 @@ pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         telemetry::http::instrument_router(build_https_router(state.clone()), "data-plane.ingress");
 
     // Bind the ingress server
-    let ingress_addr = state.config.ingress_listen_addr;
+    let ingress_addr = state.config.listen_addrs.ingress_listen_addr;
     info!(ingress = %ingress_addr, "ingress listening");
     let ingress = bind_rustls(ingress_addr, tls_config).serve(https_router.into_make_service());
 

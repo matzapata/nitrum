@@ -19,7 +19,7 @@ pub mod egress;
 #[cfg(feature = "enclave")]
 pub mod networking;
 
-pub use config::{RuntimeConfig, default_otlp_endpoint_from_imds};
+pub use config::{ConfigBootstrap, RuntimeConfig};
 pub use crypto::CryptoClient;
 pub use state::DataPlaneState;
 pub use storage::StorageClient;

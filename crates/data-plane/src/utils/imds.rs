@@ -14,7 +14,7 @@ use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::provider::future;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // ── IMDSv2 constants ─────────────────────────────────────────────────────────
 
@@ -148,6 +148,37 @@ impl ImdsClient {
         self.get_meta("meta-data/placement/region")
             .await
             .context("IMDS region request failed")
+    }
+
+    /// Fetch the AWS region, retrying with exponential backoff between attempts.
+    ///
+    /// `attempts` is the total number of tries; `initial_backoff` is the delay before
+    /// the second attempt and doubles (saturating) after each subsequent failure.
+    pub async fn get_region_with_retry(
+        &self,
+        attempts: u32,
+        initial_backoff: Duration,
+    ) -> Result<String> {
+        let mut last_error = None;
+        let mut backoff = initial_backoff;
+
+        for attempt in 1..=attempts {
+            match self.get_region().await {
+                Ok(region) => return Ok(region),
+                Err(error) => {
+                    warn!(attempt, max_attempts = attempts, %error, "IMDS region fetch failed");
+                    last_error = Some(error);
+                    if attempt < attempts {
+                        tokio::time::sleep(backoff).await;
+                        backoff = backoff.saturating_mul(2);
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!("IMDS region fetch failed without a specific error")
+        }))
     }
 
     /// Returns the EC2 instance ID.

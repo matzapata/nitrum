@@ -11,12 +11,15 @@ mod tcp;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use config::{Egress, TlsTermination};
 use tracing::{info, warn};
+
+use crate::config::RuntimeConfig;
 
 pub use filter::EgressFilter;
 
-use constants::{DNS_PROXY_PORT, ENCLAVE_UPSTREAM_DNS, ENV_UPSTREAM_DNS, TCP_PROXY_PORT};
+use constants::{
+    DNS_PROXY_PORT, ENCLAVE_UPSTREAM_DNS, TCP_PROXY_PORT, egress_upstream_dns_override,
+};
 use dns::{bind_dns_proxy, serve_dns_proxy};
 use filter::EgressFilter as Filter;
 use ip_cache::IpCache;
@@ -31,26 +34,22 @@ pub fn teardown() {
     teardown_iptables();
 }
 
-/// Initialize egress enforcement when `[egress].enabled` is true.
+/// Initialize egress enforcement when `[egress].enabled` is true in `runtime_config`.
 ///
-/// `aws_region` should be the region already resolved during runtime bootstrap when available.
-pub async fn init(
-    egress: &Egress,
-    tls: &TlsTermination,
-    aws_region: Option<&str>,
-    otlp_endpoint: Option<&str>,
-) -> anyhow::Result<()> {
-    if !egress.enabled {
+/// No-op when egress is disabled. Uses [`RuntimeConfig::aws_region`] and
+/// [`RuntimeConfig::otlp_endpoint`] for platform allowlist construction.
+pub async fn init(runtime_config: &RuntimeConfig) -> anyhow::Result<()> {
+    if !runtime_config.egress.enabled {
         info!("egress whitelist disabled");
         return Ok(());
     }
 
     info!(
-        destinations = egress.destinations.len(),
+        destinations = runtime_config.egress.destinations.len(),
         "egress whitelist enabled"
     );
 
-    let platform = build_platform_allows(egress, tls, aws_region, otlp_endpoint).await?;
+    let platform = build_platform_allows(runtime_config)?;
     let pattern_count = platform.patterns.len();
     let collector_bypass = platform.collector_bypass_ip;
     let filter = Arc::new(Filter::new(true, &platform.patterns));
@@ -99,10 +98,8 @@ pub async fn init(
 }
 
 fn detect_upstream_dns() -> anyhow::Result<SocketAddr> {
-    if let Ok(value) = std::env::var(ENV_UPSTREAM_DNS) {
-        return value
-            .parse()
-            .map_err(|error| anyhow::anyhow!("invalid {ENV_UPSTREAM_DNS}: {error}"));
+    if let Some(addr) = egress_upstream_dns_override()? {
+        return Ok(addr);
     }
 
     if let Some(addr) = read_first_nameserver() {
