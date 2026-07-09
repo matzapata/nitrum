@@ -51,7 +51,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let monitoring = Monitoring::init();
+    let _monitoring = Monitoring::init();
 
     let sdk = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let artifact = if let Some(path) = args.eif {
@@ -95,6 +95,4 @@ async fn main() {
         .await
         .expect("failed to listen for ctrl_c");
     info!("received SIGINT, shutting down");
-
-    monitoring.shutdown().await;
 }

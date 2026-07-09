@@ -3,8 +3,8 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    Egress, HealthCheck, NitrumConfig, Project, Runtime, Scaling, TlsTermination, WellKnown,
-    validate_project_name,
+    DEFAULT_IMDS_LATEST_BASE_URL, Egress, HealthCheck, NitrumConfig, Project, Runtime, Scaling,
+    TlsTermination, WellKnown, validate_project_name,
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
@@ -83,6 +83,8 @@ pub async fn run(args: InitArgs) -> Result<()> {
             enabled: true,
             destinations: vec!["ipify\\.org$".to_string()],
         },
+        imds_latest_base_url: DEFAULT_IMDS_LATEST_BASE_URL.to_string(),
+        otlp_endpoint: None,
     };
 
     let writes: Vec<(&str, String)> = vec![

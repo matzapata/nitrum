@@ -7,7 +7,7 @@ use tracing::info;
 
 /// Spawn the user command and stream its stdout/stderr to the tracing log (target "app").
 ///
-/// `child_env` is the child's full environment (e.g. [`RuntimeConfig::user_env`](crate::config::RuntimeConfig::structfield.user_env) from SSM only).
+/// `child_env` is the child's full environment (e.g. [`DataPlaneConfig::user_env`] from SSM only).
 /// Returns the process exit code when the child exits.
 pub async fn run<S: std::hash::BuildHasher + Sync>(
     command: &[String],

@@ -1,5 +1,23 @@
 use std::path::PathBuf;
 
+/// Environment variable overriding [`NitrumConfig::imds_latest_base_url`]; ignored when unset.
+///
+/// Lets the same `nitrum.toml` work in local dev (docker-compose metadata mocks) and in real
+/// deployments, where the IMDS base URL is always the standard EC2 address.
+pub const ENV_IMDS_BASE_URL: &str = "NITRUM_IMDS_BASE_URL";
+
+/// Environment variable overriding [`NitrumConfig::otlp_endpoint`]; ignored when unset. An empty
+/// value explicitly disables OTLP export (see [`NitrumConfig::otlp_endpoint`]).
+pub const ENV_OTLP_ENDPOINT: &str = "NITRUM_OTLP_ENDPOINT";
+
+/// Default IMDS base URL when [`NitrumConfig::imds_latest_base_url`] is not set in `nitrum.toml`
+/// and not overridden by [`ENV_IMDS_BASE_URL`] (includes `/latest`, no trailing slash).
+pub const DEFAULT_IMDS_LATEST_BASE_URL: &str = "http://169.254.169.254/latest";
+
+fn default_imds_latest_base_url() -> String {
+    DEFAULT_IMDS_LATEST_BASE_URL.to_string()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum NitrumConfigError {
     #[error("failed to read config file {path}: {source}")]
@@ -307,6 +325,19 @@ pub struct NitrumConfig {
     pub tls_termination: TlsTermination,
     #[serde(default)]
     pub egress: Egress,
+
+    /// IMDS base URL used to fetch the AWS region, instance ID, and credentials (includes
+    /// `/latest`; trailing slash is stripped). Defaults to the standard EC2 IMDS address;
+    /// override with [`ENV_IMDS_BASE_URL`] for local dev or metadata mocks.
+    #[serde(default = "default_imds_latest_base_url")]
+    pub imds_latest_base_url: String,
+
+    /// OTLP/gRPC collector endpoint for telemetry export (e.g. `http://127.0.0.1:4317`).
+    /// `None` means "not explicitly configured": callers may apply their own platform default
+    /// or fall back to stdout-only logging. `Some("")` explicitly disables OTLP export.
+    /// Override with [`ENV_OTLP_ENDPOINT`].
+    #[serde(default)]
+    pub otlp_endpoint: Option<String>,
 }
 
 impl NitrumConfig {
@@ -323,7 +354,25 @@ impl NitrumConfig {
         self.scaling.validate()?;
         self.tls_termination.validate()?;
         self.egress.validate()?;
+        if self.imds_latest_base_url.trim().is_empty() {
+            return Err("`imds_latest_base_url` must not be empty".to_string());
+        }
         Ok(())
+    }
+
+    /// Applies [`ENV_IMDS_BASE_URL`] / [`ENV_OTLP_ENDPOINT`] overrides on top of the values read
+    /// from `nitrum.toml`, so the same file works unmodified across local dev (docker-compose
+    /// metadata/collector mocks) and real deployments.
+    fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var(ENV_IMDS_BASE_URL) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                self.imds_latest_base_url = trimmed.trim_end_matches('/').to_string();
+            }
+        }
+        if let Ok(value) = std::env::var(ENV_OTLP_ENDPOINT) {
+            self.otlp_endpoint = Some(value);
+        }
     }
 
     /// Replace [`Project::name`] when `override_name` is [`Some`], using the same
@@ -416,10 +465,12 @@ impl TryFrom<&std::path::Path> for NitrumConfig {
             path: path_buf.clone(),
             source,
         })?;
-        let cfg: Self = toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
-            path: path_buf.clone(),
-            source,
-        })?;
+        let mut cfg: Self =
+            toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
+                path: path_buf.clone(),
+                source,
+            })?;
+        cfg.apply_env_overrides();
         cfg.validate()
             .map_err(|message| NitrumConfigError::Invalid {
                 path: path_buf,
@@ -449,5 +500,62 @@ mod tests {
             destinations: vec![r"httpbin\.org$".to_string()],
         };
         assert!(egress.validate().is_ok());
+    }
+
+    fn minimal_config() -> NitrumConfig {
+        NitrumConfig {
+            project: Project {
+                name: "nitrum-test".to_string(),
+                port: 8080,
+                start_command: vec![],
+            },
+            runtime: Runtime::default(),
+            well_known: WellKnown::default(),
+            health_check: HealthCheck::default(),
+            scaling: Scaling::default(),
+            tls_termination: TlsTermination::default(),
+            egress: Egress::default(),
+            imds_latest_base_url: default_imds_latest_base_url(),
+            otlp_endpoint: None,
+        }
+    }
+
+    #[test]
+    fn env_overrides_apply_on_top_of_toml_defaults() {
+        let imds_key = ENV_IMDS_BASE_URL;
+        let otlp_key = ENV_OTLP_ENDPOINT;
+        unsafe {
+            std::env::remove_var(imds_key);
+            std::env::remove_var(otlp_key);
+        }
+
+        let mut cfg = minimal_config();
+        cfg.apply_env_overrides();
+        assert_eq!(cfg.imds_latest_base_url, DEFAULT_IMDS_LATEST_BASE_URL);
+        assert_eq!(cfg.otlp_endpoint, None);
+
+        unsafe {
+            std::env::set_var(imds_key, "http://imds:1338/latest/");
+            std::env::set_var(otlp_key, "http://observability:4317");
+        }
+        let mut cfg = minimal_config();
+        cfg.apply_env_overrides();
+        assert_eq!(cfg.imds_latest_base_url, "http://imds:1338/latest");
+        assert_eq!(
+            cfg.otlp_endpoint,
+            Some("http://observability:4317".to_string())
+        );
+
+        unsafe {
+            std::env::set_var(otlp_key, "");
+        }
+        let mut cfg = minimal_config();
+        cfg.apply_env_overrides();
+        assert_eq!(cfg.otlp_endpoint, Some(String::new()));
+
+        unsafe {
+            std::env::remove_var(imds_key);
+            std::env::remove_var(otlp_key);
+        }
     }
 }

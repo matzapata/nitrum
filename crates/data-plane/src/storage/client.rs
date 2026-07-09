@@ -15,7 +15,7 @@ use aws_sdk_dynamodb::{
 };
 use tracing::instrument;
 
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use crate::utils::time;
 
 const LOCK_TTL_SECS: u64 = 60;
@@ -31,7 +31,7 @@ pub struct StorageClient {
 impl StorageClient {
     /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
     #[must_use]
-    pub fn new(config: &RuntimeConfig) -> Self {
+    pub fn new(config: &DataPlaneConfig) -> Self {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);

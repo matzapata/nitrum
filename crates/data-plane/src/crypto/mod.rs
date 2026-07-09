@@ -10,5 +10,6 @@ mod kms;
 mod kv;
 mod random;
 
+pub use api::init;
 pub use attest::get_attestation_doc;
 pub use client::CryptoClient;

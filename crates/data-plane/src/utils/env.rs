@@ -2,7 +2,7 @@
 //!
 //! **Empty-string policy:** for most `NITRUM_*` variables an empty value is treated the same as
 //! unset. Exceptions document their own semantics (for example
-//! [`crate::constants::ENV_OTLP_ENDPOINT`], where `""` explicitly disables OTLP export).
+//! [`config::ENV_OTLP_ENDPOINT`], where `""` explicitly disables OTLP export).
 
 /// Whether `key` is present in the environment (including when set to an empty value).
 ///

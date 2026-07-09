@@ -34,7 +34,7 @@ struct Instruments {
 
 /// Create the metric instruments against the global meter provider.
 ///
-/// Call once after [`crate::init`]. Safe to call when no OTLP endpoint is
+/// Called automatically by [`crate::init`]. Safe to call when no OTLP endpoint is
 /// configured: the instruments bind to the no-op meter and recording is free.
 pub fn init_instruments() {
     let meter = opentelemetry::global::meter("nitrum");

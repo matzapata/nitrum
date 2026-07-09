@@ -38,9 +38,20 @@ use tracing::{info, warn};
 
 // ── public entry point ────────────────────────────────────────────────────────
 
+/// Spawn the ingress server in the background.
+pub fn init(state: Arc<DataPlaneState>) {
+    tokio::spawn(async move {
+        info!("ingress task starting");
+        if let Err(e) = run(state).await {
+            warn!(error = %e, "ingress task failed");
+        }
+        warn!("ingress task exited");
+    });
+}
+
 /// Runs the ingress server (HTTP for ACME, HTTPS for app traffic). Returns when
 /// either server stops (e.g. bind/serve error) or an error occurs.
-pub async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
+async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
     let (tls_config, challenge_server) = if state.config.tls_termination.acme {
         // ACME HTTP-01 challenge handler
         let acme_router = Router::new()

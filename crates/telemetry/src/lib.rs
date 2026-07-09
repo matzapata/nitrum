@@ -40,10 +40,27 @@ pub struct TelemetryConfig {
     pub otlp_endpoint: Option<String>,
 }
 
+impl TelemetryConfig {
+    /// Create telemetry config for `service_name` with stdout logging only.
+    pub fn new(service_name: impl Into<String>) -> Self {
+        Self {
+            service_name: service_name.into(),
+            resource_attributes: Vec::new(),
+            otlp_endpoint: None,
+        }
+    }
+
+    /// Attach an OTLP/gRPC collector endpoint when export is enabled.
+    pub fn with_otlp_endpoint(mut self, endpoint: Option<impl AsRef<str>>) -> Self {
+        self.otlp_endpoint = endpoint.map(|e| e.as_ref().to_string());
+        self
+    }
+}
+
 /// Owns the OpenTelemetry providers so they stay alive for the process lifetime.
 ///
-/// [`TelemetryGuard::shutdown`] flushes and stops all exporters; dropping the
-/// guard without calling it leaves flushing to provider `Drop` (best-effort).
+/// Flushes and stops all OTLP exporters on [`Drop`]. Call [`drop`] explicitly
+/// before [`std::process::exit`], which skips destructors.
 #[derive(Default)]
 pub struct TelemetryGuard {
     /// Tracer provider exporting spans over OTLP; `None` in stdout-only mode.
@@ -57,20 +74,31 @@ pub struct TelemetryGuard {
 impl TelemetryGuard {
     /// Flush and stop all OTLP exporters. Best-effort; errors are ignored so a
     /// shutdown flush never blocks process exit.
+    fn shutdown_providers(&mut self) {
+        if let Some(provider) = self.tracer_provider.take() {
+            let _ = provider.shutdown();
+        }
+        if let Some(provider) = self.meter_provider.take() {
+            let _ = provider.shutdown();
+        }
+        if let Some(provider) = self.logger_provider.take() {
+            let _ = provider.shutdown();
+        }
+    }
+
+    /// Flush and stop all OTLP exporters before the guard is dropped.
     ///
-    /// Async to keep a stable shutdown contract for callers and to allow future
-    /// async flush paths, even though provider shutdown is currently synchronous.
+    /// Prefer relying on [`Drop`] when the guard goes out of scope naturally.
+    /// Use this only when you need to flush before other teardown runs.
     #[allow(clippy::unused_async)]
-    pub async fn shutdown(self) {
-        if let Some(provider) = self.tracer_provider {
-            let _ = provider.shutdown();
-        }
-        if let Some(provider) = self.meter_provider {
-            let _ = provider.shutdown();
-        }
-        if let Some(provider) = self.logger_provider {
-            let _ = provider.shutdown();
-        }
+    pub async fn shutdown(mut self) {
+        self.shutdown_providers();
+    }
+}
+
+impl Drop for TelemetryGuard {
+    fn drop(&mut self) {
+        self.shutdown_providers();
     }
 }
 
@@ -81,32 +109,36 @@ fn env_filter() -> EnvFilter {
 
 /// Initialize process-wide telemetry and return a guard that flushes on shutdown.
 ///
-/// Always installs a stdout logging layer. When `cfg.otlp_endpoint` is set, also
-/// installs OTLP trace and log layers, builds and registers the global OTLP meter
-/// provider, and returns the providers in the guard. If the OTLP exporters cannot
-/// be built, telemetry degrades to stdout-only logging rather than failing.
+/// Always installs a stdout logging layer and application metric instruments.
+/// When `cfg.otlp_endpoint` is set, also installs OTLP trace and log layers,
+/// builds and registers the global OTLP meter provider, and returns the
+/// providers in the guard. If the OTLP exporters cannot be built, telemetry
+/// degrades to stdout-only logging rather than failing.
 ///
-/// Must be called from within a Tokio runtime: the OTLP gRPC exporters require
-/// one. Call [`metrics::init_instruments`] afterwards to create the application
-/// metric instruments against the (now global) meter provider.
+/// Must be called from within a Tokio runtime: the OTLP gRPC exporters require one.
 #[must_use]
 pub fn init(cfg: TelemetryConfig) -> TelemetryGuard {
-    let Some(endpoint) = cfg.otlp_endpoint.as_deref().filter(|e| !e.is_empty()) else {
-        init_stdout_only();
-        return TelemetryGuard::default();
-    };
-
-    let resource = otel::build_resource(&cfg.service_name, &cfg.resource_attributes);
-    match otel::build_providers(endpoint, resource) {
-        Ok(providers) => install_with_otlp(providers),
-        Err(error) => {
-            eprintln!(
-                "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
-            );
+    let guard = match cfg.otlp_endpoint.as_deref().filter(|e| !e.is_empty()) {
+        Some(endpoint) => {
+            let resource = otel::build_resource(&cfg.service_name, &cfg.resource_attributes);
+            match otel::build_providers(endpoint, resource) {
+                Ok(providers) => install_with_otlp(providers),
+                Err(error) => {
+                    eprintln!(
+                        "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
+                    );
+                    init_stdout_only();
+                    TelemetryGuard::default()
+                }
+            }
+        }
+        None => {
             init_stdout_only();
             TelemetryGuard::default()
         }
-    }
+    };
+    metrics::init_instruments();
+    guard
 }
 
 /// Install a stdout-only subscriber (structured, non-ANSI logs).
@@ -172,11 +204,7 @@ mod tests {
 
     #[test]
     fn init_without_otlp_endpoint_is_stdout_only_and_does_not_panic() {
-        let guard = init(TelemetryConfig {
-            service_name: "test".to_string(),
-            resource_attributes: Vec::new(),
-            otlp_endpoint: None,
-        });
+        let guard = init(TelemetryConfig::new("test"));
         // No OTLP providers are created in stdout-only mode.
         assert!(guard.tracer_provider.is_none());
         assert!(guard.meter_provider.is_none());

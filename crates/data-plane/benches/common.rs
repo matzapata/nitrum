@@ -1,19 +1,18 @@
-//! Offline helpers for benchmarks and integration tests.
+//! Shared helpers for data-plane benchmarks.
 //!
-//! Builds inert [`RuntimeConfig`] values without live AWS or IMDS. Not for production startup.
+//! Builds inert [`DataPlaneConfig`] values without live AWS or IMDS.
 
-use crate::config::RuntimeConfig;
-use crate::constants::ListenAddrs;
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use config::NitrumConfig;
+use data_plane::DataPlaneConfig;
+use data_plane::constants::ListenAddrs;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Build a [`RuntimeConfig`] with inert infra placeholders for offline benchmarks.
-#[doc(hidden)]
+/// Build a [`DataPlaneConfig`] with inert infra placeholders for offline benchmarks.
 #[must_use]
-pub fn runtime_config(nitrum: NitrumConfig) -> RuntimeConfig {
+pub fn data_plane_config(nitrum: NitrumConfig) -> DataPlaneConfig {
     let aws_sdk_config = Arc::new(
         aws_config::SdkConfig::builder()
             .behavior_version(BehaviorVersion::latest())
@@ -21,9 +20,8 @@ pub fn runtime_config(nitrum: NitrumConfig) -> RuntimeConfig {
             .build(),
     );
 
-    RuntimeConfig {
+    DataPlaneConfig {
         nitrum,
-        imds_latest_base_url: "http://127.0.0.1".to_string(),
         aws_region: "us-east-1".to_string(),
         aws_sdk_config,
         instance_id: "i-bench".to_string(),
@@ -43,10 +41,9 @@ pub fn runtime_config(nitrum: NitrumConfig) -> RuntimeConfig {
     }
 }
 
-/// Set the backend port on an existing [`RuntimeConfig`].
-#[doc(hidden)]
+/// Set the backend port on an existing [`DataPlaneConfig`].
 #[must_use]
-pub const fn with_backend_port(mut config: RuntimeConfig, port: u16) -> RuntimeConfig {
+pub const fn with_backend_port(mut config: DataPlaneConfig, port: u16) -> DataPlaneConfig {
     config.nitrum.project.port = port;
     config
 }

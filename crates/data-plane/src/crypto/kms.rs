@@ -6,7 +6,7 @@
 //!
 //! **Pebbles / local:** same symmetric envelope; `Decrypt` runs **without** `Recipient` (no NSM attestation).
 
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;
@@ -21,7 +21,7 @@ pub struct Kms {
 }
 
 impl Kms {
-    pub fn new(config: &RuntimeConfig) -> Self {
+    pub fn new(config: &DataPlaneConfig) -> Self {
         let mut builder = aws_sdk_kms::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.kms_endpoint {
             builder = builder.endpoint_url(endpoint);

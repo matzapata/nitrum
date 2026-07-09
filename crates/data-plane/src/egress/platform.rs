@@ -5,10 +5,10 @@ use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 
 use tracing::{info, warn};
 
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use crate::constants::{
-    acme_directory_url, acme_directory_url_override, dynamodb_endpoint_url, imds_latest_base_url,
-    kms_endpoint_url, ssm_endpoint_url,
+    acme_directory_url, acme_directory_url_override, dynamodb_endpoint_url, kms_endpoint_url,
+    ssm_endpoint_url,
 };
 
 /// Platform bootstrap data merged with user `[egress].destinations`.
@@ -26,37 +26,31 @@ pub struct PlatformAllows {
 }
 
 /// Build merged hostname patterns and bootstrap IP allowlist from resolved runtime config.
-pub fn build_platform_allows(runtime_config: &RuntimeConfig) -> anyhow::Result<PlatformAllows> {
-    let mut patterns = runtime_config.egress.destinations.clone();
+pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<PlatformAllows> {
+    let mut patterns = config.egress.destinations.clone();
     let mut allowed_ips = HashSet::new();
 
     allowed_ips.insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
 
-    append_hostname_pattern_from_url(&mut patterns, &imds_latest_base_url());
+    append_hostname_pattern_from_url(&mut patterns, &config.imds_latest_base_url);
     append_hostname_pattern_from_url(&mut patterns, &ssm_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &kms_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &dynamodb_endpoint_url().unwrap_or_default());
 
     let acme_directory = acme_directory_url();
-    if runtime_config.tls_termination.acme || acme_directory_url_override().is_some() {
+    if config.tls_termination.acme || acme_directory_url_override().is_some() {
         append_hostname_pattern_from_url(&mut patterns, &acme_directory);
     }
 
     let collector_bypass_ip = resolve_otlp_collector_allow(
         &mut patterns,
         &mut allowed_ips,
-        runtime_config.otlp_endpoint.as_deref(),
+        config.otlp_endpoint.as_deref(),
     );
 
-    let region = &runtime_config.aws_region;
-    patterns.push(format!(
-        r"^kms\.{}\.amazonaws\.com$",
-        regex::escape(region)
-    ));
-    patterns.push(format!(
-        r"^ssm\.{}\.amazonaws\.com$",
-        regex::escape(region)
-    ));
+    let region = &config.aws_region;
+    patterns.push(format!(r"^kms\.{}\.amazonaws\.com$", regex::escape(region)));
+    patterns.push(format!(r"^ssm\.{}\.amazonaws\.com$", regex::escape(region)));
     patterns.push(format!(
         r"^dynamodb\.{}\.amazonaws\.com$",
         regex::escape(region)
@@ -74,7 +68,7 @@ pub fn build_platform_allows(runtime_config: &RuntimeConfig) -> anyhow::Result<P
     })
 }
 
-/// Permit the resolved OTLP collector endpoint (see [`crate::config::RuntimeConfig::otlp_endpoint`])
+/// Permit the resolved OTLP collector endpoint (see [`DataPlaneConfig::otlp_endpoint`])
 /// through egress so telemetry export is not dropped.
 ///
 /// Returns the collector IP to bypass transparent proxying when the endpoint is IP-based;

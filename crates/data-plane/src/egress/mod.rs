@@ -1,55 +1,110 @@
-//! In-enclave egress whitelist enforcement (DNS + transparent TCP proxy).
+//! Egress whitelist enforcement (DNS + transparent TCP proxy) on supported platforms.
 
+#[cfg(egress_enforcement)]
 mod constants;
+#[cfg(egress_enforcement)]
 mod dns;
+#[cfg(egress_enforcement)]
 mod filter;
+#[cfg(egress_enforcement)]
 mod ip_cache;
+#[cfg(egress_enforcement)]
 mod iptables;
+#[cfg(egress_enforcement)]
 mod platform;
+#[cfg(egress_enforcement)]
 mod tcp;
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use tracing::info;
 
-use tracing::{info, warn};
+use crate::config::DataPlaneConfig;
 
-use crate::config::RuntimeConfig;
-
+#[cfg(egress_enforcement)]
 pub use filter::EgressFilter;
 
+#[cfg(egress_enforcement)]
 use constants::{
     DNS_PROXY_PORT, ENCLAVE_UPSTREAM_DNS, TCP_PROXY_PORT, egress_upstream_dns_override,
 };
+#[cfg(egress_enforcement)]
 use dns::{bind_dns_proxy, serve_dns_proxy};
+#[cfg(egress_enforcement)]
 use filter::EgressFilter as Filter;
+#[cfg(egress_enforcement)]
 use ip_cache::IpCache;
+#[cfg(egress_enforcement)]
 use iptables::{
     install as install_iptables, log_missing_capability, teardown as teardown_iptables,
 };
+#[cfg(egress_enforcement)]
 use platform::build_platform_allows;
+#[cfg(egress_enforcement)]
+use std::net::SocketAddr;
+#[cfg(egress_enforcement)]
+use std::sync::Arc;
+#[cfg(egress_enforcement)]
 use tcp::{bind_tcp_proxy, serve_tcp_proxy};
+#[cfg(egress_enforcement)]
+use tracing::warn;
 
-/// Remove egress iptables rules installed by [`init`].
-pub fn teardown() {
-    teardown_iptables();
+/// Owns egress enforcement for the process lifetime.
+///
+/// Removes iptables rules on [`Drop`] when egress was enabled and installed successfully.
+pub struct EgressGuard {
+    /// Whether iptables rules were installed and should be removed on drop.
+    active: bool,
 }
 
-/// Initialize egress enforcement when `[egress].enabled` is true in `runtime_config`.
-///
-/// No-op when egress is disabled. Uses [`RuntimeConfig::aws_region`] and
-/// [`RuntimeConfig::otlp_endpoint`] for platform allowlist construction.
-pub async fn init(runtime_config: &RuntimeConfig) -> anyhow::Result<()> {
-    if !runtime_config.egress.enabled {
-        info!("egress whitelist disabled");
-        return Ok(());
+impl EgressGuard {
+    fn inactive() -> Self {
+        Self { active: false }
     }
 
+    fn active() -> Self {
+        Self { active: true }
+    }
+}
+
+impl Drop for EgressGuard {
+    fn drop(&mut self) {
+        if self.active {
+            #[cfg(egress_enforcement)]
+            teardown_iptables();
+        }
+    }
+}
+
+/// Initialize egress enforcement when `[egress].enabled` is true in `config`.
+///
+/// Returns an [`EgressGuard`] that removes iptables rules on drop when enforcement is active.
+/// No-op when egress is disabled or when enforcement is unavailable on the current platform.
+#[must_use]
+pub async fn init(config: &DataPlaneConfig) -> anyhow::Result<EgressGuard> {
+    if !config.egress.enabled {
+        info!("egress whitelist disabled");
+        return Ok(EgressGuard::inactive());
+    }
+
+    #[cfg(egress_enforcement)]
+    {
+        return init_enforcement(config).await;
+    }
+
+    #[cfg(not(egress_enforcement))]
+    {
+        info!("egress whitelist unavailable on this platform; skipping enforcement");
+        Ok(EgressGuard::inactive())
+    }
+}
+
+#[cfg(egress_enforcement)]
+async fn init_enforcement(config: &DataPlaneConfig) -> anyhow::Result<EgressGuard> {
     info!(
-        destinations = runtime_config.egress.destinations.len(),
+        destinations = config.egress.destinations.len(),
         "egress whitelist enabled"
     );
 
-    let platform = build_platform_allows(runtime_config)?;
+    let platform = build_platform_allows(config)?;
     let pattern_count = platform.patterns.len();
     let collector_bypass = platform.collector_bypass_ip;
     let filter = Arc::new(Filter::new(true, &platform.patterns));
@@ -94,9 +149,10 @@ pub async fn init(runtime_config: &RuntimeConfig) -> anyhow::Result<()> {
         "egress enforcement active"
     );
 
-    Ok(())
+    Ok(EgressGuard::active())
 }
 
+#[cfg(egress_enforcement)]
 fn detect_upstream_dns() -> anyhow::Result<SocketAddr> {
     if let Some(addr) = egress_upstream_dns_override()? {
         return Ok(addr);
@@ -111,6 +167,7 @@ fn detect_upstream_dns() -> anyhow::Result<SocketAddr> {
         .map_err(|error| anyhow::anyhow!("invalid enclave upstream DNS: {error}"))
 }
 
+#[cfg(egress_enforcement)]
 fn read_first_nameserver() -> Option<SocketAddr> {
     let contents = std::fs::read_to_string("/etc/resolv.conf").ok()?;
     for line in contents.lines() {
@@ -128,12 +185,13 @@ fn read_first_nameserver() -> Option<SocketAddr> {
     None
 }
 
+#[cfg(egress_enforcement)]
 fn write_local_resolv_conf() -> anyhow::Result<()> {
     std::fs::write("/etc/resolv.conf", "nameserver 127.0.0.1\n")?;
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, egress_enforcement))]
 mod tests {
     use super::*;
 

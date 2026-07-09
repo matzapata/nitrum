@@ -1,6 +1,6 @@
 //! Shared state for the data-plane: config and clients.
 
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
 use std::sync::{Arc, RwLock};
@@ -8,8 +8,8 @@ use std::sync::{Arc, RwLock};
 /// Shared state for the data-plane: config and clients.
 #[derive(Clone)]
 pub struct DataPlaneState {
-    /// Runtime configuration.
-    pub config: RuntimeConfig,
+    /// Resolved data-plane configuration.
+    pub config: DataPlaneConfig,
     /// Storage client for storing data.
     pub storage: Arc<StorageClient>,
     /// Crypto client for encrypting/decrypting data.
@@ -23,7 +23,7 @@ pub struct DataPlaneState {
 impl DataPlaneState {
     #[must_use]
     pub fn new(
-        config: RuntimeConfig,
+        config: DataPlaneConfig,
         storage: Arc<StorageClient>,
         crypto: Arc<CryptoClient>,
     ) -> Self {

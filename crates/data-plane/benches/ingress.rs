@@ -3,13 +3,16 @@
 //! Measures the full proxy path, including request body buffering and backend
 //! round-trip — not router dispatch alone.
 
+mod common;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use common::{data_plane_config, with_backend_port};
 use config::{NitrumConfig, WellKnown};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, black_box};
 use data_plane::server::ingress::build_https_router;
-use data_plane::{CryptoClient, DataPlaneState, StorageClient, runtime_config, with_backend_port};
+use data_plane::{CryptoClient, DataPlaneState, StorageClient};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
@@ -30,10 +33,10 @@ impl BenchEnv {
             enclave_attestation: false,
         };
 
-        let runtime_cfg = with_backend_port(runtime_config(nitrum), backend_port);
-        let storage = Arc::new(StorageClient::new(&runtime_cfg));
+        let data_plane_cfg = with_backend_port(data_plane_config(nitrum), backend_port);
+        let storage = Arc::new(StorageClient::new(&data_plane_cfg));
         let crypto = Arc::new(CryptoClient::from_dek(&DEK).expect("valid DEK"));
-        let state = Arc::new(DataPlaneState::new(runtime_cfg, storage, crypto));
+        let state = Arc::new(DataPlaneState::new(data_plane_cfg, storage, crypto));
         let app = build_https_router(state);
 
         Self { app }
