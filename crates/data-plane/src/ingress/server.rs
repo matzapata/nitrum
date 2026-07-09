@@ -1,25 +1,10 @@
-//! Ingress proxy: Responsible for terminating TLS connections, serving well-known
-//! enclave endpoints and ACME challenges, and proxying all other traffic to the
-//! user application.
-//!
-//! Optional well-known paths (enabled via `[well_known]` in `nitrum.toml`) are handled directly
-//! (the user app is not invoked):
-//!   - GET /.well-known/enclave/status
-//!     -> Responds with 200 {"status":"ok"}
-//!   - GET /.well-known/enclave/attestation
-//!     -> Responds with 200 and base64-encoded attestation document
-//!     Optional query: `nonce` — standard base64 of raw nonce bytes (same encoding as the crypto API)
-//!   - GET /.well-known/acme-challenge/*
-//!     -> Responds with 200 and the ACME HTTP-01 key authorization string
-//!
-//! The server exposes both a plain HTTP listener (default: port 80, for ACME HTTP-01
-//! validation) and a TLS listener (default: port 443) using the same Axum router.
-//! TLS config is provided by `tls::build_tls_config`. The certificate is renewed in
-//! the background and can be reloaded without restarting the ingress server.
+//! Ingress HTTP/HTTPS server: TLS termination, well-known endpoints, and app proxying.
 
+use super::state::IngressState;
 use super::tls::{TlsState, challenge_handler};
-use crate::crypto::get_attestation_doc;
-use crate::state::DataPlaneState;
+use crate::config::DataPlaneConfig;
+use crate::crypto::{CryptoClient, get_attestation_doc};
+use crate::storage::StorageClient;
 use anyhow::Context;
 use axum::{
     Router,
@@ -33,16 +18,21 @@ use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
-// ── public entry point ────────────────────────────────────────────────────────
-
 /// Spawn the ingress server in the background.
-pub fn init(state: Arc<DataPlaneState>) {
+pub fn init(config: &DataPlaneConfig, storage: &Arc<StorageClient>, crypto: &Arc<CryptoClient>) {
+    let state = Arc::new(IngressState {
+        config: config.clone(),
+        storage: storage.clone(),
+        proxy_client: reqwest::Client::new(),
+        tls_cert_hash: Arc::new(RwLock::new(None)),
+    });
+    let crypto = crypto.clone();
     tokio::spawn(async move {
         info!("ingress task starting");
-        if let Err(e) = run(state).await {
+        if let Err(e) = run(state, crypto).await {
             warn!(error = %e, "ingress task failed");
         }
         warn!("ingress task exited");
@@ -51,7 +41,7 @@ pub fn init(state: Arc<DataPlaneState>) {
 
 /// Runs the ingress server (HTTP for ACME, HTTPS for app traffic). Returns when
 /// either server stops (e.g. bind/serve error) or an error occurs.
-async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
+async fn run(state: Arc<IngressState>, crypto: Arc<CryptoClient>) -> anyhow::Result<()> {
     let (tls_config, challenge_server) = if state.config.tls_termination.acme {
         // ACME HTTP-01 challenge handler
         let acme_router = Router::new()
@@ -64,7 +54,7 @@ async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
         let acme_router = telemetry::http::instrument_router(acme_router, "data-plane.ingress");
 
         // TLS state machine
-        let mut tls_state = TlsState::new(state.clone());
+        let mut tls_state = TlsState::new(state.clone(), crypto.clone());
         let tls_config = tls_state.rustls_config();
 
         // Drive the ACME state machine
@@ -84,7 +74,7 @@ async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
 
         (tls_config, Some(challenge_server))
     } else {
-        let tls_config = TlsState::new(state.clone()).rustls_config();
+        let tls_config = TlsState::new(state.clone(), crypto).rustls_config();
         (tls_config, None)
     };
 
@@ -111,7 +101,7 @@ async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
 
 /// Build the HTTPS ingress router (well-known routes + proxy fallback).
 #[doc(hidden)]
-pub fn build_https_router(state: Arc<DataPlaneState>) -> Router {
+pub fn build_https_router(state: Arc<IngressState>) -> Router {
     let mut https_router = Router::new();
     if state.config.well_known.enclave_status {
         https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
@@ -122,8 +112,6 @@ pub fn build_https_router(state: Arc<DataPlaneState>) -> Router {
     }
     https_router.fallback(ingress_proxy).with_state(state)
 }
-
-// ── handlers ─────────────────────────────────────────────────────────────────
 
 async fn ingress_status() -> impl IntoResponse {
     (
@@ -139,7 +127,7 @@ struct IngressAttestationQuery {
 }
 
 async fn ingress_attestation(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<IngressState>>,
     Query(q): Query<IngressAttestationQuery>,
 ) -> impl IntoResponse {
     let cert_hash = state.tls_cert_hash.read().unwrap().clone();
@@ -177,7 +165,7 @@ async fn ingress_attestation(
 }
 
 async fn ingress_proxy(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<IngressState>>,
     req: Request<Body>,
 ) -> impl IntoResponse {
     let path_and_query = req

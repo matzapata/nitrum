@@ -216,7 +216,7 @@ Options are defined in the `shared` crate; the sample project comments point to 
 
 - `[project]` `name` — project identifier; CloudFormation stack name and `ProjectName` match it; S3 bucket is `nitrum-{name}`; SSM paths use `/nitrum/{name}/…` (data-plane infra and app env).
 - `[project]` `port` — TCP port your app listens on at `127.0.0.1` (ingress proxies here after TLS).
-- `[project]` `start_command` — argv for the user process (JSON array in `nitrum.toml`); the data-plane spawns it after loading config (CLI args after `--` still override when used).
+- `[project]` `start_command` — argv for the user process (JSON array in `nitrum.toml`); the data-plane spawns it after loading config.
 - `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).

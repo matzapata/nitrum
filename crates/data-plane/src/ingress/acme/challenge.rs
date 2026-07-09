@@ -1,6 +1,6 @@
 //! HTTP-01 challenge response for ingress.
 
-use crate::state::DataPlaneState;
+use crate::ingress::IngressState;
 use crate::storage::keys;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -14,7 +14,7 @@ use tracing::info;
 
 #[must_use]
 pub fn challenge_handler(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<IngressState>>,
     Path(token): Path<String>,
 ) -> Pin<Box<dyn Future<Output = Response> + Send>> {
     Box::pin(async move {

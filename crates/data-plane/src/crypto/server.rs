@@ -1,8 +1,10 @@
-//! Provide internal api for crypto operations.
+//! Internal HTTP server for crypto operations.
 
 use super::attest::get_attestation_doc;
+use super::client::CryptoClient;
 use super::kv::{EnclaveKvStore, KvStoreError};
-use crate::state::DataPlaneState;
+use crate::config::DataPlaneConfig;
+use crate::storage::StorageClient;
 use anyhow::Context;
 use axum::{
     Json, Router,
@@ -17,11 +19,25 @@ use serde_json::json;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+/// Dependencies required by the crypto API server and its handlers.
+#[derive(Clone)]
+struct CryptoApiState {
+    /// Crypto client for encrypting/decrypting data.
+    crypto: Arc<CryptoClient>,
+    /// Storage client for encrypted KV persistence.
+    storage: Arc<StorageClient>,
+}
+
 /// Spawn the crypto API server in the background.
-pub fn init(state: Arc<DataPlaneState>) {
+pub fn init(config: &DataPlaneConfig, crypto: &Arc<CryptoClient>, storage: &Arc<StorageClient>) {
+    let state = Arc::new(CryptoApiState {
+        crypto: crypto.clone(),
+        storage: storage.clone(),
+    });
+    let listen_addr = config.listen_addrs.crypto_api_listen_addr;
     tokio::spawn(async move {
         info!("crypto API task starting");
-        if let Err(e) = run(state).await {
+        if let Err(e) = run(state, listen_addr).await {
             warn!(error = %e, "crypto API task failed");
         }
         warn!("crypto API task exited");
@@ -29,8 +45,7 @@ pub fn init(state: Arc<DataPlaneState>) {
 }
 
 /// Run the crypto API server (attestation, encrypt, decrypt, KV) until the process exits.
-async fn run(state: Arc<DataPlaneState>) -> anyhow::Result<()> {
-    let addr = state.config.listen_addrs.crypto_api_listen_addr;
+async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind API server on {addr}"))?;
@@ -141,7 +156,7 @@ pub struct EncryptRequest {
 }
 
 async fn encrypt(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<CryptoApiState>>,
     Json(req): Json<EncryptRequest>,
 ) -> impl IntoResponse {
     let plaintext = req.plaintext.as_bytes();
@@ -173,7 +188,7 @@ pub struct DecryptRequest {
 }
 
 async fn decrypt(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<CryptoApiState>>,
     Json(req): Json<DecryptRequest>,
 ) -> impl IntoResponse {
     let ciphertext = match B64.decode(&req.ciphertext) {
@@ -237,7 +252,7 @@ struct KvGetRequest {
 }
 
 async fn kv_set(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<CryptoApiState>>,
     Json(req): Json<KvSetRequest>,
 ) -> impl IntoResponse {
     let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
@@ -254,7 +269,7 @@ async fn kv_set(
 }
 
 async fn kv_get(
-    State(state): State<Arc<DataPlaneState>>,
+    State(state): State<Arc<CryptoApiState>>,
     Json(req): Json<KvGetRequest>,
 ) -> impl IntoResponse {
     let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
