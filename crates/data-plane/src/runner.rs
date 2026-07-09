@@ -1,4 +1,22 @@
 //! Run and supervise the user process.
+//!
+//! This module is responsible for managing the lifecycle of a user-supplied application or service
+//! process within the data plane. It launches the process as configured, monitors its status,
+//! and ensures orderly shutdown and cleanup under normal operations or in the event of system signals.
+//!
+//! Key responsibilities:
+//! - Spawning the user process as specified in the configuration file (`[project].start_command`).
+//! - Forwarding environment variables and using appropriate standard IO options.
+//! - Supervising the running process: monitoring exit codes, handling process termination signals,
+//!   and reaping zombies if necessary.
+//! - Handling shutdown: on receipt of a termination request (e.g., SIGINT), gracefully shutting down
+//!   the running process or issuing a KILL signal as a fallback.
+//!
+//! The main entrypoint is [`run_until_shutdown`] which runs the user's command or blocks until shutdown
+//! if no command is provided. Proper guarantees are made that no orphaned processes remain after shutdown.
+//!
+//! This module is intended as internal infrastructure, not as a generic supervisor — it's specialized for
+//! launching a single user-controlled application per data-plane run.
 
 use crate::DataPlaneConfig;
 use anyhow::Result;
@@ -6,6 +24,32 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::process::Child;
 use tracing::{error, info};
+
+/// Owns the user child process and sends SIGKILL on drop when still running.
+struct RunnerGuard {
+    /// Child process handle; cleared after a successful wait.
+    child: Option<Child>,
+}
+
+impl RunnerGuard {
+    async fn wait(&mut self) -> Result<i32> {
+        let child = self
+            .child
+            .as_mut()
+            .expect("runner guard wait called without child");
+        let status = child.wait().await?;
+        self.child = None;
+        Ok(status.code().unwrap_or(-1))
+    }
+}
+
+impl Drop for RunnerGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+        }
+    }
+}
 
 /// Supervise the user process until it exits or a shutdown signal is received.
 ///
@@ -83,32 +127,6 @@ async fn run<S: std::hash::BuildHasher + Sync>(
 
     info!(target: "app", exit_code = code, "user process exited");
     Ok(code)
-}
-
-/// Owns the user child process and sends SIGKILL on drop when still running.
-struct RunnerGuard {
-    /// Child process handle; cleared after a successful wait.
-    child: Option<Child>,
-}
-
-impl RunnerGuard {
-    async fn wait(&mut self) -> Result<i32> {
-        let child = self
-            .child
-            .as_mut()
-            .expect("runner guard wait called without child");
-        let status = child.wait().await?;
-        self.child = None;
-        Ok(status.code().unwrap_or(-1))
-    }
-}
-
-impl Drop for RunnerGuard {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.start_kill();
-        }
-    }
 }
 
 async fn forward_lines<R>(reader: R, label: &'static str)

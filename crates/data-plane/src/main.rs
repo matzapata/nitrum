@@ -32,9 +32,11 @@ async fn run() -> anyhow::Result<i32> {
 
     let Args { config } = Args::parse();
 
-    // Initialize networking (TAP + VSOCK) TODO: improve comment and error handling
+    // Initialize networking
     #[cfg(feature = "enclave")]
-    data_plane::networking::init().await;
+    data_plane::networking::init()
+        .await
+        .context("enclave networking init failed")?;
 
     // Load config
     let nitrum = NitrumConfig::try_from(config.as_path())

@@ -5,8 +5,7 @@
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use config::NitrumConfig;
-use data_plane::DataPlaneConfig;
-use data_plane::constants::ListenAddrs;
+use data_plane::{DataPlaneConfig, ListenAddrs};
 use std::collections::HashMap;
 use std::sync::Arc;
 

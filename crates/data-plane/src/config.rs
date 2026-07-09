@@ -1,25 +1,24 @@
 //! Data-plane config: `nitrum.toml` plus IMDS + SSM infra settings.
 
+use crate::constants::{
+    DEFAULT_ACME_HTTP01_LISTEN_ADDR, DEFAULT_CRYPTO_API_LISTEN_ADDR, DEFAULT_INGRESS_LISTEN_ADDR,
+    ENV_ACME_HTTP01_LISTEN_ADDR, ENV_CRYPTO_API_LISTEN_ADDR, ENV_INGRESS_LISTEN_ADDR, OTLP_PORT,
+    dynamodb_endpoint_url, dynamodb_ssm_table_name, env_variablesm_ssm_name, kms_endpoint_url,
+    kms_ssm_key_name,
+};
+use crate::utils::env::var_or_nonempty_default;
+use crate::utils::imds::{EnclaveProvider, ImdsClient};
+use crate::utils::ssm::SsmParameters;
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_config::Region;
 use aws_credential_types::provider::SharedCredentialsProvider;
 use config::NitrumConfig;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::info;
-
-#[cfg(feature = "enclave")] // TODO: remove
-use crate::constants::default_otlp_endpoint_for_host;
-use crate::constants::{
-    AWS_REGION_FETCH_ATTEMPTS, AWS_REGION_FETCH_INITIAL_BACKOFF_MS, ListenAddrs,
-    app_env_parameter_name, data_plane_dynamodb_parameter_name, data_plane_kms_parameter_name,
-    dynamodb_endpoint_url, kms_endpoint_url,
-};
-use crate::utils::imds::{EnclaveProvider, ImdsClient};
-use crate::utils::ssm::SsmParameters;
 
 /// Data-plane config: `nitrum.toml` plus infra settings resolved from IMDS and SSM.
 #[derive(Clone)]
@@ -47,6 +46,16 @@ pub struct DataPlaneConfig {
     /// Effective OTLP/gRPC collector endpoint for telemetry export.
     pub otlp_endpoint: Option<String>,
 }
+/// Listen addresses for ingress, ACME HTTP-01, and the crypto API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListenAddrs {
+    /// Ingress TLS listen address.
+    pub ingress_listen_addr: SocketAddr,
+    /// ACME HTTP-01 listen address.
+    pub acme_http01_listen_addr: SocketAddr,
+    /// Crypto API listen address.
+    pub crypto_api_listen_addr: SocketAddr,
+}
 
 impl Deref for DataPlaneConfig {
     type Target = NitrumConfig;
@@ -68,23 +77,24 @@ impl DataPlaneConfig {
     ///
     /// Returns an error when IMDS, SSM, or listen-address resolution fails.
     pub async fn try_from(nitrum: NitrumConfig) -> Result<Self> {
-        info!(
-            imds_base_url = %nitrum.imds_latest_base_url,
-            "connecting to IMDS"
-        );
+        info!("Loading IMDS client");
         let imds =
             Arc::new(ImdsClient::new(&nitrum.imds_latest_base_url).context("IMDS client init")?);
 
-        // TODO: can we move this to the TelemetryConfig?
-        info!("resolving OTLP telemetry endpoint");
-        let otlp_endpoint = resolve_otlp_endpoint(&nitrum, &imds).await;
+        info!("Loading OTLP endpoint from env");
+        let otlp_endpoint = match nitrum.otlp_endpoint.as_deref() {
+            Some(explicit) => Some(explicit.to_string()),
+            None => Some(
+                imds.local_ipv4()
+                    .await
+                    .map(|parent_ipv4| format!("http://{parent_ipv4}:{OTLP_PORT}"))
+                    .unwrap_or_else(|_| format!("http://127.0.0.1:{OTLP_PORT}")),
+            ),
+        };
 
-        info!("fetching AWS region from IMDS (IMDSv2 token + placement/region)");
+        info!("Loading AWS region from IMDS");
         let aws_region = imds
-            .get_region_with_retry(
-                AWS_REGION_FETCH_ATTEMPTS,
-                Duration::from_millis(AWS_REGION_FETCH_INITIAL_BACKOFF_MS),
-            )
+            .get_region_with_retry()
             .await
             .with_context(|| {
                 format!(
@@ -103,12 +113,12 @@ impl DataPlaneConfig {
                 .await,
         );
 
-        info!("loading SSM config");
+        info!("Loading SSM config");
         let ssm = SsmParameters::new(aws_sdk_config.clone());
 
-        info!("loading DynamoDB config");
+        info!("Loading DynamoDB config");
         let dynamodb_endpoint = dynamodb_endpoint_url(); // TODO: make it a param
-        let dynamodb_path = data_plane_dynamodb_parameter_name(&nitrum.project.name);
+        let dynamodb_path = dynamodb_ssm_table_name(&nitrum.project.name);
         let dynamodb_table = ssm
             .get_parameter(&dynamodb_path)
             .await
@@ -118,24 +128,43 @@ impl DataPlaneConfig {
                 )
             })?;
 
-        info!("loading KMS config");
+        info!("Loading KMS config");
         let kms_endpoint = kms_endpoint_url();
-        let kms_path = data_plane_kms_parameter_name(&nitrum.project.name);
+        let kms_path = kms_ssm_key_name(&nitrum.project.name);
         let kms_key_id = ssm.get_parameter(&kms_path).await.with_context(|| {
             format!(
                 "SSM kms_key_id (expected {kms_path}, e.g. /nitrum/myapp/data-plane/kms_key_id)"
             )
         })?;
 
-        info!("loading app env from SSM");
-        let app_env_path = app_env_parameter_name(&nitrum.project.name);
+        info!("Loading app env from SSM");
+        let app_env_path = env_variablesm_ssm_name(&nitrum.project.name);
         let user_env = ssm
             .get_parameters_by_path_recursive(&app_env_path)
             .await
             .with_context(|| format!("SSM GetParametersByPath for app env ({app_env_path})"))?;
 
-        info!("loading listen addresses from env");
-        let listen_addrs = ListenAddrs::from_env()?;
+        info!("Loading listen addresses from env");
+        let listen_addrs = ListenAddrs {
+            ingress_listen_addr: var_or_nonempty_default(
+                ENV_INGRESS_LISTEN_ADDR,
+                DEFAULT_INGRESS_LISTEN_ADDR,
+            )
+            .parse()
+            .with_context(|| format!("invalid {ENV_INGRESS_LISTEN_ADDR}"))?,
+            acme_http01_listen_addr: var_or_nonempty_default(
+                ENV_ACME_HTTP01_LISTEN_ADDR,
+                DEFAULT_ACME_HTTP01_LISTEN_ADDR,
+            )
+            .parse()
+            .with_context(|| format!("invalid {ENV_ACME_HTTP01_LISTEN_ADDR}"))?,
+            crypto_api_listen_addr: var_or_nonempty_default(
+                ENV_CRYPTO_API_LISTEN_ADDR,
+                DEFAULT_CRYPTO_API_LISTEN_ADDR,
+            )
+            .parse()
+            .with_context(|| format!("invalid {ENV_CRYPTO_API_LISTEN_ADDR}"))?,
+        };
 
         Ok(Self {
             nitrum,
@@ -150,37 +179,5 @@ impl DataPlaneConfig {
             user_env,
             otlp_endpoint,
         })
-    }
-}
-
-/// Resolve the effective OTLP/gRPC collector endpoint for telemetry startup.
-///
-/// [`NitrumConfig::otlp_endpoint`] always wins when set: an empty value disables OTLP and keeps
-/// stdout-only logging. Otherwise, in an enclave the parent host's default collector endpoint is
-/// derived from the parent instance's `local-ipv4` via the shared `imds` client; if that lookup
-/// fails telemetry degrades to stdout-only logging. Off-enclave there is no platform default, so
-/// `None` is returned when the config value is unset.
-async fn resolve_otlp_endpoint(nitrum: &NitrumConfig, imds: &ImdsClient) -> Option<String> {
-    if let Some(explicit) = nitrum.otlp_endpoint.as_deref() {
-        return (!explicit.is_empty()).then(|| explicit.to_string());
-    }
-
-    #[cfg(feature = "enclave")]
-    {
-        match imds.local_ipv4().await {
-            Ok(parent_ipv4) => Some(default_otlp_endpoint_for_host(&parent_ipv4)),
-            Err(error) => {
-                eprintln!(
-                    "telemetry: failed to resolve default OTLP endpoint from IMDS ({error:#}); falling back to stdout-only logging"
-                );
-                None
-            }
-        }
-    }
-
-    #[cfg(not(feature = "enclave"))]
-    {
-        let _ = imds;
-        None
     }
 }

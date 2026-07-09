@@ -1,8 +1,30 @@
-use crate::constants::HOST_PROXY_PORT;
+//! Enclave network initialization and configuration for the data plane.
+//!
+//! This module is responsible for establishing the networking stack inside an AWS Nitro enclave.
+//! It sets up a virtual TAP (Ethernet) device and manages connectivity to the outside world via
+//! VSOCK-based communication with `gvproxy` on the parent EC2 instance. The TAP device is assigned
+//! a static IP and MAC address, and built-in routing ensures that traffic such as the Instance
+//! Metadata Service (IMDS) is accessible only via secure, isolated host routes.
+//!
+//! Key responsibilities include:
+//! - Creating and configuring a TAP device with static addressing within the enclave.
+//! - Establishing host communication using the VSOCK protocol (context ID 3), which connects to
+//!   a designated agent (`gvproxy`) that proxies network traffic between the enclave and the host's
+//!   network devices.
+//! - Enabling communication with external services—including EC2/ECS APIs and telemetry endpoints—over
+//!   standard transport protocols, with all egress mediated via the TAP interface and host-side proxy.
+//! - Optionally exposing debug or admin features for visibility into network state during development.
+//!
+//! This setup is crucial for secure, minimal, and auditable networking, enabling data plane components
+//! to function in a tightly controlled enclave environment without direct access to host or AWS VPC networks.
+
+use crate::constants::{HOST_PROXY_PORT, VSOCK_CONNECT_MAX_ATTEMPTS, VSOCK_CONNECT_RETRY_INTERVAL};
+use anyhow::{Context, Result};
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 /// The name of the TAP network device created inside the enclave.
 const TAP_DEVICE_NAME: &str = "tap0";
@@ -54,40 +76,75 @@ const AF_VSOCK: libc::c_int = 40;
 /// Returns once TAP ↔ VSOCK forwarding is running (background threads). Call **before** loading
 /// config that needs IMDS/HTTPS egress: the parent must run gvproxy with `-ec2-metadata-access`
 /// so `169.254.169.254` (IMDS) is reachable from the guest over TAP.
-pub async fn init() {
+#[instrument(name = "networking.init", err)]
+pub async fn init() -> Result<()> {
+    // Enclave/minimal roots often start with `lo` down; without this, `127.0.0.1` returns ENETUNREACH.
+    bring_loopback_up().context("bring loopback interface up")?;
+
+    let vsock = connect_vsock_with_retry(HOST_PROXY_PORT)
+        .await
+        .context("connect to gvproxy via VSOCK")?;
+
+    send_handshake(vsock.as_raw_fd()).context("send POST /connect handshake to gvproxy")?;
+
+    let tap = create_tap(TAP_DEVICE_NAME)
+        .with_context(|| format!("create TAP device {TAP_DEVICE_NAME}"))?;
+
+    configure_tap().context("configure TAP interface")?;
     info!(
-        port = HOST_PROXY_PORT,
-        "setting up enclave networking (TAP + VSOCK → gvproxy)"
+        device = TAP_DEVICE_NAME,
+        ip_cidr = TAP_IP_CIDR,
+        gateway = TAP_GATEWAY,
+        "TAP interface configured"
     );
 
-    // Enclave/minimal roots often start with `lo` down; without this, `127.0.0.1` returns ENETUNREACH.
-    bring_loopback_up();
+    write_resolv_conf().context("write resolv.conf")?;
 
-    let vsock_fd = loop {
-        match connect_vsock(HOST_PROXY_PORT) {
-            Ok(fd) => break fd,
-            Err(e) => {
-                info!(error = %e, "VSOCK connect failed, retrying in 1 s …");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    start_forwarding(tap.into_raw_fd(), vsock.into_raw_fd());
+    Ok(())
+}
+
+#[instrument(name = "networking.connect_vsock", fields(port), err)]
+async fn connect_vsock_with_retry(port: u32) -> Result<OwnedFd> {
+    let mut last_error = None;
+
+    for attempt in 1..=VSOCK_CONNECT_MAX_ATTEMPTS {
+        match connect_vsock(port) {
+            Ok(fd) => {
+                info!(attempt, "connected to gvproxy via VSOCK");
+                return Ok(unsafe { OwnedFd::from_raw_fd(fd) });
+            }
+            Err(error) => {
+                if attempt < VSOCK_CONNECT_MAX_ATTEMPTS {
+                    debug!(
+                        attempt,
+                        max_attempts = VSOCK_CONNECT_MAX_ATTEMPTS,
+                        error = %error,
+                        "VSOCK connect failed, retrying"
+                    );
+                    tokio::time::sleep(VSOCK_CONNECT_RETRY_INTERVAL).await;
+                } else {
+                    warn!(
+                        attempt,
+                        max_attempts = VSOCK_CONNECT_MAX_ATTEMPTS,
+                        error = %error,
+                        "VSOCK connect failed, giving up"
+                    );
+                    last_error = Some(error);
+                }
             }
         }
-    };
-    info!(port = HOST_PROXY_PORT, "connected to gvproxy via VSOCK");
+    }
 
-    send_handshake(vsock_fd).expect("failed to send POST /connect handshake");
-    info!("handshake sent");
-
-    let tap_fd = create_tap(TAP_DEVICE_NAME).expect("failed to create TAP device");
-    info!(device = TAP_DEVICE_NAME, "TAP device created");
-
-    configure_tap();
-    info!("TAP interface configured");
-
-    write_resolv_conf();
-    info!("resolv.conf written");
-
-    start_forwarding(tap_fd, vsock_fd);
-    info!("frame forwarding started (TAP ↔ VSOCK)");
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "VSOCK connect failed without a specific error",
+        )
+    }))
+    .with_context(|| {
+        format!("gvproxy not reachable on port {port} after {VSOCK_CONNECT_MAX_ATTEMPTS} attempts")
+    })
 }
 
 #[repr(C)]
@@ -99,7 +156,7 @@ struct SockAddrVm {
     zero: [u8; 4],
 }
 
-fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
+fn create_tap(name: &str) -> std::io::Result<OwnedFd> {
     assert!(
         !name.is_empty() && name.len() < libc::IFNAMSIZ,
         "TAP device name invalid"
@@ -129,15 +186,15 @@ fn create_tap(name: &str) -> std::io::Result<libc::c_int> {
         return Err(err);
     }
 
-    Ok(fd)
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn configure_tap() {
-    run_ip(&["link", "set", "dev", "lo", "up"]);
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC]);
-    run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME]);
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU]);
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"]);
+fn configure_tap() -> Result<()> {
+    run_ip(&["link", "set", "dev", "lo", "up"])?;
+    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC])?;
+    run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME])?;
+    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU])?;
+    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"])?;
     run_ip(&[
         "route",
         "add",
@@ -146,12 +203,12 @@ fn configure_tap() {
         TAP_GATEWAY,
         "dev",
         TAP_DEVICE_NAME,
-    ]);
+    ])?;
     // Without this, Linux may ARP for 169.254.169.254 on tap0 instead of forwarding to gvproxy.
-    add_imds_route();
+    add_imds_route()
 }
 
-fn add_imds_route() {
+fn add_imds_route() -> Result<()> {
     let status = Command::new("ip")
         .args([
             "route",
@@ -162,43 +219,40 @@ fn add_imds_route() {
             "dev",
             TAP_DEVICE_NAME,
         ])
-        .status();
-    match status {
-        Ok(s) if s.success() => {}
-        Ok(s) if s.code() == Some(2) => {
-            // EEXIST: route already present (e.g. warm restart).
-        }
-        Ok(s) => {
-            warn!(
-                exit_code = ?s.code(),
-                "ip route add for IMDS failed; metadata may be unreachable"
-            );
-        }
-        Err(e) => warn!(error = %e, "failed to run ip route add for IMDS"),
+        .status()
+        .context("spawn ip route add for IMDS")?;
+
+    if status.success() || status.code() == Some(2) {
+        // Exit code 2: route already present (e.g. warm restart).
+        return Ok(());
     }
+
+    let code = status.code().unwrap_or(-1);
+    anyhow::bail!("ip route add for IMDS failed with exit code {code}")
 }
 
-fn run_ip(args: &[&str]) {
+fn run_ip(args: &[&str]) -> Result<()> {
     let status = Command::new("ip")
         .args(args)
         .status()
-        .unwrap_or_else(|e| panic!("failed to run ip {args:?}: {e}"));
-    assert!(
-        status.success(),
-        "ip command failed: {args:?}, exit {:?}",
-        status.code()
-    );
+        .with_context(|| format!("spawn ip {args:?}"))?;
+    if status.success() {
+        return Ok(());
+    }
+    let code = status.code().unwrap_or(-1);
+    anyhow::bail!("ip {args:?} failed with exit code {code}")
 }
 
-fn bring_loopback_up() {
-    info!("bringing loopback lo up (127.0.0.1 may otherwise be unreachable)");
-    run_ip(&["link", "set", "dev", "lo", "up"]);
+fn bring_loopback_up() -> Result<()> {
+    info!("bringing loopback interface up");
+    run_ip(&["link", "set", "dev", "lo", "up"])
 }
 
-fn write_resolv_conf() {
-    std::fs::create_dir_all("/run/resolvconf").expect("failed to create /run/resolvconf");
+fn write_resolv_conf() -> Result<()> {
+    std::fs::create_dir_all("/run/resolvconf").context("create /run/resolvconf")?;
     std::fs::write("/run/resolvconf/resolv.conf", "nameserver 192.168.127.1\n")
-        .expect("failed to write /run/resolvconf/resolv.conf");
+        .context("write /run/resolvconf/resolv.conf")?;
+    Ok(())
 }
 
 fn connect_vsock(port: u32) -> std::io::Result<libc::c_int> {
@@ -376,25 +430,26 @@ fn rx_loop(tap_fd: libc::c_int, vsock_fd: libc::c_int, running: &Arc<AtomicBool>
     let mut buf = vec![0u8; MAX_FRAME_SIZE];
     while running.load(Ordering::Relaxed) {
         let n = unsafe { libc::read(tap_fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
-        if n <= 0 {
-            error!("TAP read error or EOF (n={n})");
+        if n < 0 {
+            error!(error = %std::io::Error::last_os_error(), "TAP read failed");
             break;
         }
-        let len = u16::try_from(n)
-            .map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "frame length larger than u16",
-                )
-            })
-            .unwrap()
-            .to_le_bytes();
+        if n == 0 {
+            error!("TAP read EOF");
+            break;
+        }
+        let Ok(frame_len) = u16::try_from(n) else {
+            error!(bytes_read = n, "TAP frame length exceeds u16 maximum");
+            break;
+        };
+        let len = frame_len.to_le_bytes();
         let frame = &buf[..n.cast_unsigned()];
-        if write_all_vectored_raw(vsock_fd, &[&len, frame]).is_err() {
-            error!("VSOCK write error");
+        if let Err(error) = write_all_vectored_raw(vsock_fd, &[&len, frame]) {
+            error!(error = %error, "VSOCK write failed");
             break;
         }
     }
+    warn!("TAP → VSOCK forwarding stopped");
     running.store(false, Ordering::Relaxed);
 }
 
@@ -405,8 +460,8 @@ fn tx_loop(vsock_fd: libc::c_int, tap_fd: libc::c_int, running: &Arc<AtomicBool>
     let mut frame_buf = vec![0u8; MAX_FRAME_SIZE];
 
     while running.load(Ordering::Relaxed) {
-        if read_exact_raw(vsock_fd, &mut len_buf).is_err() {
-            error!("VSOCK read (length header) error or EOF");
+        if let Err(error) = read_exact_raw(vsock_fd, &mut len_buf) {
+            error!(error = %error, "VSOCK read (length header) failed");
             break;
         }
 
@@ -416,25 +471,38 @@ fn tx_loop(vsock_fd: libc::c_int, tap_fd: libc::c_int, running: &Arc<AtomicBool>
             break;
         }
 
-        if read_exact_raw(vsock_fd, &mut frame_buf[..frame_len]).is_err() {
-            error!("VSOCK read (frame payload) error or EOF");
+        if let Err(error) = read_exact_raw(vsock_fd, &mut frame_buf[..frame_len]) {
+            error!(error = %error, "VSOCK read (frame payload) failed");
             break;
         }
 
-        if write_all_raw(tap_fd, &frame_buf[..frame_len]).is_err() {
-            error!("TAP write error");
+        if let Err(error) = write_all_raw(tap_fd, &frame_buf[..frame_len]) {
+            error!(error = %error, "TAP write failed");
             break;
         }
     }
+    warn!("VSOCK → TAP forwarding stopped");
     running.store(false, Ordering::Relaxed);
 }
 
 fn start_forwarding(tap_fd: libc::c_int, vsock_fd: libc::c_int) {
     let running = Arc::new(AtomicBool::new(true));
 
+    info!(
+        device = TAP_DEVICE_NAME,
+        port = HOST_PROXY_PORT,
+        "started TAP ↔ VSOCK frame forwarding"
+    );
+
     let r1 = Arc::clone(&running);
-    std::thread::spawn(move || rx_loop(tap_fd, vsock_fd, &r1));
+    std::thread::spawn(move || {
+        let _span = tracing::info_span!("networking.tap_to_vsock").entered();
+        rx_loop(tap_fd, vsock_fd, &r1);
+    });
 
     let r2 = Arc::clone(&running);
-    std::thread::spawn(move || tx_loop(vsock_fd, tap_fd, &r2));
+    std::thread::spawn(move || {
+        let _span = tracing::info_span!("networking.vsock_to_tap").entered();
+        tx_loop(vsock_fd, tap_fd, &r2);
+    });
 }
