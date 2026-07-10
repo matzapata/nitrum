@@ -1,3 +1,5 @@
+pub mod artifact;
+
 use std::path::PathBuf;
 
 /// Environment variable overriding [`NitrumConfig::imds_latest_base_url`]; ignored when unset.

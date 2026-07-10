@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use crate::artifact::EnclaveArtifact;
 use crate::utils::bucket::Bucket;
 use crate::utils::cloudformation::CloudFormation;
+use config::artifact::{eif_s3_key, eif_version_label_from_hash};
 use config::{NitrumConfig, Scaling};
 
 pub struct EnclaveCloudStack {
@@ -66,8 +67,8 @@ impl EnclaveCloudStack {
         kms_administrator_role_arn: Option<&str>,
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
-        let eif_label: String = artifact.hash.chars().take(12).collect();
-        let eif_s3_key = format!("{eif_label}.eif");
+        let eif_label = eif_version_label_from_hash(&artifact.hash);
+        let eif_s3_key = eif_s3_key(&eif_label);
         let retain_str = if retain { "true" } else { "false" };
         let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
 

@@ -1338,6 +1338,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "clap",
+ "config",
  "serde_json",
  "telemetry",
  "thiserror 2.0.18",

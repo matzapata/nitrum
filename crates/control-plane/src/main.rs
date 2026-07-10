@@ -1,18 +1,7 @@
-mod artifact;
-mod constants;
-mod enclave;
-mod monitoring;
-mod networking;
-mod utils;
-
-use artifact::EnclaveArtifact;
 use clap::Parser;
-use enclave::Enclave;
-use monitoring::Monitoring;
-use networking::Networking;
+use control_plane::ControlPlaneConfig;
 use std::path::PathBuf;
-use tracing::info;
-use utils::bucket::Bucket;
+use tracing::error;
 
 #[derive(clap::Parser)]
 #[command(name = "control-plane")]
@@ -51,48 +40,23 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let _monitoring = Monitoring::init();
-
-    let sdk = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-    let artifact = if let Some(path) = args.eif {
-        match EnclaveArtifact::try_from_local(path) {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::error!(error = %e, "invalid --eif path");
-                std::process::exit(1);
-            }
+    let config = match ControlPlaneConfig::from_cli(
+        args.eif,
+        args.eif_bucket,
+        args.eif_hash,
+        args.debug_mode,
+        args.cpu_count,
+        args.memory_mib,
+    ) {
+        Ok(config) => config,
+        Err(e) => {
+            error!(error = %e);
+            std::process::exit(1);
         }
-    } else if let (Some(bucket_name), Some(hash)) =
-        (args.eif_bucket.as_ref(), args.eif_hash.as_ref())
-    {
-        let bucket = Bucket::new(&sdk, bucket_name.as_str());
-        match EnclaveArtifact::try_from_bucket(bucket, hash.as_str()).await {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to download EIF from S3");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        tracing::error!("provide --eif PATH or both --eif-bucket and --eif-hash");
-        std::process::exit(1);
     };
 
-    info!("starting networking");
-    let mut networking = Networking::new();
-    if let Err(e) = networking.run().await {
-        tracing::error!(error = %e, "failed to start networking");
+    if let Err(e) = control_plane::run(config).await {
+        error!(error = %e);
         std::process::exit(1);
     }
-
-    info!("starting enclave");
-    let mut enclave = Enclave::new(artifact, args.debug_mode, args.cpu_count, args.memory_mib);
-    enclave.run();
-    info!("enclave started");
-
-    info!("waiting for shutdown signal");
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl_c");
-    info!("received SIGINT, shutting down");
 }
