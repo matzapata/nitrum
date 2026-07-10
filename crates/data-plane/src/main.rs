@@ -1,25 +1,10 @@
+use anyhow::Context;
 use clap::Parser;
-use data_plane::{CryptoClient, DataPlaneState, RuntimeConfig, StorageClient};
+use config::NitrumConfig;
+use data_plane::{CryptoClient, DataPlaneConfig, StorageClient};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
-
-#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-async fn setup_egress_if_enabled(runtime_config: &RuntimeConfig) {
-    if let Err(error) = data_plane::egress::init(
-        &runtime_config.egress,
-        &runtime_config.tls_termination,
-        Some(&runtime_config.aws_region),
-    )
-    .await
-    {
-        error!(
-            error = %format!("{error:#}"),
-            "egress whitelist setup failed"
-        );
-        std::process::exit(1);
-    }
-}
+use tracing::error;
 
 #[derive(Parser)]
 #[command(name = "data-plane")]
@@ -27,124 +12,64 @@ struct Args {
     /// Path to the config file. Default: nitrum.toml.
     #[arg(long, default_value = "nitrum.toml")]
     config: PathBuf,
-
-    /// Optional command to run the user process (e.g. `node /app/src/main.js`). If omitted, the process runs until SIGINT.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    command: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() {
+    std::process::exit(match run().await {
+        Ok(code) => code,
+        Err(error) => {
+            error!(error = %format!("{:#}", error));
+            1
+        }
+    });
+}
+
+async fn run() -> anyhow::Result<i32> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("failed to install default rustls crypto provider");
 
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let Args { config } = Args::parse();
 
-    let Args {
-        config,
-        command: cli_command,
-    } = Args::parse();
+    // Initialize networking
+    #[cfg(target_os = "linux")]
+    data_plane::networking::init()
+        .await
+        .context("enclave networking init failed")?;
 
-    // gvproxy TAP path must be up before IMDS / SSM / HTTPS egress; IMDS uses `169.254.169.254`
-    // when the parent runs gvproxy with `-ec2-metadata-access`.
-    #[cfg(feature = "enclave")]
-    data_plane::networking::init().await;
-    #[cfg(not(feature = "enclave"))]
-    info!("enclave networking (TAP + VSOCK) requires feature `enclave`; skipping");
+    // Load config
+    let nitrum = NitrumConfig::try_from(config.as_path())
+        .with_context(|| format!("load config from {}", config.display()))?;
+    let data_plane_config = DataPlaneConfig::try_from(nitrum)
+        .await
+        .context("resolve data-plane infra config")?;
 
-    let runtime_config = RuntimeConfig::load(&config).await.unwrap_or_else(|e| {
-        error!(
-            error = %format!("{:#}", e),
-            config_path = %config.display(),
-            "failed to load runtime config"
-        );
-        std::process::exit(1);
-    });
+    // Initialize egress
+    let _egress_guard = data_plane::egress::init(&data_plane_config)
+        .await
+        .context("egress init failed")?;
 
-    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-    setup_egress_if_enabled(&runtime_config).await;
-
-    let user_command: Vec<String> = if cli_command.is_empty() {
-        runtime_config.nitrum.project.start_command.clone()
-    } else {
-        cli_command
-    };
-
-    // Create storage client
-    let storage: Arc<StorageClient> = Arc::new(StorageClient::new(&runtime_config));
-
-    // Create crypto client
-    let crypto = Arc::new(
-        CryptoClient::new(runtime_config.clone(), storage.clone())
-            .await
-            .unwrap_or_else(|e| {
-                error!(
-                    error = %format!("{:#}", e),
-                    "crypto setup failed"
-                );
-                std::process::exit(1);
-            }),
+    // Initialize telemetry
+    let _telemetry_guard = telemetry::init(
+        telemetry::TelemetryConfig::platform("data-plane")
+            .with_otlp_endpoint(data_plane_config.otlp_endpoint.as_deref()),
     );
 
-    // Create shared data plane state
-    let state = Arc::new(DataPlaneState::new(
-        runtime_config.clone(),
-        storage,
-        crypto.clone(),
-    ));
+    // Initialize storage and crypto clients
+    let storage_client = Arc::new(StorageClient::new(&data_plane_config));
+    let crypto_client = Arc::new(
+        CryptoClient::new(&data_plane_config, &storage_client)
+            .await
+            .context("crypto setup failed")?,
+    );
 
-    // Kick off crypto api for internal usage
-    let crypto_state = state.clone();
-    tokio::spawn(async move {
-        info!("API task starting");
-        if let Err(e) = data_plane::crypto::api::run(crypto_state).await {
-            error!(error = %e, "API task failed");
-        }
-        tracing::warn!("API task exited");
-    });
+    // Initialize crypto and ingress servers
+    data_plane::crypto::init(&data_plane_config, &crypto_client, &storage_client);
+    data_plane::ingress::init(&data_plane_config, &storage_client, &crypto_client);
 
-    // Kick off ingress for external usage
-    let ingress_state = state.clone();
-    tokio::spawn(async move {
-        info!("ingress task starting");
-        if let Err(e) = data_plane::server::ingress::run(ingress_state).await {
-            error!(error = %e, "ingress task failed");
-        }
-        tracing::warn!("ingress task exited");
-    });
+    // Run user process
+    let exit_code = data_plane::runner::run_until_shutdown(&data_plane_config).await;
 
-    // Run user process if provided, otherwise run until SIGINT
-    let exit_code = if user_command.is_empty() {
-        info!("no command provided, running until SIGINT");
-        let _ = tokio::signal::ctrl_c().await;
-        info!("received SIGINT, shutting down");
-        0
-    } else {
-        tokio::select! {
-            result = data_plane::server::runner::run(&user_command, &runtime_config.user_env) => {
-                result.unwrap_or_else(|e| {
-                    tracing::error!(error = %e, "failed to run user process");
-                    1
-                })
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("received SIGINT, shutting down");
-                0
-            }
-        }
-    };
-
-    #[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-    if runtime_config.egress.enabled {
-        data_plane::egress::teardown();
-    }
-
-    std::process::exit(exit_code);
+    Ok(exit_code)
 }

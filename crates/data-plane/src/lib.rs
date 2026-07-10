@@ -1,24 +1,16 @@
-#[cfg(any(test, feature = "bench"))]
-mod bench;
 mod config;
-mod constants;
+pub mod constants;
+
 pub mod crypto;
-pub mod server;
-mod state;
+pub mod egress;
+pub mod ingress;
+pub mod runner;
 mod storage;
 mod utils;
 
-#[cfg(any(test, feature = "bench"))]
-#[doc(hidden)]
-pub use bench::{runtime_config, with_backend_port};
-
-#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
-pub mod egress;
-
-#[cfg(feature = "enclave")]
+#[cfg(target_os = "linux")]
 pub mod networking;
 
-pub use config::RuntimeConfig;
+pub use config::{DataPlaneConfig, ListenAddrs};
 pub use crypto::CryptoClient;
-pub use state::DataPlaneState;
 pub use storage::StorageClient;

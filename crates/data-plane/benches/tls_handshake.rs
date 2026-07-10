@@ -1,7 +1,7 @@
 //! TLS `ServerConfig` build from PEM and full loopback handshakes.
 
 use criterion::{Criterion, black_box};
-use data_plane::server::tls::build_server_config_from_pem;
+use data_plane::ingress::tls::build_server_config_from_pem;
 use std::sync::Arc;
 use std::sync::Once;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

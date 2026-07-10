@@ -19,7 +19,16 @@
 #   NITRUM_E2E_RUNTIME_DATA_PLANE               optional; override nitrum.toml data_plane after init
 #   NITRUM_E2E_RUNTIME_NITRO_CLI                optional; override nitrum.toml nitro_cli after init
 #
+# Image rebuild (optional; builds + pushes control-plane, data-plane[enclave], nitro-cli):
+#   REBUILD                  if non-empty, build + push the three images before the workflow
+#                            and point the NITRUM_E2E_RUNTIME_* overrides at the pushed tags
+#   DOCKER_PREFIX            registry prefix for pushed images (required when REBUILD is set),
+#                            e.g. docker.io/youruser
+#   IMAGE_TAG                tag for the pushed images (default: current git HEAD sha)
+#   DOCKER_PLATFORM          buildx target platform (default: linux/amd64)
+#
 # Usage: from repo root, `./tests/e2e/cloud.sh`
+#   Rebuild + push first: `REBUILD=1 DOCKER_PREFIX=docker.io/youruser ./tests/e2e/cloud.sh`
 
 set -euo pipefail
 
@@ -43,6 +52,7 @@ STACK_NAME="${NITRUM_E2E_STACK_NAME:-nitrum-${NAME}}"
 LOGS_SINCE="${NITRUM_CLOUD_LOGS_SINCE_MINUTES:-15}"
 WAIT_ACTIVE_TIMEOUT_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_TIMEOUT_SECONDS:-300}"
 WAIT_ACTIVE_POLL_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_POLL_SECONDS:-5}"
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 nitrum() {
     local -a cmd
@@ -67,6 +77,55 @@ apply_runtime_overrides() {
     override_runtime_image control_plane "${NITRUM_E2E_RUNTIME_CONTROL_PLANE:-}"
     override_runtime_image data_plane "${NITRUM_E2E_RUNTIME_DATA_PLANE:-}"
     override_runtime_image nitro_cli "${NITRUM_E2E_RUNTIME_NITRO_CLI:-}"
+}
+
+step_build_images() {
+    [[ -n "${REBUILD:-}" ]] || return 0
+
+    if [[ -z "${DOCKER_PREFIX:-}" ]]; then
+        echo "error: REBUILD is set but DOCKER_PREFIX is empty (e.g. DOCKER_PREFIX=docker.io/youruser)" >&2
+        exit 1
+    fi
+    command -v docker >/dev/null 2>&1 || {
+        echo "error: docker not found (needed when REBUILD is set)" >&2
+        exit 1
+    }
+
+    local sha cp_image dp_image nc_image
+    sha="${IMAGE_TAG:-$(git -C "${REPO_ROOT}" rev-parse HEAD)}"
+    cp_image="${DOCKER_PREFIX}/nitrum-control-plane:${sha}"
+    dp_image="${DOCKER_PREFIX}/nitrum-data-plane:${sha}"
+    nc_image="${DOCKER_PREFIX}/nitrum-nitro-cli:${sha}"
+
+    echo "=== rebuild: control-plane ${cp_image} ==="
+    docker buildx build --platform "${DOCKER_PLATFORM}" --push \
+        -f "${REPO_ROOT}/crates/control-plane/Dockerfile" \
+        --build-arg GIT_SHA="${sha}" \
+        --build-arg VERSION="${sha}" \
+        -t "${cp_image}" \
+        "${REPO_ROOT}"
+
+    echo "=== rebuild: data-plane (enclave) ${dp_image} ==="
+    docker buildx build --platform "${DOCKER_PLATFORM}" --push \
+        -f "${REPO_ROOT}/crates/data-plane/Dockerfile" \
+        --build-arg FEATURES=enclave \
+        --build-arg GIT_SHA="${sha}" \
+        --build-arg VERSION="${sha}" \
+        -t "${dp_image}" \
+        "${REPO_ROOT}"
+
+    echo "=== rebuild: nitro-cli ${nc_image} ==="
+    docker buildx build --platform "${DOCKER_PLATFORM}" --push \
+        -f "${REPO_ROOT}/crates/cli/nitro-cli.dockerfile" \
+        --build-arg GIT_SHA="${sha}" \
+        --build-arg VERSION="${sha}" \
+        -t "${nc_image}" \
+        "${REPO_ROOT}"
+
+    # Point the runtime overrides at the freshly pushed images so init wires them in.
+    export NITRUM_E2E_RUNTIME_CONTROL_PLANE="${cp_image}"
+    export NITRUM_E2E_RUNTIME_DATA_PLANE="${dp_image}"
+    export NITRUM_E2E_RUNTIME_NITRO_CLI="${nc_image}"
 }
 
 step_init() {
@@ -198,6 +257,7 @@ step_env_delete() {
     nitrum cloud env --path "${PROJECT}" delete "${ENV_KEY}" --force
 }
 
+step_build_images
 step_init
 step_build
 step_env_set

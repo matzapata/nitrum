@@ -1,6 +1,6 @@
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use crate::storage::{StorageClient, keys};
 use crate::utils::leader::Leader;
 use aes_gcm::{
@@ -23,8 +23,8 @@ pub struct CryptoClient {
 
 impl CryptoClient {
     /// Bootstrap DEK from storage (fetch and decrypt with KMS, or create as leader and store).
-    pub async fn new(config: RuntimeConfig, storage: Arc<StorageClient>) -> Result<Self> {
-        let kms = Kms::new(&config);
+    pub async fn new(config: &DataPlaneConfig, storage: &Arc<StorageClient>) -> Result<Self> {
+        let kms = Kms::new(config);
 
         let leader = Leader::new(
             storage.clone(),

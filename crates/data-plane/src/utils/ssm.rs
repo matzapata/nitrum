@@ -1,20 +1,16 @@
 //! SSM access via [`GetParameter`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html)
 //! and [`GetParametersByPath`](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParametersByPath.html).
 //!
-//! [`SsmParameters`] holds an [`Arc<ImdsClient>`](crate::utils::imds::ImdsClient): region and
-//! `SigV4` credentials for SSM come from the same IMDS-backed [`EnclaveProvider`] as the rest of the app.
+//! [`SsmParameters`] reuses the shared [`aws_config::SdkConfig`] built during runtime bootstrap.
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use aws_config::BehaviorVersion;
-use aws_config::Region;
-use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_ssm::Client;
 use std::collections::HashMap;
 use tracing::debug;
 
-use super::imds::{EnclaveProvider, ImdsClient};
+use crate::constants::ssm_endpoint_url;
 
 /// Last path segment of an SSM parameter name, used as the child process env var name.
 #[must_use]
@@ -22,45 +18,28 @@ pub fn parameter_name_to_env_key(name: &str) -> String {
     name.split('/').next_back().unwrap_or(name).to_string()
 }
 
-/// Batch SSM loader tied to a shared [`ImdsClient`] (same IMDS session / credential cache as the rest of the data-plane).
+/// Batch SSM loader tied to the shared runtime [`aws_config::SdkConfig`].
 #[derive(Clone, Debug)]
 pub struct SsmParameters {
-    imds: Arc<ImdsClient>,
+    sdk_config: Arc<aws_config::SdkConfig>,
 }
 
 impl SsmParameters {
-    pub const fn new(imds: Arc<ImdsClient>) -> Self {
-        Self { imds }
+    pub const fn new(sdk_config: Arc<aws_config::SdkConfig>) -> Self {
+        Self { sdk_config }
     }
 
-    async fn ssm_client(&self) -> Result<Client> {
-        // TODO: sdk_config should be built in different module and shared
-        let region = self
-            .imds
-            .get_region()
-            .await
-            .context("IMDS placement region for SSM")?;
-        let sdk_config = aws_config::defaults(BehaviorVersion::latest())
-            .region(Region::new(region))
-            .credentials_provider(SharedCredentialsProvider::new(EnclaveProvider::with_imds(
-                self.imds.clone(),
-            )))
-            .load()
-            .await;
-
-        let mut builder = aws_sdk_ssm::config::Builder::from(&sdk_config);
-        if let Some(url) = std::env::var("NITRUM_SSM_ENDPOINT_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
-        {
+    fn ssm_client(&self) -> Client {
+        let mut builder = aws_sdk_ssm::config::Builder::from(self.sdk_config.as_ref());
+        if let Some(url) = ssm_endpoint_url() {
             builder = builder.endpoint_url(url);
         }
-        Ok(Client::from_conf(builder.build()))
+        Client::from_conf(builder.build())
     }
 
     /// Single-parameter fetch (infra keys are plain `String`, not `SecureString`).
     pub async fn get_parameter(&self, name: &str) -> Result<String> {
-        let client = self.ssm_client().await?;
+        let client = self.ssm_client();
         let out = client
             .get_parameter()
             .name(name)
@@ -88,7 +67,7 @@ impl SsmParameters {
             return Ok(HashMap::new());
         }
 
-        let client = self.ssm_client().await?;
+        let client = self.ssm_client();
         let mut map = HashMap::new();
         let mut next_token = None::<String>;
 

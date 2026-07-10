@@ -14,7 +14,7 @@ use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::provider::future;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // ── IMDSv2 constants ─────────────────────────────────────────────────────────
 
@@ -26,6 +26,12 @@ const CREDENTIALS_REFRESH_SECS: u64 = 3600;
 
 /// HTTP timeout for IMDS calls.
 const METADATA_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// IMDS region fetch attempts when no region is supplied at startup.
+pub const AWS_REGION_FETCH_ATTEMPTS: u32 = 5;
+
+/// Initial backoff between IMDS region fetch retries.
+pub const AWS_REGION_FETCH_INITIAL_BACKOFF_MS: u64 = 200;
 
 // ── ImdsClient ───────────────────────────────────────────────────────────────
 
@@ -150,11 +156,46 @@ impl ImdsClient {
             .context("IMDS region request failed")
     }
 
+    /// Fetch the AWS region, retrying with exponential backoff between attempts.
+    ///
+    /// `attempts` is the total number of tries; `initial_backoff` is the delay before
+    /// the second attempt and doubles (saturating) after each subsequent failure.
+    pub async fn get_region_with_retry(&self) -> Result<String> {
+        let mut last_error = None;
+
+        for attempt in 1..=AWS_REGION_FETCH_ATTEMPTS {
+            match self.get_region().await {
+                Ok(region) => return Ok(region),
+                Err(error) => {
+                    warn!(attempt, max_attempts = AWS_REGION_FETCH_ATTEMPTS, %error, "IMDS region fetch failed");
+                    last_error = Some(error);
+                    if attempt < AWS_REGION_FETCH_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(
+                            AWS_REGION_FETCH_INITIAL_BACKOFF_MS,
+                        ))
+                        .await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!("IMDS region fetch failed without a specific error")
+        }))
+    }
+
     /// Returns the EC2 instance ID.
     pub async fn instance_id(&self) -> Result<String> {
         self.get_meta("meta-data/instance-id")
             .await
             .context("IMDS instance-id request failed")
+    }
+
+    /// Returns the parent EC2 instance's private IPv4 address.
+    pub async fn local_ipv4(&self) -> Result<String> {
+        self.get_meta("meta-data/local-ipv4")
+            .await
+            .context("IMDS local-ipv4 request failed")
     }
 
     /// Fetch temporary IAM role credentials, refreshing only when the time bucket rolls over.

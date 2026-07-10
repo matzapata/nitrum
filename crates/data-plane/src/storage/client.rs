@@ -13,8 +13,9 @@ use aws_sdk_dynamodb::{
     Client, error::SdkError, operation::put_item::PutItemError, primitives::Blob,
     types::AttributeValue,
 };
+use tracing::instrument;
 
-use crate::config::RuntimeConfig;
+use crate::config::DataPlaneConfig;
 use crate::utils::time;
 
 const LOCK_TTL_SECS: u64 = 60;
@@ -30,7 +31,7 @@ pub struct StorageClient {
 impl StorageClient {
     /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
     #[must_use]
-    pub fn new(config: &RuntimeConfig) -> Self {
+    pub fn new(config: &DataPlaneConfig) -> Self {
         let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
         if let Some(ref endpoint) = config.dynamodb_endpoint {
             builder = builder.endpoint_url(endpoint);
@@ -46,6 +47,7 @@ impl StorageClient {
     ///
     /// Returns `true` if the lock was obtained, `false` if another instance holds it.
     /// The lock auto-expires after `LOCK_TTL_SECS` seconds via `DynamoDB` TTL.
+    #[instrument(name = "dynamodb.try_acquire_lock", skip_all, fields(otel.kind = "client"), err)]
     pub async fn try_acquire_lock(&self, key: &str, owner: &str) -> Result<bool> {
         let now = time::unix_now();
         let expiry = (now + LOCK_TTL_SECS).to_string();
@@ -72,6 +74,7 @@ impl StorageClient {
     }
 
     /// Release a lock identified by `key` (owner-checked delete).
+    #[instrument(name = "dynamodb.release_lock", skip_all, fields(otel.kind = "client"), err)]
     pub async fn release_lock(&self, key: &str, owner: &str) -> Result<()> {
         self.client
             .delete_item()
@@ -87,6 +90,7 @@ impl StorageClient {
     }
 
     /// Fetch an object by key. Returns `None` if the key does not exist.
+    #[instrument(name = "dynamodb.get_object", skip_all, fields(otel.kind = "client"), err)]
     pub async fn get_object(&self, key: &str) -> Result<Option<Vec<u8>>> {
         let resp = self
             .client
@@ -112,6 +116,7 @@ impl StorageClient {
     }
 
     /// Overwrite an object (unconditional put).
+    #[instrument(name = "dynamodb.set_object", skip_all, fields(otel.kind = "client"), err)]
     pub async fn set_object(&self, key: &str, value: &[u8]) -> Result<()> {
         self.client
             .put_item()
@@ -127,6 +132,7 @@ impl StorageClient {
     /// Put an object only if it does not exist (conditional put).
     ///
     /// Returns `true` if this call wrote the value, `false` if the key already existed.
+    #[instrument(name = "dynamodb.put_object", skip_all, fields(otel.kind = "client"), err)]
     pub async fn put_object(&self, key: &str, value: &[u8]) -> Result<bool> {
         let result = self
             .client
@@ -146,6 +152,7 @@ impl StorageClient {
     }
 
     /// Delete an object by key.
+    #[instrument(name = "dynamodb.delete_object", skip_all, fields(otel.kind = "client"), err)]
     pub async fn delete_object(&self, key: &str) -> Result<()> {
         self.client
             .delete_item()

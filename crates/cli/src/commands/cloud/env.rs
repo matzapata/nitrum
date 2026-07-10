@@ -54,7 +54,7 @@ pub async fn run(args: EnvArgs) -> Result<()> {
     match args.command {
         EnvCommand::Set { key, value } => {
             validate_env_key(&key)?;
-            let name = app_env_parameter_name(&config.project.name, &key);
+            let name = env_variablesm_ssm_name(&config.project.name, &key);
             ssm.set(&name, value).await?;
             println!("Set {key} in SSM ({name})");
         }
@@ -71,7 +71,7 @@ pub async fn run(args: EnvArgs) -> Result<()> {
         }
         EnvCommand::Delete { key, force } => {
             validate_env_key(&key)?;
-            let name = app_env_parameter_name(&config.project.name, &key);
+            let name = env_variablesm_ssm_name(&config.project.name, &key);
             if !force && !utils::confirm(&format!("Delete `{key}` from SSM ({name})?")) {
                 return Ok(());
             }
@@ -92,7 +92,7 @@ pub fn app_env_ssm_path_prefix(project_name: &str) -> String {
 
 /// SSM name for one app env key under `/nitrum/{project name}/env/`.
 #[must_use]
-pub fn app_env_parameter_name(project_name: &str, key: &str) -> String {
+pub fn env_variablesm_ssm_name(project_name: &str, key: &str) -> String {
     format!("/nitrum/{project_name}/env/{key}")
 }
 
@@ -114,12 +114,12 @@ fn validate_env_key(key: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::app_env_parameter_name;
+    use super::env_variablesm_ssm_name;
 
     #[test]
     fn parameter_path_matches_data_plane_prefix() {
         assert_eq!(
-            app_env_parameter_name("myapp", "API_KEY"),
+            env_variablesm_ssm_name("myapp", "API_KEY"),
             "/nitrum/myapp/env/API_KEY"
         );
     }

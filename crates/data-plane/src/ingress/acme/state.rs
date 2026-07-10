@@ -10,7 +10,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, instrument};
 
 /// In-memory cert store (chain PEM, key PEM). Used by ACME renewal loop.
 pub type CertStore = Arc<RwLock<Option<(String, String)>>>;
@@ -61,6 +61,7 @@ impl AcmeState {
     /// The ACME leader lock is taken only when storage is missing a cert/key pair or the stored
     /// leaf is due for renewal. While waiting for the lock, storage is re-polled so followers pick
     /// up a cert as soon as another instance writes it.
+    #[instrument(name = "acme.get_or_provision", skip(self), fields(domain = %self.domain), err)]
     pub async fn get_or_provision(&self) -> Result<(String, String)> {
         loop {
             if let Some(pair) = self.cert_storage.read_cert_pair().await? {
@@ -92,6 +93,7 @@ impl AcmeState {
                     .provision_cert(account, &self.domain, self.cert_storage.as_ref())
                     .await?;
                 self.cert_storage.write_cert_pair(&chain, &key).await?;
+                self.record_cert_metrics("issued", &chain);
                 return Ok((chain, key));
             }
 
@@ -127,8 +129,20 @@ impl AcmeState {
         tokio::time::sleep(sleep_dur).await;
 
         let (chain, key) = self.get_or_provision().await?;
+        self.record_cert_metrics("renewed", &chain);
         self.current_chain = Some(chain.clone());
         *self.cert_store.write().await = Some((chain, key));
         Ok(AcmeEvent::CertRenewed)
+    }
+
+    /// Record an ACME lifecycle `event` and update the certificate expiry gauge.
+    ///
+    /// `chain` is the freshly issued/renewed leaf chain (PEM); expiry parse
+    /// failures are ignored so metrics never affect certificate provisioning.
+    fn record_cert_metrics(&self, event: &'static str, chain: &str) {
+        telemetry::metrics::record_acme_event(event);
+        if let Ok(remaining) = self.inner.duration_until_expiry(chain) {
+            telemetry::metrics::set_cert_expiry_seconds(&self.domain, remaining.as_secs_f64());
+        }
     }
 }

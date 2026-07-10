@@ -1,9 +1,24 @@
 "use strict";
 
+require("./instrumentation");
+
 const express = require("express");
 const axios = require("axios");
 const crypto = require("crypto");
 const { Wallet } = require("ethers");
+const { metrics } = require("@opentelemetry/api");
+
+const meter = metrics.getMeter("blockchain-wallet");
+const walletsCreated = meter.createCounter("app.wallet.created", {
+  description: "Wallets created by the sample app",
+});
+const signLatency = meter.createHistogram("app.wallet.sign.duration.ms", {
+  description: "Wallet sign request latency in the sample app",
+  unit: "ms",
+});
+const signErrors = meter.createCounter("app.wallet.sign.errors", {
+  description: "Failed wallet sign requests in the sample app",
+});
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const app = express();
@@ -92,6 +107,7 @@ app.post("/wallet", async (req, res) => {
 
     await kvSet("wallet:demo_last_ciphertext", ciphertext);
 
+    walletsCreated.add(1);
     res.json({ ciphertext });
   } catch (err) {
     res.status(500).json({ error: "failed to generate key" });
@@ -100,6 +116,7 @@ app.post("/wallet", async (req, res) => {
 
 // POST /wallet/sign { ciphertext, txData, proof }
 app.post("/wallet/sign", async (req, res) => {
+  const start = performance.now();
   try {
     const { ciphertext, txData, proof } = req.body || {};
     if (!ciphertext || !txData || typeof proof !== "string") {
@@ -143,7 +160,10 @@ app.post("/wallet/sign", async (req, res) => {
     // Return the signed transaction
     res.json({ signature });
   } catch (err) {
+    signErrors.add(1, { reason: "failed" });
     res.status(500).json({ error: "failed to sign transaction" });
+  } finally {
+    signLatency.record(performance.now() - start, { route: "/wallet/sign" });
   }
 });
 

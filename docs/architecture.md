@@ -340,6 +340,17 @@ Application secrets are kept separate from platform encryption keys and certific
 
 This split keeps your application’s own secrets easy to reason about (just environment variables), while Nitrum manages long‑lived platform material (TLS, internal keys) with a stricter lifecycle.
 
+## Observability
+
+Nitrum is instrumented with OpenTelemetry as the single export path. The `telemetry` crate is generic infrastructure (no AWS-specific code) consumed by both binaries; AWS translation happens entirely in a collector.
+
+- **Emission.** Both binaries initialize telemetry once at startup (`telemetry::init`). They always log structured records to stdout. When an OTLP endpoint is configured (by env override or platform default), they additionally export traces, metrics, and logs over OTLP/gRPC, and flush on graceful shutdown. Telemetry payloads stay backend-neutral; the deployed data-plane only uses IMDS to discover the parent host address for its default collector endpoint.
+- **Instrumented paths.** HTTP request count/latency on the ingress (`data-plane.ingress`) and crypto API (`data-plane.crypto-api`) routers (by matched route template, method, status class); KMS call latency and errors; ACME issue/renew events and a certificate-expiry gauge; and control-plane enclave (re)start counts. Platform telemetry is tagged with `nitrum.component=core` and `service.namespace=nitrum`.
+- **Application telemetry.** When OTLP export is enabled, the data-plane injects standard `OTEL_*` variables into the user process (`OTEL_SERVICE_NAME` = `project.name`, `nitrum.component=user-app`) so application code can export metrics, traces, and logs through the same collector. Samples prefix app metrics with `app.*` to distinguish them from platform `nitrum.*` series.
+- **Collector (ADOT).** An OpenTelemetry Collector runs on the EC2 host (in the control-plane container's network namespace) listening on `:4317`. It exports metrics to CloudWatch via `awsemf` (namespace `Nitrum`, into `/nitrum/{project}/metrics`), logs via `awscloudwatchlogs` (per-service into `/nitrum/{project}/data-plane` and `/control-plane`), and traces via `awsxray`. Because all backend specifics live in the collector configuration, adding another platform later (e.g. Kubernetes) is a collector swap rather than a code change.
+- **Enclave path.** The control-plane reaches the collector at `127.0.0.1:4317`. The enclave data-plane egresses only through gvproxy: after enclave networking is up, it reads the parent private IPv4 from IMDS (`meta-data/local-ipv4`) and exports to `http://{parent-private-ip}:4317`. CloudFormation publishes the collector on host port `4317`, while the collector itself shares the control-plane container network namespace. When egress enforcement is on, the effective collector endpoint is allowlisted; IP endpoints are also excluded from the transparent proxy, mirroring the IMDS bypass.
+- **Redaction.** Only low-cardinality, non-sensitive attributes are recorded (service, route template, method, status class, operation names). Request/response headers, bodies, query strings, and secrets are never captured.
+
 ## Further reading
 
 - [usage.md](usage.md) — CLI commands, config, and reproducible build guidance.

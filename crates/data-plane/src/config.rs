@@ -1,5 +1,14 @@
-//! Data-plane runtime config: `nitrum.toml` plus IMDS + SSM infra settings.
+//! Data-plane config: `nitrum.toml` plus IMDS + SSM infra settings.
 
+use crate::constants::{
+    DEFAULT_ACME_HTTP01_LISTEN_ADDR, DEFAULT_CRYPTO_API_LISTEN_ADDR, DEFAULT_INGRESS_LISTEN_ADDR,
+    ENV_ACME_HTTP01_LISTEN_ADDR, ENV_CRYPTO_API_LISTEN_ADDR, ENV_INGRESS_LISTEN_ADDR, OTLP_PORT,
+    dynamodb_endpoint_url, dynamodb_ssm_table_name, env_variablesm_ssm_name, kms_endpoint_url,
+    kms_ssm_key_name,
+};
+use crate::utils::env::var_or_nonempty_default;
+use crate::utils::imds::{EnclaveProvider, ImdsClient};
+use crate::utils::ssm::SsmParameters;
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_config::Region;
@@ -8,26 +17,14 @@ use config::NitrumConfig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::constants::{
-    DEFAULT_IMDS_LATEST_BASE_URL, app_env_parameter_name, data_plane_dynamodb_parameter_name,
-    data_plane_kms_parameter_name,
-};
-use crate::utils::imds::{EnclaveProvider, ImdsClient};
-use crate::utils::ssm::SsmParameters;
-
-/// Data-plane runtime config: nitrum.toml plus infra settings.
+/// Data-plane config: `nitrum.toml` plus infra settings resolved from IMDS and SSM.
 #[derive(Clone)]
-pub struct RuntimeConfig {
-    /// User provided config.
+pub struct DataPlaneConfig {
+    /// User-provided config from `nitrum.toml`, with environment overrides already applied.
     pub nitrum: NitrumConfig,
-    /// IMDS base URL from `NITRUM_IMDS_BASE_URL` or [`DEFAULT_IMDS_LATEST_BASE_URL`] (no trailing slash).
-    /// Default is standard EC2 IMDS; override for host-side runs or metadata mocks.
-    #[allow(dead_code)]
-    pub imds_latest_base_url: String,
     /// AWS region from IMDS.
     pub aws_region: String,
     /// AWS SDK config (credentials via IMDS through shared [`ImdsClient`]).
@@ -42,17 +39,25 @@ pub struct RuntimeConfig {
     pub kms_key_id: String,
     /// Optional KMS API endpoint (`NITRUM_KMS_ENDPOINT_URL`).
     pub kms_endpoint: Option<String>,
-    /// Ingress TLS listen address (`NITRUM_INGRESS_LISTEN_ADDR` or default `0.0.0.0:443`).
-    pub ingress_listen_addr: SocketAddr,
-    /// ACME HTTP-01 listen address (`NITRUM_ACME_HTTP01_LISTEN_ADDR` or default `0.0.0.0:80`).
-    pub acme_http01_listen_addr: SocketAddr,
-    /// Crypto API listen address (`NITRUM_CRYPTO_API_LISTEN_ADDR` or default `0.0.0.0:3000`).
-    pub crypto_api_listen_addr: SocketAddr,
-    /// Application env vars loaded from SSM
+    /// Listen addresses for ingress, ACME HTTP-01, and the crypto API.
+    pub listen_addrs: ListenAddrs,
+    /// Application env vars loaded from SSM.
     pub user_env: HashMap<String, String>,
+    /// Effective OTLP/gRPC collector endpoint for telemetry export.
+    pub otlp_endpoint: Option<String>,
+}
+/// Listen addresses for ingress, ACME HTTP-01, and the crypto API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListenAddrs {
+    /// Ingress TLS listen address.
+    pub ingress_listen_addr: SocketAddr,
+    /// ACME HTTP-01 listen address.
+    pub acme_http01_listen_addr: SocketAddr,
+    /// Crypto API listen address.
+    pub crypto_api_listen_addr: SocketAddr,
 }
 
-impl Deref for RuntimeConfig {
+impl Deref for DataPlaneConfig {
     type Target = NitrumConfig;
 
     fn deref(&self) -> &Self::Target {
@@ -60,33 +65,39 @@ impl Deref for RuntimeConfig {
     }
 }
 
-impl RuntimeConfig {
-    /// Load infra: [`ImdsClient`] for region, instance id, and SDK credentials; [`SsmParameters`]
-    /// for `kms_key_id` and `dynamodb_table` at fixed paths `/nitrum/{project.name}/data-plane/…`.
+impl DataPlaneConfig {
+    /// Resolve infra for a loaded [`NitrumConfig`]: [`ImdsClient`] for the AWS region, instance id,
+    /// SDK credentials, and OTLP endpoint; [`SsmParameters`] for `kms_key_id` and `dynamodb_table`
+    /// at fixed paths `/nitrum/{project.name}/data-plane/…`.
     ///
     /// There is no generic egress probe here: on Nitro, API traffic uses the TAP↔gvproxy path;
     /// probing arbitrary hosts such as `httpbin.org` fails in many setups and would block startup for no benefit.
-    pub async fn load(config_path: &Path) -> Result<Self> {
-        info!("loading runtime config from {}", config_path.display());
-        let nitrum = NitrumConfig::try_from(config_path)?;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when IMDS, SSM, or listen-address resolution fails.
+    pub async fn try_from(nitrum: NitrumConfig) -> Result<Self> {
+        info!("Loading IMDS client");
+        let imds =
+            Arc::new(ImdsClient::new(&nitrum.imds_latest_base_url).context("IMDS client init")?);
 
-        info!("loading IMDS config");
-        let imds_latest_base_url = std::env::var("NITRUM_IMDS_BASE_URL")
-            .unwrap_or_else(|_| DEFAULT_IMDS_LATEST_BASE_URL.to_string())
-            .trim_end_matches('/')
-            .to_string();
-        let imds = Arc::new(ImdsClient::new(&imds_latest_base_url).context("IMDS client init")?);
+        info!("Loading OTLP endpoint from env");
+        let otlp_endpoint = match nitrum.otlp_endpoint.as_deref() {
+            Some(explicit) => Some(explicit.to_string()),
+            None => Some(imds.local_ipv4().await.map_or_else(
+                |_| format!("http://127.0.0.1:{OTLP_PORT}"),
+                |parent_ipv4| format!("http://{parent_ipv4}:{OTLP_PORT}"),
+            )),
+        };
 
-        info!(
-            imds_base_url = %imds_latest_base_url,
-            "runtime config: fetching AWS region from IMDS (IMDSv2 token + placement/region)"
-        );
+        info!("Loading AWS region from IMDS");
         let aws_region = imds
-            .get_region()
+            .get_region_with_retry()
             .await
             .with_context(|| {
                 format!(
-                    "fetch AWS region from IMDS (GET meta-data/placement/region via {imds_latest_base_url}; set NITRUM_IMDS_BASE_URL if needed)"
+                    "fetch AWS region from IMDS (GET meta-data/placement/region via {}; set `imds_latest_base_url` in nitrum.toml if needed)",
+                    nitrum.imds_latest_base_url
                 )
             })?;
         let instance_id = imds.instance_id().await.context("IMDS instance-id")?;
@@ -94,18 +105,18 @@ impl RuntimeConfig {
             aws_config::defaults(BehaviorVersion::latest())
                 .region(Region::new(aws_region.clone()))
                 .credentials_provider(SharedCredentialsProvider::new(EnclaveProvider::with_imds(
-                    imds.clone(),
+                    imds,
                 )))
                 .load()
                 .await,
         );
 
-        info!("loading SSM config");
-        let ssm = SsmParameters::new(imds);
+        info!("Loading SSM config");
+        let ssm = SsmParameters::new(aws_sdk_config.clone());
 
-        info!("loading DynamoDB config");
-        let dynamodb_endpoint = std::env::var("NITRUM_DYNAMODB_ENDPOINT_URL").ok();
-        let dynamodb_path = data_plane_dynamodb_parameter_name(&nitrum.project.name);
+        info!("Loading DynamoDB config");
+        let dynamodb_endpoint = dynamodb_endpoint_url(); // TODO: make it a param
+        let dynamodb_path = dynamodb_ssm_table_name(&nitrum.project.name);
         let dynamodb_table = ssm
             .get_parameter(&dynamodb_path)
             .await
@@ -115,39 +126,46 @@ impl RuntimeConfig {
                 )
             })?;
 
-        info!("loading KMS config");
-        let kms_endpoint = std::env::var("NITRUM_KMS_ENDPOINT_URL").ok();
-        let kms_path = data_plane_kms_parameter_name(&nitrum.project.name);
+        info!("Loading KMS config");
+        let kms_endpoint = kms_endpoint_url();
+        let kms_path = kms_ssm_key_name(&nitrum.project.name);
         let kms_key_id = ssm.get_parameter(&kms_path).await.with_context(|| {
             format!(
                 "SSM kms_key_id (expected {kms_path}, e.g. /nitrum/myapp/data-plane/kms_key_id)"
             )
         })?;
 
-        info!("loading app env from SSM");
-        let app_env_path = app_env_parameter_name(&nitrum.project.name);
+        info!("Loading app env from SSM");
+        let app_env_path = env_variablesm_ssm_name(&nitrum.project.name);
         let user_env = ssm
             .get_parameters_by_path_recursive(&app_env_path)
             .await
             .with_context(|| format!("SSM GetParametersByPath for app env ({app_env_path})"))?;
 
-        info!("loading listen addresses from env");
-        let ingress_listen_addr: SocketAddr = std::env::var("NITRUM_INGRESS_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:443".to_string())
+        info!("Loading listen addresses from env");
+        let listen_addrs = ListenAddrs {
+            ingress_listen_addr: var_or_nonempty_default(
+                ENV_INGRESS_LISTEN_ADDR,
+                DEFAULT_INGRESS_LISTEN_ADDR,
+            )
             .parse()
-            .context("invalid NITRUM_INGRESS_LISTEN_ADDR")?;
-        let acme_http01_listen_addr: SocketAddr = std::env::var("NITRUM_ACME_HTTP01_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:80".to_string())
+            .with_context(|| format!("invalid {ENV_INGRESS_LISTEN_ADDR}"))?,
+            acme_http01_listen_addr: var_or_nonempty_default(
+                ENV_ACME_HTTP01_LISTEN_ADDR,
+                DEFAULT_ACME_HTTP01_LISTEN_ADDR,
+            )
             .parse()
-            .context("invalid NITRUM_ACME_HTTP01_LISTEN_ADDR")?;
-        let crypto_api_listen_addr: SocketAddr = std::env::var("NITRUM_CRYPTO_API_LISTEN_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
+            .with_context(|| format!("invalid {ENV_ACME_HTTP01_LISTEN_ADDR}"))?,
+            crypto_api_listen_addr: var_or_nonempty_default(
+                ENV_CRYPTO_API_LISTEN_ADDR,
+                DEFAULT_CRYPTO_API_LISTEN_ADDR,
+            )
             .parse()
-            .context("invalid NITRUM_CRYPTO_API_LISTEN_ADDR")?;
+            .with_context(|| format!("invalid {ENV_CRYPTO_API_LISTEN_ADDR}"))?,
+        };
 
         Ok(Self {
             nitrum,
-            imds_latest_base_url,
             aws_region,
             aws_sdk_config,
             instance_id,
@@ -155,10 +173,9 @@ impl RuntimeConfig {
             dynamodb_endpoint,
             kms_key_id,
             kms_endpoint,
-            ingress_listen_addr,
-            acme_http01_listen_addr,
-            crypto_api_listen_addr,
+            listen_addrs,
             user_env,
+            otlp_endpoint,
         })
     }
 }

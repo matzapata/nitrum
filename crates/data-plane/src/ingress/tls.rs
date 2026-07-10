@@ -5,7 +5,8 @@
 //! provides a cert (see deployment docs). Cert PEM + key are stored in shared storage for ACME,
 //! wrapped with the data-plane DEK (AES-GCM).
 
-use crate::state::DataPlaneState;
+use super::state::IngressState;
+use crate::crypto::CryptoClient;
 use crate::storage::keys;
 use crate::utils::leader::Leader;
 use anyhow::{Context, Result};
@@ -22,8 +23,6 @@ use super::acme::{AcmeEvent, AcmeState};
 #[cfg(feature = "pebble")]
 use super::acme::pebble_client_tls_config;
 
-use crate::constants::{ENV_ACME_DIRECTORY_URL, LETS_ENCRYPT_PROD_DIRECTORY};
-
 /// Re-export for ingress (`tls::challenge_handler`).
 pub use super::acme::challenge_handler;
 
@@ -33,7 +32,7 @@ pub use super::acme::challenge_handler;
 
 /// TLS state machine: provides `RustlsConfig` for the server and `.next()` to drive ACME events.
 pub struct TlsState {
-    state: Arc<DataPlaneState>,
+    ingress: Arc<IngressState>,
     rustls_config: RustlsConfig,
     acme_state: Option<AcmeState>,
 }
@@ -42,39 +41,38 @@ impl TlsState {
     /// Build the TLS state. Use `.rustls_config()` for the server and spawn
     /// `.next()` in a loop to drive provisioning/renewal and log events.
     #[must_use]
-    pub fn new(state: Arc<DataPlaneState>) -> Self {
-        let domain = state.config.tls_termination.domain.clone();
-        let acme_enabled = state.config.tls_termination.acme;
+    pub fn new(ingress: Arc<IngressState>, crypto: Arc<CryptoClient>) -> Self {
+        let domain = ingress.config.tls_termination.domain.clone();
+        let acme_enabled = ingress.config.tls_termination.acme;
         let (server_config, cert_hash) = ephemeral_server_config(std::slice::from_ref(&domain));
-        *state.tls_cert_hash.write().unwrap() = Some(cert_hash);
+        *ingress.tls_cert_hash.write().unwrap() = Some(cert_hash);
         let rustls_config = RustlsConfig::from_config(server_config);
 
         if !acme_enabled {
             return Self {
-                state,
+                ingress,
                 rustls_config,
                 acme_state: None,
             };
         }
 
         let acme_leader = Arc::new(Leader::new(
-            state.storage.clone(),
-            state.config.instance_id.clone(),
+            ingress.storage.clone(),
+            ingress.config.instance_id.clone(),
             keys::ACME_LEADER_KEY.to_string(),
         ));
-        let directory_url = std::env::var(ENV_ACME_DIRECTORY_URL)
-            .unwrap_or_else(|_| LETS_ENCRYPT_PROD_DIRECTORY.to_string());
+        let directory_url = crate::constants::acme_directory_url();
 
         #[cfg(feature = "pebble")]
         let client_tls_config = Some(pebble_client_tls_config().expect("pebble_client_tls_config"));
         #[cfg(not(feature = "pebble"))]
         let client_tls_config = None;
 
-        let storage_for_acme = state.storage.clone();
-        let crypto_for_acme = state.crypto.clone();
+        let storage_for_acme = ingress.storage.clone();
+        let crypto_for_acme = crypto;
 
         Self {
-            state,
+            ingress,
             rustls_config,
             acme_state: Some(AcmeState::new(
                 domain,
@@ -141,7 +139,7 @@ impl TlsState {
 
     fn apply_cert(&self, chain: &str, key: &str) {
         if let Some(hash) = cert_hash_from_chain_pem(chain) {
-            *self.state.tls_cert_hash.write().unwrap() = Some(hash);
+            *self.ingress.tls_cert_hash.write().unwrap() = Some(hash);
         }
         if let Ok(cfg) = build_server_config_from_pem(chain, key) {
             self.rustls_config.reload_from_config(cfg);

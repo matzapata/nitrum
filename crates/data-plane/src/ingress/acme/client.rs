@@ -166,6 +166,24 @@ impl AcmeClient {
         Ok((chain, private_key.serialize_pem()))
     }
 
+    /// Seconds until the leaf certificate in `chain_pem` expires.
+    ///
+    /// Saturates at zero when the certificate is already expired.
+    pub(crate) fn duration_until_expiry(&self, chain_pem: &str) -> Result<Duration> {
+        let certs = rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let leaf_der = certs.first().context("empty chain")?;
+        let (_, cert) = parse_x509_certificate(leaf_der.as_ref()).context("parse leaf cert")?;
+        let not_after = cert.validity().not_after.timestamp();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs()
+            .cast_signed();
+        Ok(Duration::from_secs(
+            (not_after - now).max(0).cast_unsigned(),
+        ))
+    }
+
     pub(crate) fn duration_until_renewal(&self, chain_pem: &str) -> Result<Duration> {
         let certs = rustls_pemfile::certs(&mut BufReader::new(chain_pem.as_bytes()))
             .collect::<Result<Vec<_>, _>>()?;

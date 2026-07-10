@@ -24,6 +24,7 @@ enclave = [
 
 [dependencies]
 config = { path = "../config" }
+telemetry = { path = "../telemetry", features = ["http"] }
 axum = "0.8"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 base64 = "0.22"

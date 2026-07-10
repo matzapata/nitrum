@@ -21,6 +21,7 @@ Inside the enclave, the data-plane sees a regular network interface (commonly `t
 | Data-plane ingress | Inside enclave | Terminates TLS and reverse-proxies app traffic to `127.0.0.1:<project.port>`. |
 | User app | Inside enclave | Handles business routes on loopback (`127.0.0.1`). |
 | IMDS (`169.254.169.254`) | Host/AWS metadata service | Provides temporary IAM role credentials, proxied through host setup. |
+| ADOT collector (`:4317`) | Parent EC2 instance | Receives OTLP/gRPC telemetry and exports it to CloudWatch/X-Ray. Reached by the enclave at the parent's private IPv4. |
 
 ## Topology overview
 
@@ -36,12 +37,14 @@ flowchart LR
     app[User app on 127.0.0.1:project.port]
     imds[IMDS 169.254.169.254]
     aws[AWS APIs KMS/DynamoDB/S3/SSM]
+    otel[ADOT collector on parent private IPv4:4317]
 
     client --> nlb --> host --> gv
     gv --> vsock --> tap --> ingress --> app
     app --> ingress --> tap --> vsock --> gv --> host --> nlb --> client
     ingress --> tap --> vsock --> gv --> imds
     app --> tap --> vsock --> gv --> aws
+    ingress --> tap --> vsock --> gv --> otel
 ```
 
 ## Inbound request path (client -> enclave)
@@ -125,6 +128,40 @@ sequenceDiagram
     k-->>d: API response
 ```
 
+## Telemetry export path (enclave -> collector)
+
+The data-plane exports OpenTelemetry traces, metrics, and logs over OTLP/gRPC to an ADOT collector running on the parent EC2 instance. Because the enclave has no direct NIC, this export leaves via `tap0` and crosses `gvproxy` on the host, exactly like any other outbound connection.
+
+The collector shares the control-plane container's network namespace and listens on `:4317`; CloudFormation publishes that port on the parent host (`-p 4317:4317`). The enclave cannot use the control-plane loopback address, so the data-plane discovers the parent's private IPv4 from IMDS (`meta-data/local-ipv4`) after enclave networking is up and exports to `http://{parent-private-ip}:4317`.
+
+Endpoint resolution:
+
+- **Unset `NITRUM_OTLP_ENDPOINT`** — use the platform default resolved from IMDS (`http://{parent-private-ip}:4317`).
+- **Empty `NITRUM_OTLP_ENDPOINT`** — stdout-only; no collector is contacted.
+- **Set `NITRUM_OTLP_ENDPOINT`** — export to that endpoint verbatim (overrides the IMDS default).
+
+When `[egress].enabled` is true, the effective collector endpoint is added to the platform allowlist so telemetry is not dropped. An IP-based endpoint (the default IMDS case) is also excluded from the transparent proxy, mirroring the IMDS bypass; a hostname endpoint uses the normal DNS/pattern allow path.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant d as Data-plane in enclave
+    participant m as IMDS 169.254.169.254
+    participant t as tap0
+    participant g as gvproxy
+    participant o as ADOT collector on parent:4317
+
+    d->>m: Fetch parent private IPv4 (meta-data/local-ipv4)
+    m-->>d: 10.x.x.x
+    Note over d: endpoint = http://10.x.x.x:4317
+    d->>t: OTLP/gRPC export
+    t->>g: Forward over enclave-host transport
+    g->>o: Deliver to collector on parent host
+    o-->>d: gRPC ack
+```
+
+See [Architecture](architecture.md) and [Usage](usage.md) for how the collector translates OTLP into CloudWatch metrics/logs and X-Ray traces.
+
 ## Local loopback vs enclave edge
 
 Inside the enclave there are two important traffic scopes:
@@ -140,6 +177,7 @@ This split lets Nitrum keep the app interface simple (regular localhost HTTP) wh
 - `gvproxy` is a required host-side networking dependency for traffic and metadata bridging.
 - If host-side `gvproxy` or port mapping is misconfigured, enclave services may be healthy internally but unreachable externally.
 - If metadata access is disabled/misconfigured, in-enclave AWS SDK calls may fail due to missing credentials.
+- Telemetry export also depends on IMDS: the data-plane reads the parent private IPv4 to reach the collector, so a broken metadata path degrades OTLP export to stdout-only logging.
 - Networking behavior is deterministic once `tap0`, forwarding rules, and ingress bindings are stable.
 
 ## Related docs
