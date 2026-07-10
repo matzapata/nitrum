@@ -84,12 +84,10 @@ impl DataPlaneConfig {
         info!("Loading OTLP endpoint from env");
         let otlp_endpoint = match nitrum.otlp_endpoint.as_deref() {
             Some(explicit) => Some(explicit.to_string()),
-            None => Some(
-                imds.local_ipv4()
-                    .await
-                    .map(|parent_ipv4| format!("http://{parent_ipv4}:{OTLP_PORT}"))
-                    .unwrap_or_else(|_| format!("http://127.0.0.1:{OTLP_PORT}")),
-            ),
+            None => Some(imds.local_ipv4().await.map_or_else(
+                |_| format!("http://127.0.0.1:{OTLP_PORT}"),
+                |parent_ipv4| format!("http://{parent_ipv4}:{OTLP_PORT}"),
+            )),
         };
 
         info!("Loading AWS region from IMDS");

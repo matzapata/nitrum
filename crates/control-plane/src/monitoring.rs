@@ -18,7 +18,7 @@ impl Monitoring {
     /// stdout only. Must be called from within the Tokio runtime.
     pub fn init() -> Self {
         let guard = telemetry::init(
-            TelemetryConfig::new("control-plane")
+            TelemetryConfig::platform("control-plane")
                 .with_otlp_endpoint(std::env::var("NITRUM_OTLP_ENDPOINT").ok()),
         );
         Self { guard }

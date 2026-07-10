@@ -2,7 +2,7 @@
 
 This sample is a small **Ethereum-style signing helper** that runs inside a Nitro enclave, in the spirit of [aws-samples/nitro-enclave-blockchain-wallet-on-eks](https://github.com/aws-samples/nitro-enclave-blockchain-wallet-on-eks), but wired through Nitrum’s build and deploy flow.
 
-The enclave uses the Nitrum **data-plane** for `encrypt`, `decrypt`, `random`, and `kv/set` + `kv/get` (see `docs/usage.md`). After each successful `/wallet` creation the sample persists the same ciphertext returned to the client under the logical key `wallet:demo_last_ciphertext` so the DynamoDB-backed KV path is exercised; if that KV write fails, the whole request fails and no ciphertext is returned. Application code lives in `enclave/src/main.js`.
+The enclave uses the Nitrum **data-plane** for `encrypt`, `decrypt`, `random`, and `kv/set` + `kv/get` (see `docs/usage.md`). After each successful `/wallet` creation the sample persists the same ciphertext returned to the client under the logical key `wallet:demo_last_ciphertext` so the DynamoDB-backed KV path is exercised; if that KV write fails, the whole request fails and no ciphertext is returned. Application code lives in `enclave/src/main.js` with OpenTelemetry metrics in `enclave/src/instrumentation.js` (`app.wallet.created`, `app.wallet.sign.duration.ms`).
 
 ### Endpoints
 

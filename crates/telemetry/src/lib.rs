@@ -15,6 +15,7 @@
 //! to telemetry (service, route template, method, status class, operation
 //! names). Request/response headers, bodies, and secrets are never recorded.
 
+pub mod env;
 pub mod metrics;
 
 #[cfg(feature = "http")]
@@ -50,9 +51,35 @@ impl TelemetryConfig {
         }
     }
 
+    /// Create telemetry config for a Nitrum platform binary (`data-plane`,
+    /// `control-plane`): tags telemetry with [`env::CORE_COMPONENT`] and
+    /// [`env::NAMESPACE`] in addition to `service_name`.
+    #[must_use]
+    pub fn platform(service_name: impl Into<String>) -> Self {
+        Self::new(service_name).with_resource_attributes([
+            ("nitrum.component", env::CORE_COMPONENT),
+            ("service.namespace", env::NAMESPACE),
+        ])
+    }
+
     /// Attach an OTLP/gRPC collector endpoint when export is enabled.
+    #[must_use]
     pub fn with_otlp_endpoint(mut self, endpoint: Option<impl AsRef<str>>) -> Self {
         self.otlp_endpoint = endpoint.map(|e| e.as_ref().to_string());
+        self
+    }
+
+    /// Attach OpenTelemetry resource attributes (e.g. `nitrum.component=core`).
+    #[must_use]
+    pub fn with_resource_attributes(
+        mut self,
+        attributes: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        self.resource_attributes.extend(
+            attributes
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into())),
+        );
         self
     }
 }
@@ -118,24 +145,21 @@ fn env_filter() -> EnvFilter {
 /// Must be called from within a Tokio runtime: the OTLP gRPC exporters require one.
 #[must_use]
 pub fn init(cfg: TelemetryConfig) -> TelemetryGuard {
-    let guard = match cfg.otlp_endpoint.as_deref().filter(|e| !e.is_empty()) {
-        Some(endpoint) => {
-            let resource = otel::build_resource(&cfg.service_name, &cfg.resource_attributes);
-            match otel::build_providers(endpoint, resource) {
-                Ok(providers) => install_with_otlp(providers),
-                Err(error) => {
-                    eprintln!(
-                        "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
-                    );
-                    init_stdout_only();
-                    TelemetryGuard::default()
-                }
+    let guard = if let Some(endpoint) = cfg.otlp_endpoint.as_deref().filter(|e| !e.is_empty()) {
+        let resource = otel::build_resource(&cfg.service_name, &cfg.resource_attributes);
+        match otel::build_providers(endpoint, resource) {
+            Ok(providers) => install_with_otlp(providers),
+            Err(error) => {
+                eprintln!(
+                    "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
+                );
+                init_stdout_only();
+                TelemetryGuard::default()
             }
         }
-        None => {
-            init_stdout_only();
-            TelemetryGuard::default()
-        }
+    } else {
+        init_stdout_only();
+        TelemetryGuard::default()
     };
     metrics::init_instruments();
     guard

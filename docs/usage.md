@@ -123,6 +123,29 @@ The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip,
 
 Nitrum emits telemetry through a single path: OpenTelemetry. Both the control-plane (on the EC2 host) and the data-plane (inside the enclave) always write structured logs to stdout and, when an OTLP collector endpoint is configured, additionally export **traces, metrics, and logs** over OTLP/gRPC to a local OpenTelemetry Collector. The collector (the AWS Distro for OpenTelemetry, ADOT, on the EC2 host) translates OTLP into CloudWatch metrics (`Nitrum` namespace via EMF), CloudWatch Logs (`/nitrum/{project}/data-plane` and `/nitrum/{project}/control-plane`), and X-Ray traces. The binaries still emit backend-neutral OTLP; the deployed data-plane only uses IMDS to discover the parent host address for its default collector endpoint.
 
+### Platform vs application telemetry
+
+Nitrum separates **platform** telemetry from **application** telemetry in OpenTelemetry:
+
+| Layer | `service.name` | `nitrum.component` | Metric prefix (examples) |
+|-------|----------------|--------------------|--------------------------|
+| Control-plane | `control-plane` | `core` | `nitrum.enclave.restarts` |
+| Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.kms.duration.ms` |
+| Your app | `project.name` from `nitrum.toml` | `user-app` | your choice (samples use `app.*`) |
+
+Platform binaries always set `service.namespace=nitrum`. When OTLP export is enabled, the data-plane also injects standard OpenTelemetry environment variables into your application process before it starts:
+
+| Variable | Value |
+|----------|--------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Same collector endpoint as the data-plane |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` |
+| `OTEL_SERVICE_NAME` | `project.name` from `nitrum.toml` |
+| `OTEL_RESOURCE_ATTRIBUTES` | `nitrum.component=user-app,service.namespace=nitrum` |
+
+Your app uses the OpenTelemetry SDK for your language and reads those variables — no Nitrum-specific client is required. In `nitrum local`, open Grafana at `http://localhost:3000` and filter by `service.name` or `nitrum.component` to compare platform and app series. In the cloud, CloudWatch EMF uses `ServiceName` (from `service.name`) as the log stream name under `/nitrum/{project}/metrics`.
+
+See `samples/hello/src/instrumentation.js` and `samples/hello/src/main.js` for a minimal Node.js example (`app.crypto.ops`, `app.kv.duration.ms`).
+
 ### `NITRUM_OTLP_ENDPOINT`
 
 Selects the OTLP/gRPC collector endpoint.

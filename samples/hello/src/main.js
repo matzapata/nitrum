@@ -1,7 +1,19 @@
 "use strict";
 
+require("./instrumentation");
+
 const express = require("express");
 const axios = require("axios");
+const { metrics } = require("@opentelemetry/api");
+
+const meter = metrics.getMeter("nitrum-hello");
+const cryptoOps = meter.createCounter("app.crypto.ops", {
+  description: "Encrypt/decrypt round-trips handled by the sample app",
+});
+const kvLatency = meter.createHistogram("app.kv.duration.ms", {
+  description: "KV set+get round-trip latency in the sample app",
+  unit: "ms",
+});
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const app = express();
@@ -52,8 +64,10 @@ app.post("/crypto", async (req, res) => {
     const { data: decrypted } = await axios.post("http://localhost:3000/decrypt", { ciphertext: encrypted.data }, {
         headers: { "Content-Type": "application/json" },
     });
+    cryptoOps.add(1, { result: "ok" });
     res.json({ encrypted, decrypted });
   } catch (err) {
+    cryptoOps.add(1, { result: "error" });
     console.error(`[server] crypto error: ${err.message}`);
     res.status(502).json({ error: err.message });
   }
@@ -67,6 +81,7 @@ app.post("/random", async (req, res) => {
 });
 
 app.post("/kv", async (req, res) => {
+  const start = performance.now();
   try {
     const { key = "hello/default", value = `kv-${Date.now()}` } = req.body || {};
     const headers = { "Content-Type": "application/json" };
@@ -78,6 +93,8 @@ app.post("/kv", async (req, res) => {
   } catch (err) {
     console.error(`[server] kv error: ${err.message}`);
     res.status(502).json({ error: err.message });
+  } finally {
+    kvLatency.record(performance.now() - start, { route: "/kv" });
   }
 });
 

@@ -1,21 +1,23 @@
 //! Egress whitelist enforcement (DNS + transparent TCP proxy) on supported platforms.
+//!
+//! Enforcement modules compile only on Linux.
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod constants;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod dns;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod filter;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod ip_cache;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod iptables;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod platform;
 pub mod server;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 mod tcp;
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 pub use filter::EgressFilter;
 pub use server::{EgressGuard, init};

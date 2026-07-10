@@ -8,7 +8,7 @@ pub mod runner;
 mod storage;
 mod utils;
 
-#[cfg(all(target_os = "linux", any(feature = "enclave", feature = "pebble")))]
+#[cfg(target_os = "linux")]
 pub mod networking;
 
 pub use config::{DataPlaneConfig, ListenAddrs};

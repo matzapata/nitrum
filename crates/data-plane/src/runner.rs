@@ -19,6 +19,7 @@
 //! launching a single user-controlled application per data-plane run.
 
 use crate::DataPlaneConfig;
+use crate::utils::otel_env::build_user_process_env;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -57,8 +58,8 @@ impl Drop for RunnerGuard {
 /// data-plane runs until SIGINT.
 pub async fn run_until_shutdown(config: &DataPlaneConfig) -> i32 {
     tokio::select! {
-        code = supervise(&config.project.start_command, &config.user_env) => code,
-        _ = shutdown_signal() => {
+        code = supervise(config) => code,
+        () = shutdown_signal() => {
             info!("received SIGINT, shutting down");
             0
         }
@@ -71,15 +72,20 @@ async fn shutdown_signal() {
         .expect("failed to listen for ctrl_c");
 }
 
-async fn supervise<S: std::hash::BuildHasher + Sync>(
-    command: &[String],
-    child_env: &HashMap<String, String, S>,
-) -> i32 {
-    if command.is_empty() {
+async fn supervise(config: &DataPlaneConfig) -> i32 {
+    if config.project.start_command.is_empty() {
         info!("no command provided, running until SIGINT");
         std::future::pending::<i32>().await
     } else {
-        match run(command, child_env).await {
+        let (child_env, otel_injected) = build_user_process_env(config);
+        if otel_injected {
+            info!(
+                target: "app",
+                service_name = %config.project.name,
+                "injecting OpenTelemetry env for user application"
+            );
+        }
+        match run(&config.project.start_command, &child_env).await {
             Ok(code) => code,
             Err(error) => {
                 error!(error = %error, "failed to run user process");
@@ -91,7 +97,8 @@ async fn supervise<S: std::hash::BuildHasher + Sync>(
 
 /// Spawn the user command and stream its stdout/stderr to the tracing log (target "app").
 ///
-/// `child_env` is the child's full environment (e.g. [`DataPlaneConfig::user_env`] from SSM only).
+/// `child_env` is the child's full environment (SSM app env plus Nitrum-injected OpenTelemetry
+/// variables when OTLP export is enabled).
 /// Returns the process exit code when the child exits.
 async fn run<S: std::hash::BuildHasher + Sync>(
     command: &[String],

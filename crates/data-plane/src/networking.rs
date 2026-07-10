@@ -190,27 +190,32 @@ fn create_tap(name: &str) -> std::io::Result<OwnedFd> {
 }
 
 fn configure_tap() -> Result<()> {
-    run_ip(&["link", "set", "dev", "lo", "up"])?;
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC])?;
-    run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME])?;
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU])?;
-    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"])?;
-    run_ip(&[
-        "route",
-        "add",
-        "default",
-        "via",
-        TAP_GATEWAY,
-        "dev",
-        TAP_DEVICE_NAME,
-    ])?;
+    run_ip(&["link", "set", "dev", "lo", "up"], &[])?;
+    run_ip(
+        &["link", "set", "dev", TAP_DEVICE_NAME, "address", TAP_MAC],
+        &[],
+    )?;
+    run_ip(&["addr", "add", TAP_IP_CIDR, "dev", TAP_DEVICE_NAME], &[])?;
+    run_ip(
+        &["link", "set", "dev", TAP_DEVICE_NAME, "mtu", TAP_MTU],
+        &[],
+    )?;
+    run_ip(&["link", "set", "dev", TAP_DEVICE_NAME, "up"], &[])?;
+    run_ip(
+        &[
+            "route",
+            "add",
+            "default",
+            "via",
+            TAP_GATEWAY,
+            "dev",
+            TAP_DEVICE_NAME,
+        ],
+        &[],
+    )?;
     // Without this, Linux may ARP for 169.254.169.254 on tap0 instead of forwarding to gvproxy.
-    add_imds_route()
-}
-
-fn add_imds_route() -> Result<()> {
-    let status = Command::new("ip")
-        .args([
+    run_ip(
+        &[
             "route",
             "add",
             IMDS_HOST_ROUTE,
@@ -218,20 +223,13 @@ fn add_imds_route() -> Result<()> {
             TAP_GATEWAY,
             "dev",
             TAP_DEVICE_NAME,
-        ])
-        .status()
-        .context("spawn ip route add for IMDS")?;
-
-    if status.success() || status.code() == Some(2) {
+        ],
         // Exit code 2: route already present (e.g. warm restart).
-        return Ok(());
-    }
-
-    let code = status.code().unwrap_or(-1);
-    anyhow::bail!("ip route add for IMDS failed with exit code {code}")
+        &[2],
+    )
 }
 
-fn run_ip(args: &[&str]) -> Result<()> {
+fn run_ip(args: &[&str], allowed_exit_codes: &[i32]) -> Result<()> {
     let status = Command::new("ip")
         .args(args)
         .status()
@@ -240,12 +238,15 @@ fn run_ip(args: &[&str]) -> Result<()> {
         return Ok(());
     }
     let code = status.code().unwrap_or(-1);
+    if allowed_exit_codes.contains(&code) {
+        return Ok(());
+    }
     anyhow::bail!("ip {args:?} failed with exit code {code}")
 }
 
 fn bring_loopback_up() -> Result<()> {
     info!("bringing loopback interface up");
-    run_ip(&["link", "set", "dev", "lo", "up"])
+    run_ip(&["link", "set", "dev", "lo", "up"], &[])
 }
 
 fn write_resolv_conf() -> Result<()> {

@@ -7,6 +7,10 @@
     "test": "node --test 'tests/**/*.test.mjs'"
   },
   "dependencies": {
+    "@opentelemetry/api": "1",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "0.57",
+    "@opentelemetry/sdk-metrics": "1",
+    "@opentelemetry/sdk-node": "0.57",
     "axios": "1",
     "express": "5"
   },

@@ -33,7 +33,7 @@ async fn run() -> anyhow::Result<i32> {
     let Args { config } = Args::parse();
 
     // Initialize networking
-    #[cfg(feature = "enclave")]
+    #[cfg(target_os = "linux")]
     data_plane::networking::init()
         .await
         .context("enclave networking init failed")?;
@@ -52,7 +52,7 @@ async fn run() -> anyhow::Result<i32> {
 
     // Initialize telemetry
     let _telemetry_guard = telemetry::init(
-        telemetry::TelemetryConfig::new("data-plane")
+        telemetry::TelemetryConfig::platform("data-plane")
             .with_otlp_endpoint(data_plane_config.otlp_endpoint.as_deref()),
     );
 

@@ -3,29 +3,29 @@
 use crate::config::DataPlaneConfig;
 use tracing::info;
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::constants::{
     DNS_PROXY_PORT, ENCLAVE_UPSTREAM_DNS, TCP_PROXY_PORT, egress_upstream_dns_override,
 };
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::dns::{bind_dns_proxy, serve_dns_proxy};
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::filter::EgressFilter as Filter;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::ip_cache::IpCache;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::iptables::{
     install as install_iptables, log_missing_capability, teardown as teardown_iptables,
 };
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::platform::build_platform_allows;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use super::tcp::{bind_tcp_proxy, serve_tcp_proxy};
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use std::net::SocketAddr;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 use tracing::warn;
 
 /// Owns egress enforcement for the process lifetime.
@@ -37,11 +37,11 @@ pub struct EgressGuard {
 }
 
 impl EgressGuard {
-    fn inactive() -> Self {
+    const fn inactive() -> Self {
         Self { active: false }
     }
 
-    fn active() -> Self {
+    const fn active() -> Self {
         Self { active: true }
     }
 }
@@ -49,7 +49,7 @@ impl EgressGuard {
 impl Drop for EgressGuard {
     fn drop(&mut self) {
         if self.active {
-            #[cfg(egress_enforcement)]
+            #[cfg(target_os = "linux")]
             teardown_iptables();
         }
     }
@@ -59,26 +59,25 @@ impl Drop for EgressGuard {
 ///
 /// Returns an [`EgressGuard`] that removes iptables rules on drop when enforcement is active.
 /// No-op when egress is disabled or when enforcement is unavailable on the current platform.
-#[must_use]
 pub async fn init(config: &DataPlaneConfig) -> anyhow::Result<EgressGuard> {
     if !config.egress.enabled {
         info!("egress whitelist disabled");
         return Ok(EgressGuard::inactive());
     }
 
-    #[cfg(egress_enforcement)]
+    #[cfg(target_os = "linux")]
     {
         return init_enforcement(config).await;
     }
 
-    #[cfg(not(egress_enforcement))]
+    #[cfg(not(target_os = "linux"))]
     {
         info!("egress whitelist unavailable on this platform; skipping enforcement");
         Ok(EgressGuard::inactive())
     }
 }
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 async fn init_enforcement(config: &DataPlaneConfig) -> anyhow::Result<EgressGuard> {
     info!(
         destinations = config.egress.destinations.len(),
@@ -133,7 +132,7 @@ async fn init_enforcement(config: &DataPlaneConfig) -> anyhow::Result<EgressGuar
     Ok(EgressGuard::active())
 }
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 fn detect_upstream_dns() -> anyhow::Result<SocketAddr> {
     if let Some(addr) = egress_upstream_dns_override()? {
         return Ok(addr);
@@ -148,7 +147,7 @@ fn detect_upstream_dns() -> anyhow::Result<SocketAddr> {
         .map_err(|error| anyhow::anyhow!("invalid enclave upstream DNS: {error}"))
 }
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 fn read_first_nameserver() -> Option<SocketAddr> {
     let contents = std::fs::read_to_string("/etc/resolv.conf").ok()?;
     for line in contents.lines() {
@@ -166,13 +165,13 @@ fn read_first_nameserver() -> Option<SocketAddr> {
     None
 }
 
-#[cfg(egress_enforcement)]
+#[cfg(target_os = "linux")]
 fn write_local_resolv_conf() -> anyhow::Result<()> {
     std::fs::write("/etc/resolv.conf", "nameserver 127.0.0.1\n")?;
     Ok(())
 }
 
-#[cfg(all(test, egress_enforcement))]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

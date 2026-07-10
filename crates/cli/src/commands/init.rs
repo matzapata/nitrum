@@ -88,6 +88,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
     };
 
     let writes: Vec<(&str, String)> = vec![
+        (
+            "src/instrumentation.js",
+            sample_instrumentation_js().to_string(),
+        ),
         ("src/main.js", sample_main_js().to_string()),
         ("package.json", sample_package_json(&args.name)?),
         ("Dockerfile", sample_dockerfile().to_string()),
@@ -133,6 +137,14 @@ const fn sample_main_js() -> &'static str {
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
         "samples/hello/src/main.js"
+    ))
+}
+
+const fn sample_instrumentation_js() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/src/instrumentation.js"
     ))
 }
 
