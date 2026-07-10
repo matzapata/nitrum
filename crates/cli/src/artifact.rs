@@ -79,7 +79,7 @@ pub fn project_eif_path(project_root: &Path, project_name: &str) -> PathBuf {
 
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 ///
-/// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name` (see `crates/data-plane/src/utils/ssm.rs`).
+/// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name` (see `crates/data-plane/src/bootstrap/ssm.rs`).
 ///
 /// # Errors
 ///

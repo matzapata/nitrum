@@ -1,5 +1,7 @@
 //! Data-plane config: `nitrum.toml` plus IMDS + SSM infra settings.
 
+use crate::bootstrap::imds::{EnclaveProvider, ImdsClient};
+use crate::bootstrap::ssm::SsmParameters;
 use crate::constants::{
     DEFAULT_ACME_HTTP01_LISTEN_ADDR, DEFAULT_CRYPTO_API_LISTEN_ADDR, DEFAULT_INGRESS_LISTEN_ADDR,
     ENV_ACME_HTTP01_LISTEN_ADDR, ENV_CRYPTO_API_LISTEN_ADDR, ENV_INGRESS_LISTEN_ADDR, OTLP_PORT,
@@ -7,8 +9,6 @@ use crate::constants::{
     kms_ssm_key_name,
 };
 use crate::utils::env::var_or_nonempty_default;
-use crate::utils::imds::{EnclaveProvider, ImdsClient};
-use crate::utils::ssm::SsmParameters;
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_config::Region;

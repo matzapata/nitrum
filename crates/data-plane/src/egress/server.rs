@@ -1,6 +1,6 @@
 //! Egress proxy servers: transparent DNS and TCP forwarding with whitelist enforcement.
 
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use tracing::info;
 
 #[cfg(target_os = "linux")]

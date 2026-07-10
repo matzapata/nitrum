@@ -61,7 +61,7 @@ In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, optionally
 
 ### AWS credentials from inside the enclave (IMDS)
 
-The data-plane uses an IMDSv2 client (`utils/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With gvproxy started using `-ec2-metadata-access` on the parent, that address inside the enclave is routed so role credentials resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
+The data-plane uses an IMDSv2 client (`bootstrap/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With gvproxy started using `-ec2-metadata-access` on the parent, that address inside the enclave is routed so role credentials resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
 
 ### Persistent encryption key and KMS
 

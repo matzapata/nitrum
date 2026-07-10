@@ -15,7 +15,7 @@ use aws_sdk_dynamodb::{
 };
 use tracing::instrument;
 
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use crate::utils::time;
 
 const LOCK_TTL_SECS: u64 = 60;

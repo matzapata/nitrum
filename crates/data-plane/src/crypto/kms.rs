@@ -6,7 +6,7 @@
 //!
 //! **Pebbles / local:** same symmetric envelope; `Decrypt` runs **without** `Recipient` (no NSM attestation).
 
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;

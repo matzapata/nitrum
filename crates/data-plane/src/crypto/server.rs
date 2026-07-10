@@ -3,7 +3,7 @@
 use super::attest::get_attestation_doc;
 use super::client::CryptoClient;
 use super::kv::{EnclaveKvStore, KvStoreError};
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use crate::storage::StorageClient;
 use anyhow::Context;
 use axum::{

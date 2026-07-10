@@ -7,6 +7,8 @@ mod attest;
 mod client;
 mod kms;
 mod kv;
+#[cfg(feature = "enclave")]
+mod nsm;
 mod random;
 pub mod server;
 

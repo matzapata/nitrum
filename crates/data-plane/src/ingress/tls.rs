@@ -7,8 +7,8 @@
 
 use super::state::IngressState;
 use crate::crypto::CryptoClient;
+use crate::storage::Leader;
 use crate::storage::keys;
-use crate::utils::leader::Leader;
 use anyhow::{Context, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use sha2::{Digest, Sha256};
@@ -61,7 +61,7 @@ impl TlsState {
             ingress.config.instance_id.clone(),
             keys::ACME_LEADER_KEY.to_string(),
         ));
-        let directory_url = crate::constants::acme_directory_url();
+        let directory_url = super::acme::acme_directory_url();
 
         #[cfg(feature = "pebble")]
         let client_tls_config = Some(pebble_client_tls_config().expect("pebble_client_tls_config"));

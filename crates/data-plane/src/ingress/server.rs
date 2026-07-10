@@ -2,7 +2,7 @@
 
 use super::state::IngressState;
 use super::tls::{TlsState, challenge_handler};
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use crate::crypto::{CryptoClient, get_attestation_doc};
 use crate::storage::StorageClient;
 use anyhow::Context;

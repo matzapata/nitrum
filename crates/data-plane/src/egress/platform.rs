@@ -5,11 +5,9 @@ use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 
 use tracing::{info, warn};
 
-use crate::config::DataPlaneConfig;
-use crate::constants::{
-    acme_directory_url, acme_directory_url_override, dynamodb_endpoint_url, kms_endpoint_url,
-    ssm_endpoint_url,
-};
+use crate::DataPlaneConfig;
+use crate::constants::{dynamodb_endpoint_url, kms_endpoint_url, ssm_endpoint_url};
+use crate::ingress::acme::{acme_directory_url, acme_directory_url_override};
 
 /// Platform bootstrap data merged with user `[egress].destinations`.
 pub struct PlatformAllows {

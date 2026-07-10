@@ -1,8 +1,8 @@
 use super::attest::get_attestation_doc;
 use super::kms::Kms;
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
+use crate::storage::Leader;
 use crate::storage::{StorageClient, keys};
-use crate::utils::leader::Leader;
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},

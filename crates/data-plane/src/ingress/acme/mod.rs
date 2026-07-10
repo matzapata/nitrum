@@ -2,11 +2,13 @@
 
 mod challenge;
 mod client;
+mod constants;
 mod state;
 mod storage;
 mod utils;
 
 pub use challenge::challenge_handler;
+pub use constants::{acme_directory_url, acme_directory_url_override};
 pub use state::{AcmeEvent, AcmeState};
 
 #[cfg(feature = "pebble")]
