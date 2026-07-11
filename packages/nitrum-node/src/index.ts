@@ -1,3 +1,5 @@
+import "reflect-metadata";
+
 /**
  * @file index.ts
  * @description Verify AWS Nitro Enclave attestation documents.

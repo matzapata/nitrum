@@ -12,7 +12,7 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "types": ["node"],
-    "moduleResolution": "node10",
+    "moduleResolution": "bundler",
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },

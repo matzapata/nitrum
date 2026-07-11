@@ -130,5 +130,5 @@ pub async fn sha256_file(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();
-    Ok(format!("{digest:x}"))
+    Ok(hex::encode(digest))
 }
