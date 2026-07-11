@@ -1,12 +1,19 @@
 //! `CloudFormation` stack and EIF S3 bucket helpers.
 
+mod cloudformation;
+mod ssm;
+
 use anyhow::Result;
 use std::collections::BTreeMap;
 
 use crate::artifact::EnclaveArtifact;
-use crate::utils::bucket::Bucket;
-use crate::utils::cloudformation::CloudFormation;
-use config::{NitrumConfig, Scaling};
+use crate::storage::Bucket;
+use crate::utils::aws;
+use config::artifact::{eif_s3_key, eif_version_label_from_hash};
+use config::{NitrumConfig, PlatformLayout, Scaling};
+
+pub use cloudformation::CloudFormation;
+pub use ssm::Ssm;
 
 pub struct EnclaveCloudStack {
     bucket: Bucket,
@@ -20,14 +27,13 @@ impl EnclaveCloudStack {
     ///
     /// Returns an error when the AWS configuration cannot be loaded.
     pub async fn new(config: &NitrumConfig) -> Result<Self> {
-        let bucket_name = format!("nitrum-{}", config.project.name);
-        let stack_name = format!("nitrum-{}", config.project.name);
+        let layout = PlatformLayout::from_project(&config.project);
         let aws_sdk_config = aws_config::load_from_env().await;
         Ok(Self {
-            bucket: Bucket::new(&aws_sdk_config, bucket_name),
+            bucket: Bucket::new(&aws_sdk_config, layout.s3_bucket()),
             cloudformation: CloudFormation::new(
                 &aws_sdk_config,
-                stack_name,
+                layout.stack_name(),
                 Self::cloud_stack_template(),
             ),
         })
@@ -36,9 +42,7 @@ impl EnclaveCloudStack {
     /// Region string for prompts (`AWS_REGION` / `AWS_DEFAULT_REGION` / `us-east-1`).
     #[must_use]
     pub fn region_display(&self) -> String {
-        std::env::var("AWS_REGION")
-            .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-            .unwrap_or_else(|_| "us-east-1".to_string())
+        aws::region_display()
     }
 
     #[must_use]
@@ -66,8 +70,8 @@ impl EnclaveCloudStack {
         kms_administrator_role_arn: Option<&str>,
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
-        let eif_label: String = artifact.hash.chars().take(12).collect();
-        let eif_s3_key = format!("{eif_label}.eif");
+        let eif_label = eif_version_label_from_hash(&artifact.hash);
+        let eif_s3_key = eif_s3_key(&eif_label);
         let retain_str = if retain { "true" } else { "false" };
         let control_plane_debug_arg = if debug_mode { "--debug-mode" } else { "" };
 
@@ -83,7 +87,7 @@ impl EnclaveCloudStack {
         }
 
         let mut params = vec![
-            ("ProjectName".to_string(), config.project.name.clone()),
+            ("ProjectName".to_string(), config.project.name.to_string()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
             ("EifS3Key".to_string(), eif_s3_key.clone()),
@@ -101,7 +105,7 @@ impl EnclaveCloudStack {
             ),
             (
                 "ControlPlaneImage".to_string(),
-                config.runtime.control_plane.clone(),
+                config.runtime.control_plane.to_string(),
             ),
             (
                 "ControlPlaneDebugArg".to_string(),

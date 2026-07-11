@@ -2,7 +2,7 @@
 
 use super::state::IngressState;
 use super::tls::{TlsState, challenge_handler};
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use crate::crypto::{CryptoClient, get_attestation_doc};
 use crate::storage::StorageClient;
 use anyhow::Context;
@@ -172,7 +172,7 @@ async fn ingress_proxy(
         .uri()
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
-    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.project.port);
+    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.project.port.get());
     let url = format!("http://{forward_to}{path_and_query}");
     info!(url = %url, "ingress: proxying to app");
 

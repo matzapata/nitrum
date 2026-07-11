@@ -1,6 +1,6 @@
 //! Shared dependencies for the ingress HTTP/HTTPS server.
 
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
 use crate::storage::StorageClient;
 use std::sync::{Arc, RwLock};
 

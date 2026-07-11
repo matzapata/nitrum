@@ -1,15 +1,19 @@
+//! Resolved path to the enclave EIF on disk (downloaded from S3 or bind-mounted).
+
 use crate::constants::ARTIFACTS_DIR;
-use crate::utils::bucket::Bucket;
+use crate::storage::Bucket;
 use anyhow::{Context, Result, bail};
+use config::artifact::{eif_s3_key, validate_eif_version_label};
 use std::path::{Path, PathBuf};
 
-/// Resolved path to the enclave EIF on disk (downloaded from S3 or bind-mounted).
+/// Runtime EIF location used by the enclave supervisor.
 #[derive(Clone)]
-pub struct EnclaveArtifact {
+pub struct RuntimeEif {
+    /// Absolute or cwd-relative path to the EIF file on the host.
     path: PathBuf,
 }
 
-impl EnclaveArtifact {
+impl RuntimeEif {
     /// Local EIF path (for example `--eif` with a bind-mounted file). Fails if the path is missing or not a regular file.
     pub fn try_from_local(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
@@ -27,10 +31,11 @@ impl EnclaveArtifact {
         &self.path
     }
 
-    /// Downloads `s3://{bucket}/{hash}.eif` into `{ARTIFACTS_DIR}/{hash}.eif` (same key convention as `nitrum cloud deploy`).
-    pub async fn try_from_bucket(bucket: Bucket, artifact_hash: &str) -> Result<Self> {
-        let artifact_hash = validate_artifact_hash(artifact_hash)?;
-        let s3_key = format!("{artifact_hash}.eif");
+    /// Downloads `s3://{bucket}/{version_label}.eif` into `{ARTIFACTS_DIR}/{version_label}.eif`.
+    pub async fn try_from_bucket(bucket: Bucket, version_label: &str) -> Result<Self> {
+        let version_label =
+            validate_eif_version_label(version_label).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let s3_key = eif_s3_key(version_label);
         let dir = PathBuf::from(ARTIFACTS_DIR);
         tokio::fs::create_dir_all(&dir)
             .await
@@ -39,15 +44,4 @@ impl EnclaveArtifact {
         bucket.download(&s3_key, &path).await?;
         Ok(Self { path })
     }
-}
-
-fn validate_artifact_hash(hash: &str) -> Result<&str> {
-    let hash = hash.trim();
-    if hash.is_empty() {
-        bail!("artifact hash must not be empty");
-    }
-    if hash.contains('/') || hash.contains('\\') || hash.contains("..") {
-        bail!("artifact hash must not contain path separators or '..'");
-    }
-    Ok(hash)
 }

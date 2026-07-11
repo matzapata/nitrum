@@ -18,9 +18,11 @@
 //! This module is intended as internal infrastructure, not as a generic supervisor — it's specialized for
 //! launching a single user-controlled application per data-plane run.
 
+mod otel_env;
+
 use crate::DataPlaneConfig;
-use crate::utils::otel_env::build_user_process_env;
 use anyhow::Result;
+use otel_env::build_user_process_env;
 use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::process::Child;

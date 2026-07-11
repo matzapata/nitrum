@@ -1,14 +1,6 @@
 use clap::Parser;
+use cli::commands::{build, cloud as cloud_cmd, describe, init, local as local_cmd};
 use tracing_subscriber::EnvFilter;
-
-pub mod artifact;
-pub mod cloud;
-pub mod commands;
-pub mod constants;
-pub mod local;
-pub mod utils;
-
-use commands::{build, cloud as cloud_cmd, describe, init, local as local_cmd};
 
 #[derive(Parser)]
 #[command(name = "nitrum")]

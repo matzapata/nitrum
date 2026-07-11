@@ -1,10 +1,8 @@
 //! Delete the `CloudFormation` stack and EIF S3 bucket created by `nitrum cloud deploy`.
 
-use crate::{cloud::EnclaveCloudStack, utils};
+use crate::{cloud::EnclaveCloudStack, project::CliProject, utils};
 use anyhow::Result;
 use clap::Args;
-use config::NitrumConfig;
-use std::env;
 use std::path::PathBuf;
 
 #[derive(Args)]
@@ -21,17 +19,9 @@ pub struct DestroyArgs {
 }
 
 pub async fn run(args: DestroyArgs) -> Result<()> {
-    // Load config
-    let root = args
-        .path
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
+    let project = CliProject::load(args.path, args.as_name)?;
+    let cloud_stack = EnclaveCloudStack::new(&project.config).await?;
 
-    // Create CloudFormation stack
-    let cloud_stack = EnclaveCloudStack::new(&config).await?;
-
-    // Confirm deletion
     let stack_name = cloud_stack.stack_name();
     let bucket = cloud_stack.bucket_name();
     let region_display = cloud_stack.region_display();
@@ -43,7 +33,6 @@ pub async fn run(args: DestroyArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Delete CloudFormation stack
     let destroy_success = format!("Stack `{stack_name}` deleted.");
     utils::with_spinner(
         "Deleting stack and S3 bucket (this may take a while)…",

@@ -113,7 +113,7 @@ services:
       retries: 60
       start_period: 120s
 
-  # One-shot: create DynamoDB table + SSM params expected by the data-plane (see crates/data-plane/src/utils/ssm.rs).
+  # One-shot: create DynamoDB table + SSM params expected by the data-plane (see crates/data-plane/src/bootstrap/ssm.rs).
   aws-init:
     image: amazon/aws-cli:latest
     platform: linux/amd64

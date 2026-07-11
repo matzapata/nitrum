@@ -1,15 +1,12 @@
 //! Implicit platform allow patterns and bootstrap IP addresses.
 
+use crate::DataPlaneConfig;
+use crate::constants::{dynamodb_endpoint_url, kms_endpoint_url, ssm_endpoint_url};
+use crate::ingress::acme::{acme_directory_url, acme_directory_url_override};
+use crate::utils::aws::region_from_sdk;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
-
 use tracing::{info, warn};
-
-use crate::config::DataPlaneConfig;
-use crate::constants::{
-    acme_directory_url, acme_directory_url_override, dynamodb_endpoint_url, kms_endpoint_url,
-    ssm_endpoint_url,
-};
 
 /// Platform bootstrap data merged with user `[egress].destinations`.
 pub struct PlatformAllows {
@@ -27,12 +24,17 @@ pub struct PlatformAllows {
 
 /// Build merged hostname patterns and bootstrap IP allowlist from resolved runtime config.
 pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<PlatformAllows> {
-    let mut patterns = config.egress.destinations.clone();
+    let mut patterns: Vec<String> = config
+        .egress
+        .destinations
+        .iter()
+        .map(|destination| destination.as_str().to_string())
+        .collect();
     let mut allowed_ips = HashSet::new();
 
     allowed_ips.insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
 
-    append_hostname_pattern_from_url(&mut patterns, &config.imds_latest_base_url);
+    append_hostname_pattern_from_url(&mut patterns, &config.imds_base_url);
     append_hostname_pattern_from_url(&mut patterns, &ssm_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &kms_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &dynamodb_endpoint_url().unwrap_or_default());
@@ -48,7 +50,7 @@ pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<Platfor
         config.otlp_endpoint.as_deref(),
     );
 
-    let region = &config.aws_region;
+    let region = region_from_sdk(config.aws.as_ref());
     patterns.push(format!(r"^kms\.{}\.amazonaws\.com$", regex::escape(region)));
     patterns.push(format!(r"^ssm\.{}\.amazonaws\.com$", regex::escape(region)));
     patterns.push(format!(
@@ -79,13 +81,13 @@ fn resolve_otlp_collector_allow(
     endpoint: Option<&str>,
 ) -> Option<IpAddr> {
     let endpoint = endpoint?;
-    let host = extract_host(&endpoint)?;
+    let host = extract_host(endpoint)?;
     if let Ok(ip) = host.parse::<IpAddr>() {
         allowed_ips.insert(ip);
         info!(collector = %ip, "egress: OTLP collector IP allowed (proxy bypass)");
         return Some(ip);
     }
-    append_hostname_pattern_from_url(patterns, &endpoint);
+    append_hostname_pattern_from_url(patterns, endpoint);
     None
 }
 

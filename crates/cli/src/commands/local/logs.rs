@@ -1,10 +1,9 @@
 use clap::Args;
-use std::env;
+use std::path::PathBuf;
 
 use anyhow::Result;
-use config::NitrumConfig;
 
-use crate::local::EnclaveLocalStack;
+use crate::{local::EnclaveLocalStack, project::CliProject};
 
 #[derive(Args)]
 pub struct LogsArgs {
@@ -13,7 +12,7 @@ pub struct LogsArgs {
     pub as_name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
-    pub root: Option<std::path::PathBuf>,
+    pub path: Option<PathBuf>,
     /// Number of log lines to show from the end of each service (docker compose `--tail`)
     #[arg(long)]
     pub tail: Option<u32>,
@@ -23,15 +22,7 @@ pub struct LogsArgs {
 }
 
 pub async fn run(args: LogsArgs) -> Result<()> {
-    // Load config
-    let root = args
-        .root
-        .clone()
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
-
-    // Tail logs
-    let local_stack = EnclaveLocalStack::new(&root, &cfg);
+    let project = CliProject::load(args.path, args.as_name)?;
+    let local_stack = EnclaveLocalStack::new(&project.root, &project.config);
     local_stack.logs(args.tail, args.follow).await
 }

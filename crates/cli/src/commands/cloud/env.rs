@@ -3,11 +3,12 @@
 use anyhow::{Result, bail};
 use clap::Args;
 use clap::Subcommand;
-use config::NitrumConfig;
-use std::env;
+use config::PlatformLayout;
 use std::path::PathBuf;
 
-use crate::utils::{self, Ssm};
+use crate::cloud::Ssm;
+use crate::project::CliProject;
+use crate::utils;
 
 #[derive(Args)]
 pub struct EnvArgs {
@@ -43,23 +44,19 @@ pub enum EnvCommand {
 }
 
 pub async fn run(args: EnvArgs) -> Result<()> {
-    let root = args
-        .path
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
-
+    let project = CliProject::load(args.path, args.as_name)?;
     let ssm = Ssm::new().await?;
+    let layout = PlatformLayout::from_project(&project.config.project);
 
     match args.command {
         EnvCommand::Set { key, value } => {
             validate_env_key(&key)?;
-            let name = env_variablesm_ssm_name(&config.project.name, &key);
+            let name = layout.app_env_key(&key);
             ssm.set(&name, value).await?;
             println!("Set {key} in SSM ({name})");
         }
         EnvCommand::Get => {
-            let path = app_env_ssm_path_prefix(&config.project.name);
+            let path = layout.app_env_prefix();
             let rows = ssm.list(&path).await?;
             if rows.is_empty() {
                 println!("(no parameters under {path}/)");
@@ -71,7 +68,7 @@ pub async fn run(args: EnvArgs) -> Result<()> {
         }
         EnvCommand::Delete { key, force } => {
             validate_env_key(&key)?;
-            let name = env_variablesm_ssm_name(&config.project.name, &key);
+            let name = layout.app_env_key(&key);
             if !force && !utils::confirm(&format!("Delete `{key}` from SSM ({name})?")) {
                 return Ok(());
             }
@@ -82,18 +79,6 @@ pub async fn run(args: EnvArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// SSM path prefix for app env parameters (`GetParametersByPath`).
-#[must_use]
-pub fn app_env_ssm_path_prefix(project_name: &str) -> String {
-    format!("/nitrum/{project_name}/env")
-}
-
-/// SSM name for one app env key under `/nitrum/{project name}/env/`.
-#[must_use]
-pub fn env_variablesm_ssm_name(project_name: &str, key: &str) -> String {
-    format!("/nitrum/{project_name}/env/{key}")
 }
 
 fn validate_env_key(key: &str) -> Result<()> {
@@ -110,17 +95,4 @@ fn validate_env_key(key: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::env_variablesm_ssm_name;
-
-    #[test]
-    fn parameter_path_matches_data_plane_prefix() {
-        assert_eq!(
-            env_variablesm_ssm_name("myapp", "API_KEY"),
-            "/nitrum/myapp/env/API_KEY"
-        );
-    }
 }

@@ -1,4 +1,4 @@
-mod config;
+mod bootstrap;
 pub mod constants;
 
 pub mod crypto;
@@ -11,6 +11,6 @@ mod utils;
 #[cfg(target_os = "linux")]
 pub mod networking;
 
-pub use config::{DataPlaneConfig, ListenAddrs};
-pub use crypto::CryptoClient;
+pub use bootstrap::{DataPlaneConfig, ListenAddrs};
+pub use crypto::{CryptoClient, Kms};
 pub use storage::StorageClient;

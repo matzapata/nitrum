@@ -14,6 +14,14 @@ The generated diagrams used in this document are stored in `docs/diagrams/output
 | `data-plane`                  | Runs inside the enclave: loads `nitrum.toml`, wires storage/crypto, runs TLS and HTTP ingress, and hosts the application process.                                   |
 | `config`                      | Shared configuration types (for example `nitrum.toml` deserialization).                                                                                             |
 
+### Module layout (by crate)
+
+| Crate | Notable modules |
+| ----- | --------------- |
+| `config` | `sections/` (`project`, `runtime`, `health_check`, `scaling`, `tls_termination`, `egress`, `well_known`), `platform` (`PlatformLayout` for SSM/S3/CFN paths), `artifact` (EIF naming conventions) |
+| `cli` | `artifact/` (build, describe), `cloud/`, `storage/`, `local/`, `project/` (`CliProject`), `commands/` |
+| `control-plane` | `bootstrap/` (orchestration, config), `enclave/` (supervisor, nitro-cli), `networking/` (gvproxy, forwarder), `storage/` |
+| `data-plane` | `bootstrap/` (config, IMDS, SSM), `networking/` (tap, vsock, forwarding), `ingress/` (TLS, ACME), `crypto/`, `storage/`, `egress/`, `runner/` |
 
 ## High-level system context
 
@@ -42,7 +50,7 @@ The control-plane stays on the host: it manages gvproxy (VSOCK, TAP, port forwar
 
 ## Control-plane and data-plane (detailed)
 
-In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, optionally exposes `/.well-known/enclave/*` per `[well_known]` in `nitrum.toml`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and `project.port` from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
+In Nitrum the `data-plane` crate: `ingress/server.rs` terminates TLS, optionally exposes `/.well-known/enclave/*` per `[well_known]` in `nitrum.toml`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and `project.port` from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
 
 ### TLS termination, certificate storage, and sync
 
@@ -50,7 +58,7 @@ In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, optionally
 - Self-signed bootstrap: On startup, `TlsState` builds an ephemeral server config for the configured domain and records a hash of the certificate used when minting attestation documents (see below). This allows the enclave to answer HTTPS and attestation requests before a real ACME certificate exists.
 - ACME (`[tls_termination] acme = true`):
   - A dedicated HTTP listener (HTTP-01) serves `/.well-known/acme-challenge/*`.
-  - The ACME client in `server/acme/` talks to Let’s Encrypt (or Pebble in local dev) over HTTPS using normal egress.
+  - The ACME client in `ingress/acme/` talks to Let’s Encrypt (or Pebble in local dev) over HTTPS using normal egress.
   - When a certificate is issued, the certificate chain and private key are encrypted with a data-plane encryption key (see KMS section) and stored in a durable backend (for example S3 or DynamoDB) under a key derived from the project name and domain.
   - The ingress layer hot‑reloads rustls with the new certificate without restarting the enclave.
 - Cross-instance sync: On subsequent boots or across additional replicas, the data-plane:
@@ -61,7 +69,7 @@ In Nitrum the `data-plane` crate: `server/ingress.rs` terminates TLS, optionally
 
 ### AWS credentials from inside the enclave (IMDS)
 
-The data-plane uses an IMDSv2 client (`utils/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With gvproxy started using `-ec2-metadata-access` on the parent, that address inside the enclave is routed so role credentials resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
+The data-plane uses an IMDSv2 client (`bootstrap/imds.rs`) pointed at `http://169.254.169.254/latest` (see comments there). With gvproxy started using `-ec2-metadata-access` on the parent, that address inside the enclave is routed so role credentials resolve the same way as on the host. The sequence is conceptually the same as the “IMDS proxy” drawings used in many Nitro walkthroughs.
 
 ### Persistent encryption key and KMS
 
@@ -99,9 +107,9 @@ The data-plane exposes a small HTTP surface alongside your application:
 
 ### Internal crypto HTTP API
 
-In addition to the public ingress on HTTPS, the data-plane runs a **separate plain HTTP server** (`crypto/api.rs`) intended for use from inside the enclave—typically your application calling `127.0.0.1` (or the configured bind address) over the loopback path. It is **not** behind the ingress TLS listener and is **not** the same process surface as `/.well-known/enclave/`* on port 443.
+In addition to the public ingress on HTTPS, the data-plane runs a **separate plain HTTP server** (`crypto/server.rs`) intended for use from inside the enclave—typically your application calling `127.0.0.1` (or the configured bind address) over the loopback path. It is **not** behind the ingress TLS listener and is **not** the same process surface as `/.well-known/enclave/`* on port 443.
 
-- **Listen address:** `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `0.0.0.0:3000`), parsed at runtime with the rest of the data-plane env-driven config (`config.rs`).
+- **Listen address:** `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `0.0.0.0:3000`), parsed at runtime with the rest of the data-plane env-driven config (`bootstrap/config.rs`).
 - **Crypto material:** `POST /encrypt` and `POST /decrypt` use the KMS-backed DEK held by `CryptoClient` (AES-GCM; see the KMS section). Bodies are JSON: encrypt sends `{"plaintext": "<utf-8 string>"}` and returns base64 ciphertext in `data`; decrypt sends `{"ciphertext": "<base64>"}` and returns the decrypted UTF-8 string in `data`. Failures populate `error`.
 - **KV storage:** `POST /kv/set` with `{"key": "<logical>","value": "<utf-8>"}` encrypts the value with the same DEK and overwrites the DynamoDB object keyed `kv:<logical>`. `POST /kv/get` with `{"key": "<logical>"}` returns the decrypted UTF-8 string in `data`, or `404` when absent. Key and value size limits and allowed key characters match the usage documentation; decrypt or UTF-8 issues surface as `422`.
 - **Attestation:** `POST /attestation` accepts JSON with optional camelCase fields `nonce`, `publicKey`, and `userData` (each a standard base64 string when present). The response returns a base64-encoded raw attestation document in `data`. This complements `GET /.well-known/enclave/attestation`, which is tailored for external HTTPS clients and binds the current TLS leaf into the NSM request.

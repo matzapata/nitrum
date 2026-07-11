@@ -33,6 +33,12 @@ pub const AWS_REGION_FETCH_ATTEMPTS: u32 = 5;
 /// Initial backoff between IMDS region fetch retries.
 pub const AWS_REGION_FETCH_INITIAL_BACKOFF_MS: u64 = 200;
 
+/// Environment variable overriding the IMDS base URL (local dev / metadata mocks).
+pub const ENV_IMDS_BASE_URL: &str = "NITRUM_IMDS_BASE_URL";
+
+/// Default IMDS base URL (includes `/latest`, no trailing slash).
+pub const DEFAULT_IMDS_LATEST_BASE_URL: &str = "http://169.254.169.254/latest";
+
 // ── ImdsClient ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -66,7 +72,7 @@ impl std::fmt::Debug for ImdsClient {
 impl ImdsClient {
     /// Create a new client for the given IMDS base URL (including `/latest`; trailing slashes stripped).
     pub fn new(latest_base: impl AsRef<str>) -> Result<Self> {
-        let latest_base = latest_base.as_ref().trim_end_matches('/').to_string();
+        let latest_base = normalize_latest_base(latest_base.as_ref());
         let http = reqwest::Client::builder()
             .timeout(METADATA_HTTP_TIMEOUT)
             .build()
@@ -79,6 +85,17 @@ impl ImdsClient {
                 credentials: None,
             }),
         })
+    }
+
+    /// Create a client using `env_var` when set and non-empty, otherwise `default`.
+    pub fn from_env(env_var: &str, default: &str) -> Result<Self> {
+        Self::new(resolve_latest_base_from_env(env_var, default))
+    }
+
+    /// Resolved IMDS base URL (includes `/latest`, no trailing slash).
+    #[must_use]
+    pub fn latest_base_url(&self) -> &str {
+        &self.latest_base
     }
 
     // ── internal helpers ────────────────────────────────────────────────────
@@ -273,6 +290,46 @@ impl ImdsClient {
             "IMDS role credentials refreshed"
         );
         Ok(creds)
+    }
+}
+
+fn normalize_latest_base(latest_base: &str) -> String {
+    latest_base.trim().trim_end_matches('/').to_string()
+}
+
+fn resolve_latest_base_from_env(env_var: &str, default: &str) -> String {
+    if let Ok(value) = std::env::var(env_var) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return normalize_latest_base(trimmed);
+        }
+    }
+    normalize_latest_base(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_env_resolves_base_url() {
+        unsafe {
+            std::env::remove_var(ENV_IMDS_BASE_URL);
+        }
+        let client =
+            ImdsClient::from_env(ENV_IMDS_BASE_URL, DEFAULT_IMDS_LATEST_BASE_URL).expect("client");
+        assert_eq!(client.latest_base_url(), DEFAULT_IMDS_LATEST_BASE_URL);
+
+        unsafe {
+            std::env::set_var(ENV_IMDS_BASE_URL, "http://imds:1338/latest/");
+        }
+        let client =
+            ImdsClient::from_env(ENV_IMDS_BASE_URL, DEFAULT_IMDS_LATEST_BASE_URL).expect("client");
+        assert_eq!(client.latest_base_url(), "http://imds:1338/latest");
+
+        unsafe {
+            std::env::remove_var(ENV_IMDS_BASE_URL);
+        }
     }
 }
 

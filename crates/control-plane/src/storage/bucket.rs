@@ -4,9 +4,11 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::info;
 
-/// S3 bucket scoped to an S3 client and bucket name (same idea as the CLI `utils::bucket::Bucket`).
+/// S3 bucket scoped to an S3 client and bucket name.
 pub struct Bucket {
+    /// AWS SDK S3 client for object operations.
     client: aws_sdk_s3::Client,
+    /// Bucket name (for example the deploy-time `nitrum-{project}` bucket).
     name: String,
 }
 

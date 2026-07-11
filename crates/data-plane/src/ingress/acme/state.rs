@@ -1,11 +1,11 @@
 //! ACME leader election, storage-backed cert, and renewal loop.
 
 use super::client::AcmeClient;
+use super::constants::{ACME_LOCK_RETRY_INTERVAL, CERTIFICATE_RENEWAL_FRACTION};
 use super::storage::AcmeStorage;
-use crate::constants::{ACME_LOCK_RETRY_INTERVAL, CERTIFICATE_RENEWAL_FRACTION};
 use crate::crypto::CryptoClient;
+use crate::storage::Leader;
 use crate::storage::StorageClient;
-use crate::utils::leader::Leader;
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;

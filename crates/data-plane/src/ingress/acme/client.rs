@@ -1,7 +1,7 @@
 //! ACME account, orders, and certificate provisioning.
 
+use super::constants::CERTIFICATE_RENEWAL_FRACTION;
 use super::utils::acme_https_client;
-use crate::constants::CERTIFICATE_RENEWAL_FRACTION;
 use crate::crypto::CryptoClient;
 use crate::storage::StorageClient;
 use crate::storage::keys;

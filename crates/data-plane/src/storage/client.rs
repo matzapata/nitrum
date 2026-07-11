@@ -13,9 +13,12 @@ use aws_sdk_dynamodb::{
     Client, error::SdkError, operation::put_item::PutItemError, primitives::Blob,
     types::AttributeValue,
 };
+use std::sync::Arc;
 use tracing::instrument;
 
-use crate::config::DataPlaneConfig;
+use crate::DataPlaneConfig;
+use crate::constants::ENV_DYNAMODB_ENDPOINT_URL;
+use crate::utils::env::optional_nonempty;
 use crate::utils::time;
 
 const LOCK_TTL_SECS: u64 = 60;
@@ -29,18 +32,27 @@ pub struct StorageClient {
 }
 
 impl StorageClient {
-    /// Build from runtime config and shared SDK config (`DynamoDB` encapsulated in storage).
+    /// Build a client for `table` using `aws`.
+    ///
+    /// When [`ENV_DYNAMODB_ENDPOINT_URL`] is set and non-empty, routes API calls to that endpoint
+    /// (local dev / LocalStack); otherwise uses the regional DynamoDB endpoint from the SDK config.
     #[must_use]
-    pub fn new(config: &DataPlaneConfig) -> Self {
-        let mut builder = aws_sdk_dynamodb::config::Builder::from(config.aws_sdk_config.as_ref());
-        if let Some(ref endpoint) = config.dynamodb_endpoint {
+    pub fn new(aws: Arc<aws_config::SdkConfig>, table: impl Into<String>) -> Self {
+        let mut builder = aws_sdk_dynamodb::config::Builder::from(aws.as_ref());
+        if let Some(endpoint) = optional_nonempty(ENV_DYNAMODB_ENDPOINT_URL) {
             builder = builder.endpoint_url(endpoint);
         }
         let client = Client::from_conf(builder.build());
         Self {
             client,
-            table: config.dynamodb_table.clone(),
+            table: table.into(),
         }
+    }
+
+    /// Build from resolved [`DataPlaneConfig`] (`aws` + `dynamodb_table`).
+    #[must_use]
+    pub fn from_config(config: &DataPlaneConfig) -> Self {
+        Self::new(config.aws.clone(), config.dynamodb_table.clone())
     }
 
     /// Try to acquire a distributed lock identified by `key`.

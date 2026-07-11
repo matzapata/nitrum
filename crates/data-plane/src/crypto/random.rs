@@ -4,7 +4,7 @@ use anyhow::Result;
 
 #[cfg(feature = "enclave")]
 pub fn rand_bytes(size: usize) -> Result<Vec<u8>> {
-    use crate::utils::nsm::NsmConnection;
+    use crate::crypto::nsm::NsmConnection;
     use aws_nitro_enclaves_nsm_api as nitro;
 
     let nsm_conn = NsmConnection::try_new().map_err(|e| anyhow::anyhow!("NsmConnection: {e:?}"))?;
