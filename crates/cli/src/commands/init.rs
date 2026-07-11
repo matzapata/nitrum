@@ -120,7 +120,7 @@ fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
     let body = toml::to_string_pretty(config).context("serialize nitrum.toml")?;
     let contents = format!(
         "# Default template generated with `nitrum init`\n\
-         # For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/lib.rs\n\
+         # For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/sections/\n\
          \n\
          {body}"
     );

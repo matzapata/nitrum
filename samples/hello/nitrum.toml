@@ -1,5 +1,5 @@
 # Default template generated with `nitrum init`
-# For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/lib.rs
+# For details check https://github.com/matzapata/nitrum/blob/develop/crates/config/src/sections/
 
 [project]
 name = "nitrum-hello"

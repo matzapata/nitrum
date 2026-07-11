@@ -14,8 +14,6 @@ pub enum NitrumConfigError {
         #[source]
         source: toml::de::Error,
     },
-    #[error("invalid config in {path}: {message}")]
-    Invalid { path: PathBuf, message: String },
     #[error("invalid `project.name` override: {message}")]
     NameOverrideInvalid { message: String },
 }
