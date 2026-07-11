@@ -1,10 +1,11 @@
 use anyhow::Result;
 use clap::Args;
-use config::{NitrumConfig, PlatformLayout};
+use config::PlatformLayout;
 use std::collections::HashSet;
-use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::project::CliProject;
 
 #[derive(Args)]
 pub struct LogsArgs {
@@ -29,15 +30,11 @@ pub struct LogsArgs {
 }
 
 pub async fn run(args: LogsArgs) -> Result<()> {
-    let root = args
-        .path
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
+    let project = CliProject::load(args.path, args.as_name)?;
 
     let aws_sdk_config = aws_config::load_from_env().await;
     let client = aws_sdk_cloudwatchlogs::Client::new(&aws_sdk_config);
-    let layout = PlatformLayout::from_project(&config.project);
+    let layout = PlatformLayout::from_project(&project.config.project);
     let log_group = layout.control_plane_log_group();
 
     let now_ms = now_epoch_millis();

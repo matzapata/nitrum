@@ -82,7 +82,7 @@ mod tests {
             nitrum: NitrumConfig {
                 project: config::Project {
                     name: project_name.parse().expect("valid test project name"),
-                    port: 8080,
+                    port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
                     start_command: vec![],
                 },
                 runtime: config::Runtime::default(),

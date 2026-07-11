@@ -1,9 +1,8 @@
 use anyhow::Result;
 use clap::Args;
-use config::NitrumConfig;
-use std::env;
+use std::path::PathBuf;
 
-use crate::{local::EnclaveLocalStack, utils};
+use crate::{local::EnclaveLocalStack, project::CliProject, utils};
 
 #[derive(Args)]
 pub struct DownArgs {
@@ -12,19 +11,12 @@ pub struct DownArgs {
     pub as_name: Option<String>,
     /// Project directory (default: current directory)
     #[arg(short, long)]
-    pub root: Option<std::path::PathBuf>,
+    pub path: Option<PathBuf>,
 }
 
 pub async fn run(args: DownArgs) -> Result<()> {
-    // Load config
-    let root = args
-        .root
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
-
-    // Stop local stack
-    let local_stack = EnclaveLocalStack::new(&root, &cfg);
+    let project = CliProject::load(args.path, args.as_name)?;
+    let local_stack = EnclaveLocalStack::new(&project.root, &project.config);
     utils::with_spinner(
         "Stopping local stack…",
         "Local stack stopped.",

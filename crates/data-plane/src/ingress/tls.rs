@@ -42,7 +42,7 @@ impl TlsState {
     /// `.next()` in a loop to drive provisioning/renewal and log events.
     #[must_use]
     pub fn new(ingress: Arc<IngressState>, crypto: Arc<CryptoClient>) -> Self {
-        let domain = ingress.config.tls_termination.domain.clone();
+        let domain = ingress.config.tls_termination.domain.to_string();
         let acme_enabled = ingress.config.tls_termination.acme;
         let (server_config, cert_hash) = ephemeral_server_config(std::slice::from_ref(&domain));
         *ingress.tls_cert_hash.write().unwrap() = Some(cert_hash);

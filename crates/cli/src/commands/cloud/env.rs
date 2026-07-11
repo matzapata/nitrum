@@ -3,11 +3,12 @@
 use anyhow::{Result, bail};
 use clap::Args;
 use clap::Subcommand;
-use config::{NitrumConfig, PlatformLayout};
-use std::env;
+use config::PlatformLayout;
 use std::path::PathBuf;
 
-use crate::utils::{self, Ssm};
+use crate::cloud::Ssm;
+use crate::project::CliProject;
+use crate::utils;
 
 #[derive(Args)]
 pub struct EnvArgs {
@@ -43,15 +44,9 @@ pub enum EnvCommand {
 }
 
 pub async fn run(args: EnvArgs) -> Result<()> {
-    let root = args
-        .path
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let config = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
-
+    let project = CliProject::load(args.path, args.as_name)?;
     let ssm = Ssm::new().await?;
-
-    let layout = PlatformLayout::from_project(&config.project);
+    let layout = PlatformLayout::from_project(&project.config.project);
 
     match args.command {
         EnvCommand::Set { key, value } => {

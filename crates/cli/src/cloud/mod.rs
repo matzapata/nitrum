@@ -1,13 +1,19 @@
 //! `CloudFormation` stack and EIF S3 bucket helpers.
 
+mod cloudformation;
+mod ssm;
+
 use anyhow::Result;
 use std::collections::BTreeMap;
 
 use crate::artifact::EnclaveArtifact;
-use crate::utils::bucket::Bucket;
-use crate::utils::cloudformation::CloudFormation;
+use crate::storage::Bucket;
+use crate::utils::aws;
 use config::artifact::{eif_s3_key, eif_version_label_from_hash};
 use config::{NitrumConfig, PlatformLayout, Scaling};
+
+pub use cloudformation::CloudFormation;
+pub use ssm::Ssm;
 
 pub struct EnclaveCloudStack {
     bucket: Bucket,
@@ -36,9 +42,7 @@ impl EnclaveCloudStack {
     /// Region string for prompts (`AWS_REGION` / `AWS_DEFAULT_REGION` / `us-east-1`).
     #[must_use]
     pub fn region_display(&self) -> String {
-        std::env::var("AWS_REGION")
-            .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-            .unwrap_or_else(|_| "us-east-1".to_string())
+        aws::region_display()
     }
 
     #[must_use]

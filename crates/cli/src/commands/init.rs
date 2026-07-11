@@ -3,8 +3,8 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    DockerImageRef, Egress, HealthCheck, NitrumConfig, Project, ProjectName, Runtime, Scaling,
-    TlsTermination, WellKnown,
+    DockerImageRef, Egress, EgressPattern, HealthCheck, NitrumConfig, Project, ProjectName,
+    Runtime, Scaling, TlsTermination, WellKnown,
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
@@ -67,7 +67,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
     let nitrum_config = NitrumConfig {
         project: Project {
             name: project_name,
-            port: 8080,
+            port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
             start_command: vec!["node".to_string(), "/app/src/main.js".to_string()],
         },
         runtime: Runtime {
@@ -81,7 +81,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
         tls_termination: TlsTermination::default(),
         egress: Egress {
             enabled: true,
-            destinations: vec!["ipify\\.org$".to_string()],
+            destinations: vec![EgressPattern::try_new(r"ipify\.org$")?],
         },
     };
 
@@ -117,9 +117,6 @@ pub async fn run(args: InitArgs) -> Result<()> {
 }
 
 fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
-    config
-        .validate()
-        .map_err(|e| anyhow::anyhow!("invalid init template: {e}"))?;
     let body = toml::to_string_pretty(config).context("serialize nitrum.toml")?;
     let contents = format!(
         "# Default template generated with `nitrum init`\n\

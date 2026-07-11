@@ -2,11 +2,10 @@
 
 use anyhow::Result;
 use clap::Args;
-use config::NitrumConfig;
-use std::env;
 use std::path::PathBuf;
 
 use crate::artifact::{EnclaveArtifact, project_eif_path};
+use crate::project::CliProject;
 
 #[derive(Args)]
 pub struct DescribeArgs {
@@ -19,18 +18,15 @@ pub struct DescribeArgs {
 }
 
 pub async fn run(args: DescribeArgs) -> Result<()> {
-    let cwd = env::current_dir().expect("current directory");
-    let cfg = NitrumConfig::try_from(cwd.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
+    let project = CliProject::load(None, args.as_name)?;
 
     let eif_path = match &args.eif {
         Some(p) if p.is_absolute() => p.clone(),
-        Some(p) => cwd.join(p),
-        None => project_eif_path(&cwd, &cfg.project.name),
+        Some(p) => project.root.join(p),
+        None => project_eif_path(&project.root, &project.config.project.name),
     };
 
-    // Load up artifact
-    let artifact = EnclaveArtifact::try_from(&eif_path, &cfg).await?;
+    let artifact = EnclaveArtifact::try_from(&eif_path, &project.config).await?;
 
     println!("EIF: {}", artifact.eif_path.display());
     println!("Hash (sha256): {}", artifact.hash);

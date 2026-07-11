@@ -16,6 +16,9 @@ include = [
     "../../samples/hello/tests/integration.test.mjs",
 ]
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "nitrum"
 path = "src/main.rs"

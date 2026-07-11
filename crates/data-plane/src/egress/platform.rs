@@ -24,7 +24,12 @@ pub struct PlatformAllows {
 
 /// Build merged hostname patterns and bootstrap IP allowlist from resolved runtime config.
 pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<PlatformAllows> {
-    let mut patterns = config.egress.destinations.clone();
+    let mut patterns: Vec<String> = config
+        .egress
+        .destinations
+        .iter()
+        .map(|destination| destination.as_str().to_string())
+        .collect();
     let mut allowed_ips = HashSet::new();
 
     allowed_ips.insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));

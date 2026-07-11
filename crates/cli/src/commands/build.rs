@@ -2,10 +2,9 @@
 
 use anyhow::Result;
 use clap::Args;
-use config::NitrumConfig;
-use std::env;
+use std::path::PathBuf;
 
-use crate::{artifact::EnclaveArtifact, utils};
+use crate::{artifact::EnclaveArtifact, project::CliProject, utils};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -14,22 +13,16 @@ pub struct BuildArgs {
     pub as_name: Option<String>,
     /// Path to project directory (default: current directory)
     #[arg(short, long)]
-    pub path: Option<std::path::PathBuf>,
+    pub path: Option<PathBuf>,
 }
 
 pub async fn run(args: BuildArgs) -> Result<()> {
-    // Load config
-    let root = args
-        .path
-        .unwrap_or_else(|| env::current_dir().expect("current directory"));
-    let cfg = NitrumConfig::try_from(root.join("nitrum.toml").as_path())?
-        .with_name(args.as_name.clone())?;
+    let project = CliProject::load(args.path, args.as_name)?;
 
-    // Build artifact
     let artifact = utils::with_spinner(
         "Building enclave artifact from source…",
         "EIF built and measured.",
-        EnclaveArtifact::try_from(&root, &cfg),
+        EnclaveArtifact::try_from(&project.root, &project.config),
     )
     .await?;
 

@@ -44,6 +44,7 @@ pub fn data_plane_config(nitrum: NitrumConfig) -> DataPlaneConfig {
 /// Set the backend port on an existing [`DataPlaneConfig`].
 #[must_use]
 pub const fn with_backend_port(mut config: DataPlaneConfig, port: u16) -> DataPlaneConfig {
-    config.nitrum.project.port = port;
+    config.nitrum.project.port =
+        std::num::NonZeroU16::new(port).expect("benchmark backend port must be non-zero");
     config
 }

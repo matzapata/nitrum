@@ -104,41 +104,15 @@ impl<'de> serde::Deserialize<'de> for ProjectName {
     }
 }
 
-/// Validates a project name string without constructing [`ProjectName`].
-///
-/// # Errors
-///
-/// Returns `Err` with a human-readable message when `name` does not satisfy
-/// Nitrum project naming rules.
-pub fn validate_project_name(name: &str) -> Result<(), String> {
-    ProjectName::try_new(name)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
 /// `[project]` in `nitrum.toml`.
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Project {
     pub name: ProjectName,
     /// TCP port your application listens on (`127.0.0.1`); the ingress proxies here after TLS.
-    pub port: u16,
+    pub port: std::num::NonZeroU16,
     /// Process argv for the user workload (read from `nitrum.toml` by the data-plane).
     #[serde(default, alias = "command")]
     pub start_command: Vec<String>,
-}
-
-impl Project {
-    /// Validates semantic constraints for `[project]`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` with a human-readable message when `port` is invalid.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.port == 0 {
-            return Err("`project.port` must not be 0".to_string());
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

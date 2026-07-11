@@ -122,15 +122,6 @@ impl Default for Runtime {
     }
 }
 
-impl Runtime {
-    /// Validates semantic constraints for `[runtime]`.
-    ///
-    /// Image references are validated when deserialized or constructed; this is a no-op.
-    pub const fn validate(&self) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::DockerImageRef;
