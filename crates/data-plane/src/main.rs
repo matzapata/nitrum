@@ -32,8 +32,8 @@ async fn run() -> anyhow::Result<i32> {
 
     let Args { config } = Args::parse();
 
-    // Initialize networking
-    #[cfg(target_os = "linux")]
+    // Nitro enclave TAP/VSOCK setup; skipped for local Compose (`pebble` feature only).
+    #[cfg(all(target_os = "linux", feature = "enclave"))]
     data_plane::networking::init()
         .await
         .context("enclave networking init failed")?;

@@ -8,7 +8,7 @@ pub mod runner;
 mod storage;
 mod utils;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "enclave"))]
 pub mod networking;
 
 pub use bootstrap::{DataPlaneConfig, ListenAddrs};

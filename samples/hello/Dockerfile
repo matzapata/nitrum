@@ -14,7 +14,7 @@ COPY package.json .
 RUN npm install
 
 # Copy the enclave code
-COPY src/main.js src/main.js
+COPY src/ src/
 
 # Copy the nitrum configuration
 COPY nitrum.toml /app/nitrum.toml
