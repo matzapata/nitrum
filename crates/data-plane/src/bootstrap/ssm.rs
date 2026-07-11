@@ -3,21 +3,12 @@
 //!
 //! [`SsmParameters`] reuses the shared [`aws_config::SdkConfig`] built during runtime bootstrap.
 
-use std::sync::Arc;
-
+use crate::constants::ssm_endpoint_url;
 use anyhow::{Context, Result};
 use aws_sdk_ssm::Client;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::debug;
-
-use crate::constants::ssm_endpoint_url;
-
-/// Last path segment of an SSM parameter name, used as the child process env var name.
-#[must_use]
-pub fn parameter_name_to_env_key(name: &str) -> String {
-    name.split('/').next_back().unwrap_or(name).to_string()
-}
-
 /// Batch SSM loader tied to the shared runtime [`aws_config::SdkConfig`].
 #[derive(Clone, Debug)]
 pub struct SsmParameters {
@@ -101,6 +92,12 @@ impl SsmParameters {
         debug!(keys = ?map.keys().collect::<Vec<_>>(), "SSM app env by path");
         Ok(map)
     }
+}
+
+/// Last path segment of an SSM parameter name, used as the child process env var name.
+#[must_use]
+pub fn parameter_name_to_env_key(name: &str) -> String {
+    name.split('/').next_back().unwrap_or(name).to_string()
 }
 
 #[cfg(test)]

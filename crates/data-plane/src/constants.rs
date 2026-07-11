@@ -1,9 +1,12 @@
-//! Shared runtime configuration: env var names, SSM paths, and AWS endpoint overrides.
+//! Shared runtime configuration: env var names, defaults, and AWS endpoint overrides.
 
 use crate::utils::env::optional_nonempty;
 
 /// OTLP/gRPC port exposed by the parent host's ADOT collector.
 pub const OTLP_PORT: u16 = 4317;
+
+/// Environment variable overriding the OTLP collector endpoint.
+pub const ENV_OTLP_ENDPOINT: &str = "NITRUM_OTLP_ENDPOINT";
 
 /// Environment variable overriding the DynamoDB API endpoint.
 pub const ENV_DYNAMODB_ENDPOINT_URL: &str = "NITRUM_DYNAMODB_ENDPOINT_URL";
@@ -32,22 +35,10 @@ pub const ENV_CRYPTO_API_LISTEN_ADDR: &str = "NITRUM_CRYPTO_API_LISTEN_ADDR";
 /// Default crypto API listen address.
 pub const DEFAULT_CRYPTO_API_LISTEN_ADDR: &str = "0.0.0.0:3000";
 
-/// SSM path for KMS key ID under `/nitrum/{project name}/data-plane/kms_key_id`.
+/// Returns [`ENV_OTLP_ENDPOINT`] when set (including empty string to disable export).
 #[must_use]
-pub fn kms_ssm_key_name(project_name: &str) -> String {
-    format!("/nitrum/{project_name}/data-plane/kms_key_id")
-}
-
-/// SSM path for `DynamoDB` table name under `/nitrum/{project name}/data-plane/dynamodb_table`.
-#[must_use]
-pub fn dynamodb_ssm_table_name(project_name: &str) -> String {
-    format!("/nitrum/{project_name}/data-plane/dynamodb_table")
-}
-
-/// SSM path for app env under `/nitrum/{project name}/env/`.
-#[must_use]
-pub fn env_variablesm_ssm_name(project_name: &str) -> String {
-    format!("/nitrum/{project_name}/env/")
+pub fn otlp_endpoint_from_env() -> Option<String> {
+    std::env::var(ENV_OTLP_ENDPOINT).ok()
 }
 
 /// Optional DynamoDB API endpoint override.

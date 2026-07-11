@@ -7,39 +7,51 @@
 //! **Pebbles / local:** same symmetric envelope; `Decrypt` runs **without** `Recipient` (no NSM attestation).
 
 use crate::DataPlaneConfig;
+use crate::constants::ENV_KMS_ENDPOINT_URL;
+use crate::utils::env::optional_nonempty;
 use anyhow::{Context, Result};
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;
+use std::sync::Arc;
 use tracing::instrument;
 
 /// KMS client bound to a specific key ID.
 pub struct Kms {
     client: aws_sdk_kms::Client,
     key_id: String,
-    aws_region: String,
     kms_endpoint: Option<String>,
 }
 
 impl Kms {
-    pub fn new(config: &DataPlaneConfig) -> Self {
-        let mut builder = aws_sdk_kms::config::Builder::from(config.aws_sdk_config.as_ref());
-        if let Some(ref endpoint) = config.kms_endpoint {
+    /// Build a client for `key_id` using `aws`.
+    ///
+    /// When [`ENV_KMS_ENDPOINT_URL`] is set and non-empty, routes API calls to that endpoint
+    /// (local dev / LocalStack); otherwise uses the regional KMS endpoint from the SDK config.
+    #[must_use]
+    pub fn new(aws: Arc<aws_config::SdkConfig>, key_id: impl Into<String>) -> Self {
+        let kms_endpoint = optional_nonempty(ENV_KMS_ENDPOINT_URL);
+        let mut builder = aws_sdk_kms::config::Builder::from(aws.as_ref());
+        if let Some(ref endpoint) = kms_endpoint {
             builder = builder.endpoint_url(endpoint);
         }
         let client = aws_sdk_kms::Client::from_conf(builder.build());
         Self {
             client,
-            key_id: config.kms_key_id.clone(),
-            aws_region: config.aws_region.clone(),
-            kms_endpoint: config.kms_endpoint.clone(),
+            key_id: key_id.into(),
+            kms_endpoint,
         }
+    }
+
+    /// Build from resolved [`DataPlaneConfig`] (`aws` + `kms_key_id`).
+    #[must_use]
+    pub fn from_config(config: &DataPlaneConfig) -> Self {
+        Self::new(config.aws.clone(), config.kms_key_id.clone())
     }
 
     fn kms_call_context(&self, operation: &str) -> String {
         format!(
-            "KMS {operation} (key_id={}, region={}, endpoint={})",
+            "KMS {operation} (key_id={}, endpoint={})",
             self.key_id,
-            self.aws_region,
             self.kms_endpoint
                 .as_deref()
                 .unwrap_or("(default AWS KMS HTTPS endpoint)")

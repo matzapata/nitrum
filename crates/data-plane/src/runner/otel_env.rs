@@ -46,7 +46,10 @@ pub fn user_otel_env(config: &DataPlaneConfig) -> Option<HashMap<String, String>
         OTEL_EXPORTER_OTLP_PROTOCOL.to_string(),
         OTLP_PROTOCOL_GRPC.to_string(),
     );
-    env.insert(OTEL_SERVICE_NAME.to_string(), config.project.name.clone());
+    env.insert(
+        OTEL_SERVICE_NAME.to_string(),
+        config.project.name.to_string(),
+    );
     env.insert(
         OTEL_RESOURCE_ATTRIBUTES.to_string(),
         format!("nitrum.component={USER_APP_COMPONENT},service.namespace={NAMESPACE}"),
@@ -61,21 +64,24 @@ mod tests {
     use aws_config::BehaviorVersion;
     use aws_config::Region;
     use config::NitrumConfig;
+    use config::PlatformLayout;
     use std::net::SocketAddr;
     use std::sync::Arc;
 
     fn test_config(otlp_endpoint: Option<&str>, project_name: &str) -> DataPlaneConfig {
-        let aws_sdk_config = Arc::new(
+        let aws = Arc::new(
             aws_config::SdkConfig::builder()
                 .behavior_version(BehaviorVersion::latest())
                 .region(Region::new("us-east-1"))
                 .build(),
         );
 
+        let layout = PlatformLayout::new(project_name.parse().expect("valid test project name"));
+
         DataPlaneConfig {
             nitrum: NitrumConfig {
                 project: config::Project {
-                    name: project_name.to_string(),
+                    name: project_name.parse().expect("valid test project name"),
                     port: 8080,
                     start_command: vec![],
                 },
@@ -85,16 +91,13 @@ mod tests {
                 scaling: config::Scaling::default(),
                 tls_termination: config::TlsTermination::default(),
                 egress: config::Egress::default(),
-                imds_latest_base_url: "http://127.0.0.1/latest".to_string(),
-                otlp_endpoint: None,
             },
-            aws_region: "us-east-1".to_string(),
-            aws_sdk_config,
+            layout,
+            aws,
+            imds_base_url: "http://127.0.0.1/latest".to_string(),
             instance_id: "i-test".to_string(),
             dynamodb_table: "table".to_string(),
-            dynamodb_endpoint: None,
             kms_key_id: "key".to_string(),
-            kms_endpoint: None,
             listen_addrs: ListenAddrs {
                 ingress_listen_addr: "0.0.0.0:443".parse::<SocketAddr>().unwrap(),
                 acme_http01_listen_addr: "0.0.0.0:80".parse::<SocketAddr>().unwrap(),

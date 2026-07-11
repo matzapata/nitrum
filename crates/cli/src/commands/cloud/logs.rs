@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Args;
-use config::NitrumConfig;
+use config::{NitrumConfig, PlatformLayout};
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
@@ -37,7 +37,8 @@ pub async fn run(args: LogsArgs) -> Result<()> {
 
     let aws_sdk_config = aws_config::load_from_env().await;
     let client = aws_sdk_cloudwatchlogs::Client::new(&aws_sdk_config);
-    let log_group = format!("/nitrum/{}/control-plane", config.project.name);
+    let layout = PlatformLayout::from_project(&config.project);
+    let log_group = layout.control_plane_log_group();
 
     let now_ms = now_epoch_millis();
     let lookback_ms = (args.since_minutes.saturating_mul(60).saturating_mul(1000)).cast_signed();

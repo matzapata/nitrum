@@ -1,13 +1,12 @@
 //! Implicit platform allow patterns and bootstrap IP addresses.
 
-use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
-
-use tracing::{info, warn};
-
 use crate::DataPlaneConfig;
 use crate::constants::{dynamodb_endpoint_url, kms_endpoint_url, ssm_endpoint_url};
 use crate::ingress::acme::{acme_directory_url, acme_directory_url_override};
+use crate::utils::aws::region_from_sdk;
+use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+use tracing::{info, warn};
 
 /// Platform bootstrap data merged with user `[egress].destinations`.
 pub struct PlatformAllows {
@@ -46,7 +45,7 @@ pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<Platfor
         config.otlp_endpoint.as_deref(),
     );
 
-    let region = &config.aws_region;
+    let region = region_from_sdk(config.aws.as_ref());
     patterns.push(format!(r"^kms\.{}\.amazonaws\.com$", regex::escape(region)));
     patterns.push(format!(r"^ssm\.{}\.amazonaws\.com$", regex::escape(region)));
     patterns.push(format!(

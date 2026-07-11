@@ -3,8 +3,8 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    DEFAULT_IMDS_LATEST_BASE_URL, Egress, HealthCheck, NitrumConfig, Project, Runtime, Scaling,
-    TlsTermination, WellKnown, validate_project_name,
+    DockerImageRef, Egress, HealthCheck, NitrumConfig, Project, ProjectName, Runtime, Scaling,
+    TlsTermination, WellKnown,
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
@@ -26,9 +26,9 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
-    validate_project_name(&args.name).map_err(|msg| {
+    let project_name: ProjectName = args.name.parse().map_err(|error| {
         anyhow::anyhow!(
-            "{msg} (project directory name is used as `project.name` in nitrum.toml for `nitrum cloud deploy`)"
+            "{error} (project directory name is used as `project.name` in nitrum.toml for `nitrum cloud deploy`)"
         )
     })?;
 
@@ -66,14 +66,14 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     let nitrum_config = NitrumConfig {
         project: Project {
-            name: args.name.clone(),
+            name: project_name,
             port: 8080,
             start_command: vec!["node".to_string(), "/app/src/main.js".to_string()],
         },
         runtime: Runtime {
-            data_plane,
-            control_plane,
-            nitro_cli,
+            data_plane: DockerImageRef::try_new(&data_plane)?,
+            control_plane: DockerImageRef::try_new(&control_plane)?,
+            nitro_cli: DockerImageRef::try_new(&nitro_cli)?,
         },
         well_known: WellKnown::default(),
         health_check: HealthCheck::default(),
@@ -83,8 +83,6 @@ pub async fn run(args: InitArgs) -> Result<()> {
             enabled: true,
             destinations: vec!["ipify\\.org$".to_string()],
         },
-        imds_latest_base_url: DEFAULT_IMDS_LATEST_BASE_URL.to_string(),
-        otlp_endpoint: None,
     };
 
     let writes: Vec<(&str, String)> = vec![

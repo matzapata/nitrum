@@ -33,7 +33,7 @@ impl BenchEnv {
         };
 
         let data_plane_cfg = with_backend_port(data_plane_config(nitrum), backend_port);
-        let storage = Arc::new(StorageClient::new(&data_plane_cfg));
+        let storage = Arc::new(StorageClient::from_config(&data_plane_cfg));
         let state = Arc::new(IngressState {
             config: data_plane_cfg,
             storage,

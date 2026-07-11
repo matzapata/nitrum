@@ -14,4 +14,5 @@ pub mod server;
 
 pub use attest::get_attestation_doc;
 pub use client::CryptoClient;
+pub use kms::Kms;
 pub use server::init;

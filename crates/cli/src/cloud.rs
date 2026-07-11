@@ -7,7 +7,7 @@ use crate::artifact::EnclaveArtifact;
 use crate::utils::bucket::Bucket;
 use crate::utils::cloudformation::CloudFormation;
 use config::artifact::{eif_s3_key, eif_version_label_from_hash};
-use config::{NitrumConfig, Scaling};
+use config::{NitrumConfig, PlatformLayout, Scaling};
 
 pub struct EnclaveCloudStack {
     bucket: Bucket,
@@ -21,14 +21,13 @@ impl EnclaveCloudStack {
     ///
     /// Returns an error when the AWS configuration cannot be loaded.
     pub async fn new(config: &NitrumConfig) -> Result<Self> {
-        let bucket_name = format!("nitrum-{}", config.project.name);
-        let stack_name = format!("nitrum-{}", config.project.name);
+        let layout = PlatformLayout::from_project(&config.project);
         let aws_sdk_config = aws_config::load_from_env().await;
         Ok(Self {
-            bucket: Bucket::new(&aws_sdk_config, bucket_name),
+            bucket: Bucket::new(&aws_sdk_config, layout.s3_bucket()),
             cloudformation: CloudFormation::new(
                 &aws_sdk_config,
-                stack_name,
+                layout.stack_name(),
                 Self::cloud_stack_template(),
             ),
         })
@@ -84,7 +83,7 @@ impl EnclaveCloudStack {
         }
 
         let mut params = vec![
-            ("ProjectName".to_string(), config.project.name.clone()),
+            ("ProjectName".to_string(), config.project.name.to_string()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
             ("EifS3Key".to_string(), eif_s3_key.clone()),
@@ -102,7 +101,7 @@ impl EnclaveCloudStack {
             ),
             (
                 "ControlPlaneImage".to_string(),
-                config.runtime.control_plane.clone(),
+                config.runtime.control_plane.to_string(),
             ),
             (
                 "ControlPlaneDebugArg".to_string(),

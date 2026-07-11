@@ -110,7 +110,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     let out_path = root.join("out.json");
     let mut envelope = serde_json::Map::new();
     envelope.insert(
-        stack_name.clone(),
+        stack_name.to_string(),
         serde_json::to_value(&outputs).expect("output map serializes to JSON"),
     );
     utils::write_json_value_pretty(&out_path, &serde_json::Value::Object(envelope))?;
