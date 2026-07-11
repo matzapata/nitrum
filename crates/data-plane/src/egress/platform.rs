@@ -34,7 +34,7 @@ pub fn build_platform_allows(config: &DataPlaneConfig) -> anyhow::Result<Platfor
 
     allowed_ips.insert(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)));
 
-    append_hostname_pattern_from_url(&mut patterns, &config.imds_latest_base_url);
+    append_hostname_pattern_from_url(&mut patterns, &config.imds_base_url);
     append_hostname_pattern_from_url(&mut patterns, &ssm_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &kms_endpoint_url().unwrap_or_default());
     append_hostname_pattern_from_url(&mut patterns, &dynamodb_endpoint_url().unwrap_or_default());
@@ -81,13 +81,13 @@ fn resolve_otlp_collector_allow(
     endpoint: Option<&str>,
 ) -> Option<IpAddr> {
     let endpoint = endpoint?;
-    let host = extract_host(&endpoint)?;
+    let host = extract_host(endpoint)?;
     if let Ok(ip) = host.parse::<IpAddr>() {
         allowed_ips.insert(ip);
         info!(collector = %ip, "egress: OTLP collector IP allowed (proxy bypass)");
         return Some(ip);
     }
-    append_hostname_pattern_from_url(patterns, &endpoint);
+    append_hostname_pattern_from_url(patterns, endpoint);
     None
 }
 

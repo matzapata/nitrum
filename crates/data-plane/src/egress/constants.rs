@@ -24,13 +24,15 @@ pub const ENV_UPSTREAM_DNS: &str = "NITRUM_EGRESS_UPSTREAM_DNS";
 ///
 /// Returns an error when the variable is set to a non-empty value that is not a valid `SocketAddr`.
 pub fn egress_upstream_dns_override() -> Result<Option<SocketAddr>> {
-    match optional_nonempty(ENV_UPSTREAM_DNS) {
-        None => Ok(None),
-        Some(value) => value
-            .parse()
-            .map(Some)
-            .with_context(|| format!("invalid {ENV_UPSTREAM_DNS}")),
-    }
+    optional_nonempty(ENV_UPSTREAM_DNS).map_or_else(
+        || Ok(None),
+        |value| {
+            value
+                .parse()
+                .map(Some)
+                .with_context(|| format!("invalid {ENV_UPSTREAM_DNS}"))
+        },
+    )
 }
 
 /// Default TTL for IP→hostname cache entries populated from allowed DNS responses.
