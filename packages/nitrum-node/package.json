@@ -42,14 +42,15 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@peculiar/x509": "^1.12.3",
+    "@peculiar/x509": "^2.0.0",
     "cbor-x": "^1.6.0",
-    "cose-js": "0.8.3"
+    "cose-js": "0.8.3",
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.10",
-    "@types/node": "^22.0.0",
-    "typescript": "^5.0.0",
+    "@biomejs/biome": "2.4.16",
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.0",
     "vitest": "^3.0.0"
   },
   "engines": {

@@ -13,6 +13,7 @@ include = [
     "../../samples/hello/Dockerfile",
     "../../samples/hello/package.json",
     "../../samples/hello/src/main.js",
+    "../../samples/hello/src/instrumentation.js",
     "../../samples/hello/tests/integration.test.mjs",
 ]
 
@@ -37,16 +38,17 @@ futures-util = "0.3"
 http-body-util = "0.1"
 tar = "0.4.46"
 dialoguer = "0.12.0"
-indicatif = "0.17.0"
+indicatif = "0.18"
 serde_json = "1"
-toml = "0.8"
+toml = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-sha2 = "0.10"
+sha2 = "0.11"
+hex = "0.4"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
 aws-sdk-cloudformation = "1"

@@ -17,7 +17,7 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify CHANGELOG entry for tag
         run: ./scripts/verify-changelog.sh "${{ github.ref_name }}"
 
@@ -25,7 +25,7 @@ jobs:
     name: Rust Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: rustfmt
@@ -40,7 +40,7 @@ jobs:
     name: Rust Lint (Clippy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: clippy
@@ -55,7 +55,7 @@ jobs:
     name: Rust Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
         with:
@@ -68,7 +68,7 @@ jobs:
     name: nitrum-node
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -86,7 +86,7 @@ jobs:
     name: Supply chain (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
         with:
