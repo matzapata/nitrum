@@ -9,3 +9,4 @@ dist
 .venv/
 .venv-diagrams/
 __pycache__/
+tests/perf/results/
