@@ -116,8 +116,11 @@ run_scenario() {
     local out_json="${RESULTS_DIR}/${name}.json"
 
     echo "=== k6 ${name} (vus=${PERF_VUS} duration=${PERF_DURATION}) ==="
+    # Include p(99) in the export; default trend stats stop at p(95).
+    # --summary-export uses a flat metric shape (no .values nesting).
     k6 run \
         --insecure-skip-tls-verify \
+        --summary-trend-stats="med,avg,p(90),p(95),p(99)" \
         -e "ENCLAVE_URL=${ENCLAVE_URL}" \
         -e "PERF_VUS=${PERF_VUS}" \
         -e "PERF_DURATION=${PERF_DURATION}" \
@@ -199,10 +202,11 @@ print_summary() {
             continue
         fi
         json="${RESULTS_DIR}/${route}.json"
-        rps="$(format_rps "$(metric_or_na "${json}" '.metrics.http_reqs.values.rate')")"
-        p50="$(format_ms "$(metric_or_na "${json}" '.metrics.http_req_duration.values["p(50)"]')")"
-        p99="$(format_ms "$(metric_or_na "${json}" '.metrics.http_req_duration.values["p(99)"]')")"
-        err_rate="$(metric_or_na "${json}" '.metrics.http_req_failed.values.rate')"
+        # k6 --summary-export layout: .metrics.<name>.{rate,med,p(99),value} (flat).
+        rps="$(format_rps "$(metric_or_na "${json}" '.metrics.http_reqs.rate')")"
+        p50="$(format_ms "$(metric_or_na "${json}" '.metrics.http_req_duration.med')")"
+        p99="$(format_ms "$(metric_or_na "${json}" '.metrics.http_req_duration["p(99)"]')")"
+        err_rate="$(metric_or_na "${json}" '.metrics.http_req_failed.value')"
         err_pct="$(format_pct "${err_rate}")"
         route_label="$(label_for_route "${route}")"
         echo "| ${route_label} | ${PERF_VUS} | ${PERF_DURATION} | ${rps} | ${p50} | ${p99} | ${err_pct} |" >>"${summary_file}"

@@ -50,8 +50,10 @@ Default `PERF_ROUTES=health,crypto`. Restrict with e.g. `PERF_ROUTES=crypto`.
 
 Under `tests/perf/results/<UTC-timestamp>/` (gitignored):
 
-- `health.json` / `crypto.json` — k6 `--summary-export`
-- `summary.md` — markdown table (RPS, p50, p99, error rate) plus git SHA / target metadata
+- `health.json` / `crypto.json` — k6 `--summary-export` (flat fields under `.metrics.*`, not `.values`)
+- `summary.md` — markdown table (RPS, p50←`med`, p99, error rate) plus git SHA / target metadata
+
+The orchestrator passes `--summary-trend-stats=med,avg,p(90),p(95),p(99)` so p99 is present in the export.
 
 Paste the table into [`docs/performance_results.md`](../../docs/performance_results.md) after a real EC2 run.
 
