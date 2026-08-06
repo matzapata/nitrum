@@ -10,23 +10,20 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 - **Python**: `3.11+` for documentation tooling.
 - **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
 - **Poetry**: Python dependency manager used for docs diagram generation.
-- **make** (optional): Targets in the [`Makefile`](Makefile) mirror common commands (`lint`, `format`, Docker image builds, docs diagram generation).
+- **make** (optional): Targets in the [`Makefile`](Makefile) — `format`, `lint`, `check` (format+lint), `deny`, `test`, `lint-node` / `typecheck-node` / `test-node` / `check-node`, `docs-diagrams`.
 
 Clone the repo and run from the workspace root:
 
 ```bash
-cargo check --all-targets --all-features
-cargo test --all-features
-cargo deny check
+make check
+make test
+make deny
 ```
 
-For the TypeScript verifier package:
+For the TypeScript verifier package (run `npm ci` once after clone):
 
 ```bash
-npm ci
-npm run lint -w nitrum-node
-npm run typecheck -w nitrum-node
-npm test -w nitrum-node
+make check-node
 ```
 
 ### Render architecture diagrams
@@ -61,10 +58,9 @@ This command installs the Poetry diagram dependencies (if needed) and renders:
 Before opening a pull request:
 
 ```bash
-cargo fmt --all
-cargo clippy --all-targets --all-features
-cargo deny check
-npm run lint -w nitrum-node
+make check
+make deny
+make lint-node
 ```
 
 CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` lint/typecheck/test, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
@@ -72,6 +68,40 @@ CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` lint/t
 ## Releases
 
 See [docs/releases.md](docs/releases.md) for SemVer, `nitrum.toml` breaking-change rules, CHANGELOG requirements, and how tag releases are gated on CI.
+
+## Macro load testing (EC2 Nitro)
+
+Reproducible k6 load against a **deployed** enclave (not `nitrum local`). Prefer a load client in the **same VPC** as the stack. The harness does not deploy or destroy stacks — use `nitrum cloud deploy` / `nitrum cloud destroy` (or `tests/e2e/cloud.sh`) for that.
+
+**Prerequisites on the load client:** [`k6`](https://k6.io/), [`jq`](https://jqlang.github.io/jq/), and a live `ENCLAVE_URL` (NLB HTTPS origin).
+
+```bash
+# macOS
+brew install k6 jq
+
+# Amazon Linux 2023
+sudo dnf install -y https://dl.k6.io/rpm/repo.rpm
+sudo dnf install -y k6 jq
+```
+
+**Single run** (default: `GET /health` then `POST /crypto`, 50 VUs × 30s):
+
+```bash
+ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
+```
+
+**VU sweep** (capacity curve; run `run-macro.sh` at several concurrencies):
+
+```bash
+export ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com
+for vus in 10 50 100 200; do
+  PERF_VUS=$vus PERF_ROUTES=crypto \
+    PERF_RESULTS_DIR="tests/perf/results/vus-$vus-crypto" \
+    ./tests/perf/run-macro.sh
+done
+```
+
+Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
 
 ## Pull requests
 

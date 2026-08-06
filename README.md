@@ -75,6 +75,20 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 - **Blockchain wallet example** — see `samples/wallet` for a minimal secure wallet app scaffolded using Nitrum and running fully inside a Nitro Enclave.
 - **TypeScript verifier** — `packages/nitrum-node` provides a Node.js helper for verifying Nitro Enclave attestation documents.
 
+### Performance
+
+Macro load on a real Nitro enclave (`m6i.xlarge`, 2 enclave vCPU / 4320 MiB, same-VPC k6 client, 50 VUs × 30s, git `b8bf492`):
+
+| Route | RPS | p50 | p99 | Errors |
+|-------|-----|-----|-----|--------|
+| `GET /.well-known/enclave/status` | ~8.4k | ~5 ms | ~19 ms | 0% |
+| `GET /health` (proxied app) | ~625 | ~79 ms | ~166 ms | 0% |
+| `POST /crypto` (proxy + encrypt/decrypt) | ~438 | ~112 ms | ~174 ms | 0% |
+
+VU sweeps show proxied routes saturate around **~50 VUs** (~450 RPS crypto / ~630 RPS health); more concurrency mostly raises latency. In-enclave status alone plateaus near **~9.5k RPS**.
+
+Load harness: see [CONTRIBUTING.md](CONTRIBUTING.md#macro-load-testing-ec2-nitro).
+
 ### License
 
 Nitrum is released under the **MIT** license. See `LICENSE` for details.

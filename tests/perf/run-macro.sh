@@ -7,7 +7,7 @@
 # Usage (from repo root):
 #   ./tests/perf/run-macro.sh
 #
-# See tests/perf/README.md and tests/perf/.env.example.
+# See CONTRIBUTING.md (Macro load testing) and tests/perf/.env.example.
 
 set -euo pipefail
 
