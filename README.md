@@ -71,9 +71,11 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 
 ### Samples and libraries
 
-- **Hello sample** — minimal end‑to‑end project using the `nitrum` CLI: see `samples/hello` (and its `README.md`).
-- **Blockchain wallet example** — see `samples/wallet` for a minimal secure wallet app scaffolded using Nitrum and running fully inside a Nitro Enclave.
-- **TypeScript verifier** — `packages/nitrum-node` provides a Node.js helper for verifying Nitro Enclave attestation documents.
+- **Hello sample** — Rust enclave app using `crates/sdk` (crypto API client): see `samples/hello`.
+- **Blockchain wallet example** — Rust enclave with JS integration tests: see `samples/wallet`.
+- **`nitrum-node`** (`packages/node`) — Node.js napi bindings over `crates/verify` (document verify + TLS leaf hash bind).
+- **`crates/sdk`** — In-enclave HTTP client for the data-plane crypto API (`:3000`).
+- **`crates/verify`** — Pure Rust attestation verification library.
 
 ### Performance
 

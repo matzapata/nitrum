@@ -25,8 +25,8 @@
 # Open Grafana at http://localhost:3000 to explore metrics, traces, and logs.
 #
 # Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
-# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
-# `.nitrum/local-stack.yml` to refresh this template after upgrading the CLI.
+# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production).
+# `nitrum local` rewrites `.nitrum/local-stack.yml` from the CLI template on each up/down/logs.
 
 configs:
   pebble-config:
@@ -237,7 +237,12 @@ services:
     cap_add:
       - NET_ADMIN
     build:
-      context: ..
+      # Absolute paths set by `nitrum local` (`ENCLAVE_BUILD_CONTEXT` /
+      # `ENCLAVE_DOCKERFILE`). In-repo samples use the workspace root so
+      # Dockerfiles can `COPY crates/sdk`; standalone `nitrum init` projects
+      # use the project directory + `Dockerfile`.
+      context: ${ENCLAVE_BUILD_CONTEXT}
+      dockerfile: ${ENCLAVE_DOCKERFILE}
       args:
         DATA_PLANE_IMAGE: ${DATA_PLANE_IMAGE}
     hostname: nitrum.local

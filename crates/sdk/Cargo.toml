@@ -1,0 +1,18 @@
+[package]
+name = "sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "In-enclave HTTP client for the Nitrum data-plane crypto API"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

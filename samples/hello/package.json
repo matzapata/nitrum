@@ -1,23 +1,11 @@
 {
-  "name": "hello",
-  "version": "1.0.0",
-  "main": "src/main.js",
+  "name": "nitrum-hello-tests",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node src/main.js",
-    "test": "node --test 'tests/**/*.test.mjs'"
+    "test": "node --test tests/integration.test.mjs"
   },
   "dependencies": {
-    "@opentelemetry/api": "1",
-    "@opentelemetry/exporter-metrics-otlp-grpc": "0.57",
-    "@opentelemetry/sdk-metrics": "1",
-    "@opentelemetry/sdk-node": "0.57",
-    "axios": "1",
-    "express": "5"
-  },
-  "devDependencies": {
     "nitrum-node": "0.0.1"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }

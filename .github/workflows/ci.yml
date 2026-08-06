@@ -69,17 +69,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Lint
-        run: npm run lint -w nitrum-node
-      - name: Typecheck
-        run: npm run typecheck -w nitrum-node
-      - name: Test
+      - name: Build native bindings
+        run: npm run build -w nitrum-node
+      - name: Smoke test
         run: npm test -w nitrum-node
 
   supply-chain:

@@ -1,5 +1,16 @@
 [workspace]
-members = ["crates/cli", "crates/control-plane", "crates/data-plane", "crates/config", "crates/telemetry"]
+members = [
+    "crates/cli",
+    "crates/control-plane",
+    "crates/data-plane",
+    "crates/config",
+    "crates/telemetry",
+    "crates/verify",
+    "crates/sdk",
+    "packages/node",
+    "samples/hello",
+    "samples/wallet",
+]
 resolver = "2"
 
 [workspace.package]

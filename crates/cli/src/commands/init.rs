@@ -8,7 +8,6 @@ use config::{
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
-use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -46,6 +45,8 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     fs::create_dir_all(directory.join("src"))
         .with_context(|| format!("create {}", directory.join("src").display()))?;
+    fs::create_dir_all(directory.join("tests"))
+        .with_context(|| format!("create {}", directory.join("tests").display()))?;
 
     let spinner = utils::style_spinner(
         ProgressBar::new_spinner(),
@@ -68,7 +69,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
         project: Project {
             name: project_name,
             port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
-            start_command: vec!["node".to_string(), "/app/src/main.js".to_string()],
+            start_command: vec!["/app/hello".to_string()],
         },
         runtime: Runtime {
             data_plane: DockerImageRef::try_new(&data_plane)?,
@@ -86,17 +87,15 @@ pub async fn run(args: InitArgs) -> Result<()> {
     };
 
     let writes: Vec<(&str, String)> = vec![
-        (
-            "src/instrumentation.js",
-            sample_instrumentation_js().to_string(),
-        ),
-        ("src/main.js", sample_main_js().to_string()),
-        ("package.json", sample_package_json(&args.name)?),
-        ("Dockerfile", sample_dockerfile().to_string()),
+        ("src/main.rs", sample_main_rs().to_string()),
+        ("Cargo.toml", init_cargo_toml()),
+        ("Dockerfile", init_dockerfile().to_string()),
         (
             "tests/integration.test.mjs",
             sample_integration_test_mjs().to_string(),
         ),
+        ("package.json", sample_package_json().to_string()),
+        (".gitignore", "/target\n/Cargo.lock\n".into()),
     ];
 
     for (relative_path, contents) in writes {
@@ -127,45 +126,62 @@ fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
 
-const fn sample_main_js() -> &'static str {
+const fn sample_main_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/src/main.js"
+        "samples/hello/src/main.rs"
     ))
 }
 
-const fn sample_instrumentation_js() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/src/instrumentation.js"
-    ))
+/// Standalone Cargo.toml for `nitrum init` (git dep on `sdk`, not a monorepo path).
+fn init_cargo_toml() -> String {
+    r#"[package]
+name = "hello"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "hello"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sdk = { git = "https://github.com/matzapata/nitrum.git", package = "sdk", branch = "develop" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "metrics"] }
+"#
+    .to_string()
 }
 
-fn sample_package_json(name: &str) -> Result<String> {
-    let mut value: Value = serde_json::from_str(sample_package_json_template())
-        .context("parse sample package.json")?;
-    if let Value::Object(map) = &mut value {
-        map.insert("name".to_string(), Value::String(name.to_string()));
-    }
-    serde_json::to_string_pretty(&value).context("serialize package.json")
-}
+/// Standalone Dockerfile for `nitrum init` (project-dir build context).
+const fn init_dockerfile() -> &'static str {
+    r#"ARG DATA_PLANE_IMAGE=ghcr.io/matzapata/nitrum/data-plane:latest-dev
+ARG RUST_IMAGE=rust:1.95-bookworm
 
-const fn sample_package_json_template() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/package.json"
-    ))
-}
+FROM --platform=linux/amd64 ${RUST_IMAGE} AS builder
+WORKDIR /build
+COPY Cargo.toml ./
+COPY src ./src
+RUN cargo build --release
 
-const fn sample_dockerfile() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/Dockerfile"
-    ))
+FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
+WORKDIR /app
+COPY --from=builder /build/target/release/hello /app/hello
+COPY nitrum.toml /app/nitrum.toml
+CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]
+"#
 }
 
 const fn sample_integration_test_mjs() -> &'static str {
@@ -173,5 +189,13 @@ const fn sample_integration_test_mjs() -> &'static str {
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
         "samples/hello/tests/integration.test.mjs"
+    ))
+}
+
+const fn sample_package_json() -> &'static str {
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../",
+        "samples/hello/package.json"
     ))
 }

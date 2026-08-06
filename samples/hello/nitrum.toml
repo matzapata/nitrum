@@ -4,7 +4,7 @@
 [project]
 name = "nitrum-hello"
 port = 8080
-start_command = ["node", "/app/src/main.js"]
+start_command = ["/app/hello"]
 
 [runtime]
 data_plane = "ghcr.io/matzapata/nitrum/data-plane:latest"

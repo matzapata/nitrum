@@ -23,6 +23,6 @@ pub struct LogsArgs {
 
 pub async fn run(args: LogsArgs) -> Result<()> {
     let project = CliProject::load(args.path, args.as_name)?;
-    let local_stack = EnclaveLocalStack::new(&project.root, &project.config);
+    let local_stack = EnclaveLocalStack::new(&project.root, &project.config)?;
     local_stack.logs(args.tail, args.follow).await
 }

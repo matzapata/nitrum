@@ -2,10 +2,11 @@
 
 use anyhow::{Context, Result, bail};
 use config::NitrumConfig;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
+use crate::artifact::resolve_docker_build_paths;
 use crate::constants;
 
 pub struct EnclaveLocalStack<'a> {
@@ -15,27 +16,46 @@ pub struct EnclaveLocalStack<'a> {
     enclave_image: String,
     /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`); pebble build for local Compose.
     data_plane_image: String,
+    /// Docker build context (workspace root for in-repo samples, else project dir).
+    build_context: PathBuf,
+    /// Dockerfile path relative to [`Self::build_context`].
+    dockerfile: String,
 }
 
 impl<'a> EnclaveLocalStack<'a> {
-    #[must_use]
-    pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Self {
-        Self {
+    /// # Errors
+    ///
+    /// Returns an error when the project path cannot be canonicalized or the
+    /// Docker build context cannot be resolved.
+    pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Result<Self> {
+        let (build_context, dockerfile) = resolve_docker_build_paths(project_root)?;
+        Ok(Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
             data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE")
                 .unwrap_or_else(|_| "ghcr.io/matzapata/nitrum/data-plane:latest-dev".to_string()),
-        }
+            build_context,
+            dockerfile,
+        })
+    }
+
+    fn apply_build_env<'cmd>(&self, cmd: &'cmd mut Command) -> &'cmd mut Command {
+        cmd.env("ENCLAVE_IMAGE", &self.enclave_image)
+            .env("DATA_PLANE_IMAGE", &self.data_plane_image)
+            .env(
+                "ENCLAVE_BUILD_CONTEXT",
+                self.build_context.to_string_lossy().as_ref(),
+            )
+            .env("ENCLAVE_DOCKERFILE", &self.dockerfile)
     }
 
     /// Start the local stack (equivalent to `docker compose up` with the Nitrum template).
     pub async fn up(&self) -> Result<()> {
         let compose_file = self.ensure_template()?;
 
-        let output = Command::new("docker")
-            .current_dir(self.project_root)
-            .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env("DATA_PLANE_IMAGE", self.data_plane_image.clone())
+        let mut cmd = Command::new("docker");
+        cmd.current_dir(self.project_root);
+        self.apply_build_env(&mut cmd)
             // `docker compose build` under BuildKit / buildx may try to resolve local-only base
             // images from a registry. Disable BuildKit here so local tags such as
             // `nitrum-e2e-data-plane:local` work as `FROM ${DATA_PLANE_IMAGE}` inputs.
@@ -50,7 +70,9 @@ impl<'a> EnclaveLocalStack<'a> {
             .args(["up", "--build", "-d"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let output = cmd
             .output()
             .await
             .context("failed to spawn `docker compose`")?;
@@ -79,10 +101,9 @@ impl<'a> EnclaveLocalStack<'a> {
     pub async fn down(&self) -> Result<()> {
         let compose_file = self.ensure_template()?;
 
-        let output = Command::new("docker")
-            .current_dir(self.project_root)
-            .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env("DATA_PLANE_IMAGE", &self.data_plane_image)
+        let mut cmd = Command::new("docker");
+        cmd.current_dir(self.project_root);
+        self.apply_build_env(&mut cmd)
             .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .arg("compose")
             .arg("--progress")
@@ -92,7 +113,9 @@ impl<'a> EnclaveLocalStack<'a> {
             .args(["down"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let output = cmd
             .output()
             .await
             .context("failed to spawn `docker compose`")?;
@@ -122,9 +145,8 @@ impl<'a> EnclaveLocalStack<'a> {
         let compose_file = self.ensure_template()?;
 
         let mut cmd = Command::new("docker");
-        cmd.current_dir(self.project_root)
-            .env("ENCLAVE_IMAGE", &self.enclave_image)
-            .env("DATA_PLANE_IMAGE", &self.data_plane_image)
+        cmd.current_dir(self.project_root);
+        self.apply_build_env(&mut cmd)
             .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .arg("compose")
             .arg("-f")
@@ -159,15 +181,12 @@ impl<'a> EnclaveLocalStack<'a> {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docker-compose.yml"))
     }
 
-    /// Writes the local stack file from the bundled template if it is not already present.
+    /// Writes the bundled Compose template (always refreshed so CLI upgrades apply).
     /// Returns the project-relative path ([`constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE`]).
     fn ensure_template(&self) -> Result<&'static str> {
         let compose_path = self
             .project_root
             .join(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
-        if compose_path.is_file() {
-            return Ok(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE);
-        }
         if let Some(parent) = compose_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create {}", parent.display()))?;

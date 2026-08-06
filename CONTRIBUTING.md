@@ -5,12 +5,12 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 ## Development setup
 
 - **Rust**: MSRV **1.95** ([rustup](https://rustup.rs/)); pinned in [`rust-toolchain.toml`](rust-toolchain.toml) and [`Cargo.toml`](Cargo.toml) `workspace.package.rust-version`.
-- **Node.js**: **22** recommended for `packages/nitrum-node` (engines: `>=18`).
+- **Node.js**: **22** recommended for `packages/node` / `nitrum-node` (engines: `>=18`).
 - **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum local` (Compose).
 - **Python**: `3.11+` for documentation tooling.
 - **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
 - **Poetry**: Python dependency manager used for docs diagram generation.
-- **make** (optional): Targets in the [`Makefile`](Makefile) — `format`, `lint`, `check` (format+lint), `deny`, `test`, `lint-node` / `typecheck-node` / `test-node` / `check-node`, `docs-diagrams`.
+- **make** (optional): Targets in the [`Makefile`](Makefile) — `format`, `lint`, `check` (format+lint), `deny`, `test`, `test-node` / `check-node`, `docs-diagrams`.
 
 Clone the repo and run from the workspace root:
 
@@ -20,7 +20,7 @@ make test
 make deny
 ```
 
-For the TypeScript verifier package (run `npm ci` once after clone):
+For the Node napi bindings (run `npm ci` once after clone):
 
 ```bash
 make check-node
@@ -60,10 +60,10 @@ Before opening a pull request:
 ```bash
 make check
 make deny
-make lint-node
+make check-node
 ```
 
-CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` lint/typecheck/test, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
+CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` build/smoke tests, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
 
 ## Releases
 

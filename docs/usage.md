@@ -18,7 +18,7 @@ Needed only if you use `**nitrum cloud`** (deploy, env, logs, destroy). Local-on
 
 ## Project layout and example
 
-`nitrum init [name]` by default creates a sample Node.js server, but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
+`nitrum init [name]` by default creates a sample **Rust** server (axum + `sdk`), but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
 
 The repository includes a reference project under `samples/hello` which shows the end‑to‑end flow:
 
@@ -117,7 +117,7 @@ The request may be empty or use `Content-Type: application/json` with an optiona
   }
   ```
 
-The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `samples/wallet/enclave/src/main.js` sample uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext` while still returning it in the HTTP response for the client-driven signing flow.
+The `samples/hello` Rust app demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `samples/wallet` sample uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext`; see `samples/wallet/tests/integration.test.mjs` for the create-and-sign flow.
 
 ## Observability
 
@@ -144,7 +144,7 @@ Platform binaries always set `service.namespace=nitrum`. When OTLP export is ena
 
 Your app uses the OpenTelemetry SDK for your language and reads those variables — no Nitrum-specific client is required. In `nitrum local`, open Grafana at `http://localhost:3000` and filter by `service.name` or `nitrum.component` to compare platform and app series. In the cloud, CloudWatch EMF uses `ServiceName` (from `service.name`) as the log stream name under `/nitrum/{project}/metrics`.
 
-See `samples/hello/src/instrumentation.js` and `samples/hello/src/main.js` for a minimal Node.js example (`app.crypto.ops`, `app.kv.duration.ms`).
+See `samples/hello/src/main.rs` for a minimal Rust example (`app.crypto.ops`, `app.kv.duration.ms`).
 
 ### `NITRUM_OTLP_ENDPOINT`
 

@@ -13,11 +13,20 @@
  */
 
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
+import tls from "node:tls";
 import { before, describe, it } from "node:test";
-import { NitrumVerifier } from "nitrum-node";
+
+const require = createRequire(import.meta.url);
+const { verifyAttestation, verifyTlsLeafBindsAttestation } = require("nitrum-node");
 
 function resolveBaseUrl() {
-  const raw = (process.env.ENCLAVE_URL || "https://127.0.0.1:443").trim();
+  const raw = (
+    process.env.ENCLAVE_URL ||
+    process.env.NITRUM_E2E_BASE_URL ||
+    "https://127.0.0.1:443"
+  ).trim();
   return raw.replace(/\/$/, "");
 }
 
@@ -34,6 +43,63 @@ function tlsInsecureEnv() {
     process.env.ENCLAVE_TLS_INSECURE === "1" ||
     process.env.ENCLAVE_TLS_INSECURE === "true"
   );
+}
+
+/** Fetch attestation, verify document + TLS leaf binding. */
+async function verifyEnclaveAttestation(origin, { rejectUnauthorized }) {
+  const nonce = randomBytes(32);
+  const url = `${origin}/.well-known/enclave/attestation?nonce=${encodeURIComponent(nonce.toString("base64"))}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`attestation HTTP ${res.status}: ${text.slice(0, 500)}`);
+  }
+  const body = JSON.parse(text);
+  if (body.error) throw new Error(body.error);
+  if (!body.data) throw new Error("attestation: missing document");
+
+  const raw = Uint8Array.from(Buffer.from(body.data, "base64"));
+  const result = verifyAttestation(raw, {
+    nonce: Uint8Array.from(nonce),
+    maxAgeMs: 5 * 60_000,
+  });
+  if (!result.valid) {
+    throw new Error(result.reason ?? "verifyAttestation failed");
+  }
+
+  const u = new URL(origin.startsWith("http") ? origin : `https://${origin}`);
+  if (u.protocol !== "https:") {
+    throw new Error("attestation TLS binding requires https:");
+  }
+  const port = u.port ? Number(u.port) : 443;
+  const leafDer = await getTlsLeafDer(u.hostname, port, rejectUnauthorized);
+  if (!verifyTlsLeafBindsAttestation(result.document.public_key, leafDer)) {
+    throw new Error("TLS leaf does not match attestation public_key");
+  }
+  return result.document;
+}
+
+function getTlsLeafDer(hostname, port, rejectUnauthorized) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect(
+      { host: hostname, port, servername: hostname, rejectUnauthorized },
+      () => {
+        try {
+          const cert = socket.getPeerCertificate();
+          socket.end();
+          if (!cert?.raw || typeof cert.raw === "string") {
+            reject(new Error("TLS: no peer certificate DER"));
+            return;
+          }
+          resolve(new Uint8Array(cert.raw));
+        } catch (e) {
+          socket.end();
+          reject(e);
+        }
+      },
+    );
+    socket.on("error", reject);
+  });
 }
 
 const baseUrl = resolveBaseUrl();
@@ -73,11 +139,9 @@ describe("nitrum project (integration)", () => {
     it.skip("GET /.well-known/enclave/attestation skipped in local development (non-production TLS)", () => {});
   } else {
     it("GET /.well-known/enclave/attestation validates attestation and TLS leaf binding", async () => {
-      const verifier = new NitrumVerifier({
-        baseUrl,
-        tlsRejectUnauthorized: !tlsInsecureEnv(),
+      const doc = await verifyEnclaveAttestation(baseUrl, {
+        rejectUnauthorized: !tlsInsecureEnv(),
       });
-      const doc = await verifier.verify();
       assert.ok(doc && typeof doc === "object");
     });
   }

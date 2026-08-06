@@ -1,10 +1,8 @@
 ## Nitrum “hello” sample
 
-A minimal project that builds an EIF, injects env vars, and deploys with Nitrum’s control-plane and CloudFormation—small enough to copy into your own apps.
+Minimal Rust enclave app that exercises the data-plane crypto API via workspace [`crates/sdk`](../../crates/sdk), egress allowlisting, and OpenTelemetry metrics.
 
-For **requirements**, **local development** (`nitrum local …`), **workflow**, and every command in detail, see [docs/usage.md](../../docs/usage.md).
-
-From the repo root, install the CLI once (`cargo install --path crates/cli`), then:
+For **requirements**, **local development** (`nitrum local …`), and CLI details, see [docs/usage.md](../../docs/usage.md).
 
 ```bash
 cd samples/hello
@@ -13,8 +11,6 @@ nitrum cloud env set DEMO hello
 nitrum cloud deploy
 ```
 
-After deploy, use the stack outputs (for example the load balancer URL) to reach the service over HTTPS.
+`start_command` runs `/app/hello`. Metrics (`app.crypto.ops`, `app.kv.duration.ms`) export when `OTEL_EXPORTER_OTLP_ENDPOINT` is injected by the data-plane runner.
 
-Inspect `nitrum.toml` here for how this sample wires the data-plane and control-plane; replace `src/` with your own code when you are ready.
-
-`src/instrumentation.js` bootstraps OpenTelemetry metrics export using the `OTEL_*` variables Nitrum injects at runtime. `src/main.js` records sample business metrics (`app.crypto.ops`, `app.kv.duration.ms`) alongside the platform `nitrum.*` series from the data-plane. In `nitrum local`, open Grafana at `http://localhost:3000` and filter by `nitrum.component` (`core` vs `user-app`) or `service.name`.
+Integration tests (JS + `nitrum-node`) live under `tests/`.

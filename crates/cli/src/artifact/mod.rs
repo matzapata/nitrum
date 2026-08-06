@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use describe::describe_eif_json;
 
-pub use build::{build_enclave_eif, build_enclave_image};
+pub use build::{build_enclave_eif, build_enclave_image, resolve_docker_build_paths};
 pub use describe::describe_eif;
 
 #[derive(Debug, Clone)]
