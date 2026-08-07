@@ -2,7 +2,7 @@
 
 Minimal Rust enclave app that exercises the data-plane crypto API via workspace [`crates/sdk`](../../crates/sdk), egress allowlisting, and OpenTelemetry metrics.
 
-This is an **in-repo** demo (same project-dir Docker layout as [`crates/cli/template`](../../crates/cli/template); workspace `[patch]` maps git `sdk` to local `crates/sdk` for `cargo` builds). The scaffold `nitrum init` copies is [`crates/cli/template`](../../crates/cli/template).
+This is an **in-repo** demo (same project-dir Docker layout as [`crates/cli/template`](../../crates/cli/template); workspace `[patch]` maps git `nitrum-sdk` to local `crates/sdk` for `cargo` builds). The scaffold `nitrum init` copies is [`crates/cli/template`](../../crates/cli/template).
 
 For **requirements**, **local development** (`nitrum local …`), and CLI details, see [docs/usage.md](../../docs/usage.md).
 

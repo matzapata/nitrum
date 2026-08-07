@@ -1,5 +1,5 @@
 [package]
-name = "sdk"
+name = "nitrum-sdk"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

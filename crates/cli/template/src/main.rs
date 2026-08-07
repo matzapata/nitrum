@@ -2,7 +2,6 @@
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use opentelemetry::KeyValue;
@@ -10,15 +9,13 @@ use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use sdk::{NitrumClient, SdkError};
+use sdk::NitrumClient;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{error, info};
-
-const SERVICE_NAME: &str = "nitrum-hello";
 
 struct AppState {
     /// Data-plane crypto API client.
@@ -31,38 +28,35 @@ struct AppState {
     kv_latency: Histogram<f64>,
 }
 
-enum AppError {
-    BadGateway(&'static str),
-}
-
-impl From<SdkError> for AppError {
-    fn from(err: SdkError) -> Self {
-        error!(error = %err, "sdk error");
-        Self::BadGateway("upstream request failed")
-    }
-}
-
-impl From<reqwest::Error> for AppError {
-    fn from(err: reqwest::Error) -> Self {
-        error!(error = %err, "egress error");
-        Self::BadGateway("egress request failed")
-    }
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> axum::response::Response {
-        let (status, message) = match self {
-            Self::BadGateway(message) => (StatusCode::BAD_GATEWAY, message),
-        };
-        (status, Json(json!({ "error": message }))).into_response()
-    }
-}
-
 #[tokio::main]
 async fn main() {
-    init_telemetry(SERVICE_NAME);
+    // Initialize tracing.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
-    let meter = opentelemetry::global::meter(SERVICE_NAME);
+    // Initialize telemetry.
+    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        && let Ok(exporter) = opentelemetry_otlp::MetricExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .build()
+    {
+        opentelemetry::global::set_meter_provider(
+            SdkMeterProvider::builder()
+                .with_periodic_exporter(exporter)
+                .with_resource(
+                    Resource::builder()
+                        .with_service_name("nitrum-hello-world")
+                        .build(),
+                )
+                .build(),
+        );
+    }
+    // Create a meter for the application.
+    let meter = opentelemetry::global::meter("nitrum-hello-world");
+    
+    // Create a state for the application.
     let state = Arc::new(AppState {
         nitrum: NitrumClient::default(),
         http: reqwest::Client::new(),
@@ -72,85 +66,75 @@ async fn main() {
             .build(),
         kv_latency: meter
             .f64_histogram("app.kv.duration.ms")
-            .with_description("KV set+get round-trip latency in the sample app")
+            .with_description("KV set/get latency in the sample app")
             .with_unit("ms")
             .build(),
     });
 
+    // Create a router for the application.
     let app = Router::new()
-        .route("/health", get(health))
-        .route("/egress", get(egress))
-        .route("/egress-blocked", get(egress_blocked))
-        .route("/attestation", get(attestation))
-        .route("/crypto", post(crypto))
-        .route("/random", post(random))
-        .route("/kv", post(kv))
-        .route("/env", get(env))
+        .route("/health", get(health_handler))
+        .route("/egress", get(egress_handler))
+        .route("/egress-blocked", get(egress_blocked_handler))
+        .route("/attestation", get(attestation_handler))
+        .route("/crypto", post(crypto_handler))
+        .route("/random", post(random_handler))
+        .route("/kv/set", post(kv_set_handler))
+        .route("/kv/get", post(kv_get_handler))
+        .route("/env", get(env_handler))
         .with_state(state);
 
-    let addr = listen_addr();
-    info!(%addr, "hello sample listening");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
-    axum::serve(listener, app).await.expect("serve");
-}
-
-fn init_telemetry(default_service_name: &str) {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
-
-    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
-    let Some(endpoint) = endpoint.filter(|e| !e.is_empty()) else {
-        return;
-    };
-
-    let resource = Resource::builder()
-        .with_service_name(
-            std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| default_service_name.into()),
-        )
-        .build();
-
-    if let Ok(exporter) = opentelemetry_otlp::MetricExporter::builder()
-        .with_tonic()
-        .with_endpoint(endpoint)
-        .build()
-    {
-        let provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter)
-            .with_resource(resource)
-            .build();
-        opentelemetry::global::set_meter_provider(provider);
-    }
-}
-
-fn listen_addr() -> SocketAddr {
+    // Get the port from the environment or use 8080 as default.
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-    SocketAddr::from(([0, 0, 0, 0], port))
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+    // Start the server.
+    info!("listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
-async fn health() -> &'static str {
+// ############################################################################
+// Health handler.
+// ############################################################################
+
+async fn health_handler() -> &'static str {
     "OK"
 }
 
-async fn egress(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
+// ############################################################################ 
+// Egress handler.
+// ############################################################################
+
+async fn egress_handler(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let res = state
         .http
         .get("https://api.ipify.org?format=json")
         .timeout(std::time::Duration::from_secs(15))
         .send()
-        .await?;
+        .await
+        .map_err(|e| {
+            error!(error = %e, "egress error");
+            (StatusCode::BAD_GATEWAY, Json(json!({ "error": "egress request failed" })))
+        })?;
     let body = res.json::<Value>().await.map_err(|e| {
         error!(error = %e, "egress decode");
-        AppError::BadGateway("egress decode failed")
+        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "egress decode failed" })))
     })?;
     Ok(Json(body))
 }
 
-/// Expected denial path: always 200 so clients can assert allowlist behavior.
-async fn egress_blocked(State(state): State<Arc<AppState>>) -> Json<Value> {
+// ############################################################################
+// Egress blocked handler.
+// ############################################################################
+
+// Expected denial path: always 200 so clients can assert allowlist behavior.
+async fn egress_blocked_handler(State(state): State<Arc<AppState>>) -> Json<Value> {
     match state
         .http
         .get("https://example.com")
@@ -163,6 +147,10 @@ async fn egress_blocked(State(state): State<Arc<AppState>>) -> Json<Value> {
     }
 }
 
+// ############################################################################
+// Attestation query handler.
+// ############################################################################
+
 #[derive(Debug, Deserialize)]
 struct AttestationQuery {
     nonce: Option<String>,
@@ -172,112 +160,164 @@ struct AttestationQuery {
     user_data: Option<String>,
 }
 
-async fn attestation(
+async fn attestation_handler(
     State(state): State<Arc<AppState>>,
     Query(q): Query<AttestationQuery>,
-) -> Result<Json<Value>, AppError> {
-    let bytes = state
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let data = state
         .nitrum
         .attestation(
             q.nonce.as_deref(),
             q.public_key.as_deref(),
             q.user_data.as_deref(),
         )
-        .await?;
-    Ok(Json(
-        json!({ "data": base64_encode(&bytes), "error": null }),
-    ))
+        .await
+        .map_err(|e| {
+            error!(error = %e, "sdk error");
+            (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
+        })?;
+
+    Ok(Json(json!({ "data": data, "error": null })))
 }
+
+// ############################################################################
+// Crypto handler.
+// ############################################################################
 
 #[derive(Debug, Deserialize)]
 struct CryptoBody {
     plaintext: Option<String>,
 }
 
-async fn crypto(
+async fn crypto_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CryptoBody>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let plaintext = body.plaintext.unwrap_or_default();
+    
     let encrypted = match state.nitrum.encrypt(&plaintext).await {
         Ok(v) => v,
         Err(e) => {
+            error!(error = %e, "sdk error");
             state.crypto_ops.add(1, &[KeyValue::new("result", "error")]);
-            return Err(e.into());
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": "upstream request failed" })),
+            ));
         }
     };
     let decrypted = match state.nitrum.decrypt(&encrypted).await {
         Ok(v) => v,
         Err(e) => {
+            error!(error = %e, "sdk error");
             state.crypto_ops.add(1, &[KeyValue::new("result", "error")]);
-            return Err(e.into());
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": "upstream request failed" })),
+            ));
         }
     };
     state.crypto_ops.add(1, &[KeyValue::new("result", "ok")]);
+    
     Ok(Json(json!({
         "encrypted": { "data": encrypted, "error": null },
         "decrypted": { "data": decrypted, "error": null },
     })))
 }
 
+// ############################################################################
+// Random handler.
+// ############################################################################
+
 #[derive(Debug, Deserialize)]
 struct RandomBody {
     length: Option<usize>,
 }
 
-async fn random(
+async fn random_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RandomBody>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let length = body.length.unwrap_or(32);
-    let bytes = state.nitrum.random(length).await?;
+
+    let bytes = state.nitrum.random(length).await.map_err(|e| {
+        error!(error = %e, "sdk error");
+        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
+    })?;
+
     Ok(Json(
         json!({ "data": base64_encode(&bytes), "error": null }),
     ))
 }
 
+// ############################################################################
+// KV handlers.
+// ############################################################################
+
 #[derive(Debug, Deserialize)]
-struct KvBody {
-    key: Option<String>,
-    value: Option<String>,
+struct KvSetBody {
+    key: String,
+    value: String,
 }
 
-async fn kv(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<KvBody>,
-) -> Result<Json<Value>, AppError> {
-    let start = Instant::now();
-    let key = body.key.unwrap_or_else(|| "hello/default".into());
-    let value = body.value.unwrap_or_else(|| format!("kv-{}", now_ms()));
+#[derive(Debug, Deserialize)]
+struct KvGetBody {
+    key: String,
+}
 
-    let result = async {
-        state.nitrum.kv_set(&key, &value).await?;
-        let got = state.nitrum.kv_get(&key).await?;
-        Ok::<_, SdkError>(got.unwrap_or_default())
-    }
-    .await;
+async fn kv_set_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<KvSetBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let start = Instant::now();
+    let KvSetBody { key, value } = body;
+
+    state.nitrum.kv_set(&key, &value).await.map_err(|e| {
+        error!(error = %e, "sdk error");
+        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
+    })?;
 
     state.kv_latency.record(
         start.elapsed().as_secs_f64() * 1000.0,
-        &[KeyValue::new("route", "/kv")],
+        &[KeyValue::new("route", "/kv/set")],
     );
 
-    let got = result?;
-    Ok(Json(json!({ "key": key, "value": got })))
+    Ok(Json(json!({ "key": key, "value": value })))
 }
 
-async fn env() -> Json<Value> {
+async fn kv_get_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<KvGetBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let start = Instant::now();
+    let key = body.key;
+
+    let result = state.nitrum.kv_get(&key).await.map_err(|e| {
+        error!(error = %e, "sdk error");
+        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
+    })?;
+
+    state.kv_latency.record(
+        start.elapsed().as_secs_f64() * 1000.0,
+        &[KeyValue::new("route", "/kv/get")],
+    );
+
+    Ok(Json(json!({ "key": key, "value": result })))
+}
+
+// ############################################################################
+// Environment handler.
+// ############################################################################
+
+async fn env_handler() -> Json<Value> {
     Json(json!({ "env": std::env::var("DEMO").ok() }))
 }
+
+// ############################################################################
+// Utils
+// ############################################################################
 
 fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-fn now_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
 }

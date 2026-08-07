@@ -25,6 +25,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/pin-sdk.sh"
+
 if [[ -f "${SCRIPT_DIR}/.env" ]]; then
     set -a
     # shellcheck source=/dev/null
@@ -58,51 +61,6 @@ step_init() {
     fi
     echo "=== init: ${NAME} in ${PARENT} ==="
     (cd "${PARENT}" && nitrum init "${NAME}")
-}
-
-# `nitrum init` pins sdk to git `develop`, which may not publish that crate yet (this branch).
-# Vendor the workspace sdk so the enclave image builds offline against local sources.
-vendor_sdk() {
-    local dest="${PROJECT}/vendor/sdk"
-    echo "=== vendor: copy crates/sdk -> ${dest} ==="
-    rm -rf "${PROJECT}/vendor"
-    mkdir -p "${PROJECT}/vendor"
-    cp -a "${REPO_ROOT}/crates/sdk" "${dest}"
-    # Drop workspace inheritance so the standalone Docker build can resolve the manifest.
-    cat >"${dest}/Cargo.toml" <<'EOF'
-[package]
-name = "sdk"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
-license = "MIT"
-publish = false
-
-[dependencies]
-base64 = "0.22"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-EOF
-    local cargo_toml="${PROJECT}/Cargo.toml"
-    if grep -q 'sdk = { git = "https://github.com/matzapata/nitrum.git"' "${cargo_toml}"; then
-        local tmp
-        tmp="$(mktemp)"
-        sed 's|sdk = { git = "https://github.com/matzapata/nitrum.git", package = "sdk", branch = "develop" }|sdk = { path = "vendor/sdk" }|' \
-            "${cargo_toml}" >"${tmp}"
-        mv "${tmp}" "${cargo_toml}"
-    fi
-    # Init Dockerfile only copies Cargo.toml + src; path-dep needs vendor in the build context.
-    local dockerfile="${PROJECT}/Dockerfile"
-    if ! grep -q 'COPY vendor' "${dockerfile}"; then
-        local tmp
-        tmp="$(mktemp)"
-        sed '/COPY Cargo.toml \.\//a\
-COPY vendor ./vendor
-' "${dockerfile}" >"${tmp}"
-        mv "${tmp}" "${dockerfile}"
-    fi
 }
 
 cleanup() {
@@ -150,7 +108,7 @@ step_down() {
 trap cleanup EXIT
 
 step_init
-vendor_sdk
+pin_sdk_git
 preclean_stack
 step_up
 step_logs

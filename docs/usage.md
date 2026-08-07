@@ -18,9 +18,9 @@ Needed only if you use `**nitrum cloud`** (deploy, env, logs, destroy). Local-on
 
 ## Project layout and example
 
-`nitrum init [name]` scaffolds from [`crates/cli/template`](../crates/cli/template) (git `sdk` dependency, project-directory Docker build). You can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
+`nitrum init [name]` scaffolds from [`crates/cli/template`](../crates/cli/template) (git `nitrum-sdk` dependency, project-directory Docker build). You can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
 
-In-repo demos under `examples/hello` and `examples/wallet` use the same project-directory Docker layout (git `sdk` + workspace `[patch]` to local [`crates/sdk`](../crates/sdk)); they are not what `nitrum init` copies. Typical flow on a scaffolded or example project:
+In-repo demos under `examples/hello` and `examples/wallet` use the same project-directory Docker layout (git `nitrum-sdk` + workspace `[patch]` to local [`crates/sdk`](../crates/sdk)); they are not what `nitrum init` copies. Typical flow on a scaffolded or example project:
 
 - Build the EIF: `nitrum build`.
 - Set a simple environment variable: `nitrum cloud env set DEMO hello`.

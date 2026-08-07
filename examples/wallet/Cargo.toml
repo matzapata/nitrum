@@ -15,7 +15,7 @@ axum = "0.8"
 ethers = { version = "2.0", default-features = false, features = ["rustls"] }
 hex = "0.4"
 hmac = "0.12"
-sdk = { git = "https://github.com/matzapata/nitrum.git", package = "sdk", branch = "develop" }
+sdk = { git = "https://github.com/matzapata/nitrum.git", package = "nitrum-sdk", branch = "develop" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

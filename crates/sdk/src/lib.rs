@@ -110,26 +110,22 @@ impl NitrumClient {
         Ok(body.data)
     }
 
-    /// `POST /attestation` — optional base64 fields; returns raw attestation document bytes.
+    /// `POST /attestation` — optional base64 fields; returns base64 attestation document.
     pub async fn attestation(
         &self,
         nonce_b64: Option<&str>,
         public_key_b64: Option<&str>,
         user_data_b64: Option<&str>,
-    ) -> Result<Vec<u8>, SdkError> {
-        let b64: String = self
-            .post_data(
-                "/attestation",
-                json!({
-                    "nonce": nonce_b64,
-                    "publicKey": public_key_b64,
-                    "userData": user_data_b64,
-                }),
-            )
-            .await?;
-        base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .map_err(|e| SdkError::Decode(e.to_string()))
+    ) -> Result<String, SdkError> {
+        self.post_data(
+            "/attestation",
+            json!({
+                "nonce": nonce_b64,
+                "publicKey": public_key_b64,
+                "userData": user_data_b64,
+            }),
+        )
+        .await
     }
 
     async fn post_data<T: for<'de> Deserialize<'de>>(

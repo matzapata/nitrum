@@ -189,17 +189,26 @@ describe("nitrum project (integration)", () => {
     assert.ok(data && typeof data === "object");
   });
 
-  it("POST /kv round-trips via data-plane KV storage", async () => {
+  it("POST /kv/set and /kv/get round-trip via data-plane KV storage", async () => {
     const key = `e2e_kv_${Date.now()}`;
     const value = "nitrum-kv-test";
-    const data = await fetchJson(`${baseUrl}/kv`, {
+    const setData = await fetchJson(`${baseUrl}/kv/set`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value }),
     });
-    assert.ok(data && typeof data === "object");
-    assert.equal(data.key, key);
-    assert.equal(data.value, value);
+    assert.ok(setData && typeof setData === "object");
+    assert.equal(setData.key, key);
+    assert.equal(setData.value, value);
+
+    const getData = await fetchJson(`${baseUrl}/kv/get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    assert.ok(getData && typeof getData === "object");
+    assert.equal(getData.key, key);
+    assert.equal(getData.value, value);
   });
 
   it("GET /env returns JSON", async () => {

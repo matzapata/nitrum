@@ -1,6 +1,6 @@
 # CLI project template
 
-Customer scaffold copied by `nitrum init`. Uses a git dependency on `sdk` and a project-directory Docker build context.
+Customer scaffold copied by `nitrum init`. Uses a git dependency on `nitrum-sdk` and a project-directory Docker build context.
 
 Also holds the bundled stack YAML:
 

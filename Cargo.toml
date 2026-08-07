@@ -43,7 +43,7 @@ unused_self = "allow"
 [workspace.dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 
-# Examples declare sdk via git (same as `nitrum init` / Docker builds). In-repo
+# Examples declare nitrum-sdk via git (same as `nitrum init` / Docker builds). In-repo
 # `cargo build -p hello` still uses the local crate.
 [patch."https://github.com/matzapata/nitrum.git"]
-sdk = { path = "crates/sdk" }
+nitrum-sdk = { path = "crates/sdk" }

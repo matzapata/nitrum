@@ -28,6 +28,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/pin-sdk.sh"
+
 if [[ -f "${SCRIPT_DIR}/.env" ]]; then
     set -a
     # shellcheck source=/dev/null
@@ -186,6 +189,7 @@ step_env_delete() {
 }
 
 step_init
+pin_sdk_git
 step_build
 step_env_set
 step_deploy

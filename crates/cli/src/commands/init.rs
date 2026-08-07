@@ -127,7 +127,7 @@ fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
 }
 
 /// Files under `template/` — customer scaffold + stack YAML for the CLI
-/// (not the monorepo `examples/hello` path-sdk demos).
+/// (not the monorepo `examples/hello` git-`nitrum-sdk` demos).
 macro_rules! bundled_template {
     ($rel:literal) => {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/template/", $rel))

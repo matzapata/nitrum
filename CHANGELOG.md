@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `crates/verify` — pure Rust AWS Nitro attestation verification (COSE, chain, PCR/nonce/age, TLS leaf hash bind).
-- `crates/sdk` — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `kv` / `attestation`).
+- `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `kv` / `attestation`).
 - `packages/node` (npm `nitrum-node`) — thin napi-rs bindings over `verify` (document verify + TLS leaf hash bind).
-- Rust rewrites of `examples/hello` and `examples/wallet` using `sdk`; `nitrum init` scaffolds the Rust hello example.
+- Rust rewrites of `examples/hello` and `examples/wallet` using `nitrum-sdk`; `nitrum init` scaffolds the Rust hello example.
 - CI: `cargo test --all-features`, multi-platform `nitrum-node` prebuilds (macOS/Linux/Windows), `cargo-deny`, Dependabot.
 - Release gates: tag releases require green CI before GHCR push, `nitrum-node` npm publish (with platform optional packages), and GitHub Release CLI assets.
 - OCI image labels: `org.opencontainers.image.revision`, `io.nitrum.git.sha`, and version metadata on runtime images.
