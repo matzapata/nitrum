@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
-const NITRUM_TOML: &str = include_str!("../../../samples/hello/nitrum.toml");
+const NITRUM_TOML: &str = include_str!("../../../examples/hello/nitrum.toml");
 
 struct BenchEnv {
     app: Router,

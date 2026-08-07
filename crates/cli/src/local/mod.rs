@@ -17,7 +17,7 @@ pub struct EnclaveLocalStack<'a> {
     /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`);
     /// pebble / local Compose build derived from `[runtime].data_plane` with a `-local` tag suffix.
     data_plane_image: String,
-    /// Docker build context (workspace root for in-repo samples, else project dir).
+    /// Docker build context (workspace root for in-repo examples, else project dir).
     build_context: PathBuf,
     /// Dockerfile path relative to [`Self::build_context`].
     dockerfile: String,

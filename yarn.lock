@@ -7,8 +7,8 @@
   resolved "https://registry.npmjs.org/@napi-rs/cli/-/cli-2.18.4.tgz"
   integrity sha512-SgJeA4df9DE2iAEpr3M2H0OKl/yjtg1BnRI5/JyowS71tUWhrfSu2LT0V3vlHET+g1hBVlrO60PmEXwUEKp8Mg==
 
-"blockchain-wallet-tests@file:/Users/matzapata/git/nitrum/nitrum/samples/wallet":
-  resolved "file:samples/wallet"
+"blockchain-wallet-tests@file:/Users/matzapata/git/nitrum/nitrum/examples/wallet":
+  resolved "file:examples/wallet"
   dependencies:
     nitrum-node "0.0.1"
 
@@ -17,8 +17,8 @@ husky@9.1.7:
   resolved "https://registry.npmjs.org/husky/-/husky-9.1.7.tgz"
   integrity sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==
 
-"nitrum-hello-tests@file:/Users/matzapata/git/nitrum/nitrum/samples/hello":
-  resolved "file:samples/hello"
+"nitrum-hello-tests@file:/Users/matzapata/git/nitrum/nitrum/examples/hello":
+  resolved "file:examples/hello"
   dependencies:
     nitrum-node "0.0.1"
 

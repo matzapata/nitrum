@@ -8,8 +8,8 @@ members = [
     "crates/verify",
     "crates/sdk",
     "packages/node",
-    "samples/hello",
-    "samples/wallet",
+    "examples/hello",
+    "examples/wallet",
 ]
 resolver = "2"
 

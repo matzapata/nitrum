@@ -238,7 +238,7 @@ services:
       - NET_ADMIN
     build:
       # Absolute paths set by `nitrum local` (`ENCLAVE_BUILD_CONTEXT` /
-      # `ENCLAVE_DOCKERFILE`). In-repo samples use the workspace root so
+      # `ENCLAVE_DOCKERFILE`). In-repo examples use the workspace root so
       # Dockerfiles can `COPY crates/sdk`; standalone `nitrum init` projects
       # use the project directory + `Dockerfile`.
       context: ${ENCLAVE_BUILD_CONTEXT}

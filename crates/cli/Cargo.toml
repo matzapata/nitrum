@@ -10,9 +10,9 @@ include = [
     "src/**/*",
     "../../infra/cloudformation/template.yml",
     "../../infra/docker/compose.yml",
-    "../../samples/hello/src/main.rs",
-    "../../samples/hello/package.json",
-    "../../samples/hello/tests/integration.test.mjs",
+    "../../examples/hello/src/main.rs",
+    "../../examples/hello/package.json",
+    "../../examples/hello/tests/integration.test.mjs",
 ]
 
 [lib]

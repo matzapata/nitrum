@@ -8,7 +8,7 @@ use tokio::process::Command;
 ///
 /// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name`.
 ///
-/// When the project lives inside a Nitrum Cargo workspace (in-repo samples), the Docker
+/// When the project lives inside a Nitrum Cargo workspace (in-repo examples), the Docker
 /// build context is the workspace root so path deps like `crates/sdk` resolve. Otherwise
 /// the project directory is the context (standalone `nitrum init` projects).
 ///
@@ -109,7 +109,7 @@ pub fn resolve_docker_build_paths(project_root: &Path) -> Result<(PathBuf, Strin
 ///
 /// Projects living under a `target/` directory (e.g. e2e workspaces created at
 /// `<repo>/target/nitrum-e2e-workspace/…`) must stay as standalone Docker contexts.
-/// Walking past `target/` would incorrectly treat them as in-repo samples and send
+/// Walking past `target/` would incorrectly treat them as in-repo examples and send
 /// the entire monorepo — including a huge `target/` tree — as the build context.
 fn find_nitrum_workspace_root(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
@@ -218,15 +218,15 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn in_repo_sample_uses_workspace_root_context() {
+    fn in_repo_example_uses_workspace_root_context() {
         let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .canonicalize()
             .unwrap();
-        let sample = workspace.join("samples/hello");
-        let (ctx, dockerfile) = resolve_docker_build_paths(&sample).unwrap();
+        let example = workspace.join("examples/hello");
+        let (ctx, dockerfile) = resolve_docker_build_paths(&example).unwrap();
         assert_eq!(ctx, workspace);
-        assert_eq!(dockerfile, "samples/hello/Dockerfile");
+        assert_eq!(dockerfile, "examples/hello/Dockerfile");
     }
 
     #[test]

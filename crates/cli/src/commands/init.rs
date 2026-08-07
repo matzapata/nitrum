@@ -130,7 +130,7 @@ const fn sample_main_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/src/main.rs"
+        "examples/hello/src/main.rs"
     ))
 }
 
@@ -195,7 +195,7 @@ const fn sample_integration_test_mjs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/tests/integration.test.mjs"
+        "examples/hello/tests/integration.test.mjs"
     ))
 }
 
@@ -203,6 +203,6 @@ const fn sample_package_json() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../",
-        "samples/hello/package.json"
+        "examples/hello/package.json"
     ))
 }

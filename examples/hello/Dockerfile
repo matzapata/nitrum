@@ -1,5 +1,5 @@
 # Build context must be the Nitrum repository root.
-# `nitrum build` detects the workspace and sets this automatically for in-repo samples.
+# `nitrum build` detects the workspace and sets this automatically for in-repo examples.
 #
 # The data-plane runtime image is Alpine/musl, so the app must be linked for
 # `x86_64-unknown-linux-musl`.
@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
 # Minimal workspace so `crates/sdk` workspace inheritance resolves without the full monorepo.
 RUN printf '%s\n' \
   '[workspace]' \
-  'members = ["crates/sdk", "samples/hello"]' \
+  'members = ["crates/sdk", "examples/hello"]' \
   'resolver = "2"' \
   '' \
   '[workspace.package]' \
@@ -34,11 +34,11 @@ RUN printf '%s\n' \
   > Cargo.toml
 
 COPY crates/sdk ./crates/sdk
-COPY samples/hello ./samples/hello
+COPY examples/hello ./examples/hello
 RUN cargo build --release -p hello --target x86_64-unknown-linux-musl
 
 FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
 WORKDIR /app
 COPY --from=builder /src/target/x86_64-unknown-linux-musl/release/hello /app/hello
-COPY samples/hello/nitrum.toml /app/nitrum.toml
+COPY examples/hello/nitrum.toml /app/nitrum.toml
 CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]

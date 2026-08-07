@@ -1,4 +1,4 @@
-# Keep workspace-root builds small (samples, bake, platform images).
+# Keep workspace-root builds small (examples, bake, platform images).
 # Without this, local `target/` alone can be tens of GB.
 .git
 .github
