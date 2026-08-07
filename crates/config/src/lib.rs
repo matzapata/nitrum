@@ -7,10 +7,11 @@ mod sections;
 pub use error::NitrumConfigError;
 pub use platform::PlatformLayout;
 pub use sections::{
-    DockerImageRef, DockerImageRefError, Egress, EgressPattern, EgressPatternError, HealthCheck,
-    HealthCheckPath, HealthCheckPathError, Project, ProjectName, ProjectNameError, Runtime,
-    Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError,
-    WellKnown,
+    DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,
+    ENV_RUNTIME_DATA_PLANE_IMAGE, ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern,
+    EgressPatternError, HealthCheck, HealthCheckPath, HealthCheckPathError, Project, ProjectName,
+    ProjectNameError, Runtime, Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination,
+    TlsTerminationError, WellKnown,
 };
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -56,9 +57,12 @@ impl TryFrom<&std::path::Path> for NitrumConfig {
             path: path_buf.clone(),
             source,
         })?;
-        toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
-            path: path_buf,
-            source,
-        })
+        let mut config: Self =
+            toml::from_str(&contents).map_err(|source| NitrumConfigError::Parse {
+                path: path_buf,
+                source,
+            })?;
+        config.runtime.apply_env_overrides()?;
+        Ok(config)
     }
 }

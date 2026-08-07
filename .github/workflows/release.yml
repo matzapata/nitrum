@@ -88,11 +88,11 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
-          cache-from: type=gha,scope=data-plane-dev
-          cache-to: type=gha,mode=max,scope=data-plane-dev
+          cache-from: type=gha,scope=data-plane-local
+          cache-to: type=gha,mode=max,scope=data-plane-local
           tags: |
-            ${{ env.GHCR_PREFIX }}/data-plane:${{ github.ref_name }}-dev
-            ${{ env.GHCR_PREFIX }}/data-plane:latest-dev
+            ${{ env.GHCR_PREFIX }}/data-plane:${{ github.ref_name }}-local
+            ${{ env.GHCR_PREFIX }}/data-plane:latest-local
 
       - name: Build and push nitro-cli
         uses: docker/build-push-action@v7

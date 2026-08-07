@@ -9,11 +9,11 @@
 #   ENCLAVE_URL              default: https://nitrum.local (override for http://127.0.0.1:443 if you prefer)
 #   ENCLAVE_TLS_INSECURE     default: 1
 #   NITRUM_LOCAL_LOGS_TAIL   passed to `nitrum local logs --tail` (default: 80)
-#   NITRUM_LOCAL_DATA_PLANE_IMAGE
-#                            optional; if unset, e2e builds a pebble data-plane image once and uses it
-#   NITRUM_E2E_REBUILD_DATA_PLANE
-#                            if non-empty, force `docker build` even when the local tag exists
-#                            (set after changing data-plane code, e.g. new crypto HTTP routes)
+#
+# Runtime images come from the project's nitrum.toml `[runtime]` section, optionally
+# overridden via NITRUM_RUNTIME_DATA_PLANE_IMAGE (and siblings). `nitrum local up`
+# automatically appends `-local` to the resolved data_plane tag. Build images with
+# `docker buildx bake` — see CONTRIBUTING.md. This script does not build images.
 #
 # Add 127.0.0.1 nitrum.local to /etc/hosts if needed.
 #
@@ -36,26 +36,7 @@ PARENT="${NITRUM_E2E_PARENT_DIR:-${REPO_ROOT}/target/nitrum-e2e-workspace}"
 NAME="${NITRUM_E2E_INIT_NAME:-nitrum-e2e-demo}"
 PROJECT="${PARENT}/${NAME}"
 LOG_TAIL="${NITRUM_LOCAL_LOGS_TAIL:-80}"
-E2E_DATA_PLANE_TAG="${NITRUM_E2E_DATA_PLANE_TAG:-nitrum-e2e-data-plane:local}"
 STACK_UP=0
-
-ensure_local_data_plane_image() {
-    if [[ -n "${NITRUM_LOCAL_DATA_PLANE_IMAGE:-}" ]]; then
-        echo "=== data-plane: using NITRUM_LOCAL_DATA_PLANE_IMAGE=${NITRUM_LOCAL_DATA_PLANE_IMAGE} ==="
-        return 0
-    fi
-    if [[ -n "${NITRUM_E2E_REBUILD_DATA_PLANE:-}" ]] || ! docker image inspect "${E2E_DATA_PLANE_TAG}" >/dev/null 2>&1; then
-        echo "=== data-plane: docker build ${E2E_DATA_PLANE_TAG} (pebble, linux/amd64) ==="
-        docker build --platform linux/amd64 \
-            -f "${REPO_ROOT}/crates/data-plane/Dockerfile" \
-            --build-arg FEATURES=pebble \
-            -t "${E2E_DATA_PLANE_TAG}" \
-            "${REPO_ROOT}"
-    else
-        echo "=== data-plane: reuse image ${E2E_DATA_PLANE_TAG} (set NITRUM_E2E_REBUILD_DATA_PLANE=1 to rebuild) ==="
-    fi
-    export NITRUM_LOCAL_DATA_PLANE_IMAGE="${E2E_DATA_PLANE_TAG}"
-}
 
 nitrum() {
     local -a cmd
@@ -77,6 +58,51 @@ step_init() {
     fi
     echo "=== init: ${NAME} in ${PARENT} ==="
     (cd "${PARENT}" && nitrum init "${NAME}")
+}
+
+# `nitrum init` pins sdk to git `develop`, which may not publish that crate yet (this branch).
+# Vendor the workspace sdk so the enclave image builds offline against local sources.
+vendor_sdk() {
+    local dest="${PROJECT}/vendor/sdk"
+    echo "=== vendor: copy crates/sdk -> ${dest} ==="
+    rm -rf "${PROJECT}/vendor"
+    mkdir -p "${PROJECT}/vendor"
+    cp -a "${REPO_ROOT}/crates/sdk" "${dest}"
+    # Drop workspace inheritance so the standalone Docker build can resolve the manifest.
+    cat >"${dest}/Cargo.toml" <<'EOF'
+[package]
+name = "sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+EOF
+    local cargo_toml="${PROJECT}/Cargo.toml"
+    if grep -q 'sdk = { git = "https://github.com/matzapata/nitrum.git"' "${cargo_toml}"; then
+        local tmp
+        tmp="$(mktemp)"
+        sed 's|sdk = { git = "https://github.com/matzapata/nitrum.git", package = "sdk", branch = "develop" }|sdk = { path = "vendor/sdk" }|' \
+            "${cargo_toml}" >"${tmp}"
+        mv "${tmp}" "${cargo_toml}"
+    fi
+    # Init Dockerfile only copies Cargo.toml + src; path-dep needs vendor in the build context.
+    local dockerfile="${PROJECT}/Dockerfile"
+    if ! grep -q 'COPY vendor' "${dockerfile}"; then
+        local tmp
+        tmp="$(mktemp)"
+        sed '/COPY Cargo.toml \.\//a\
+COPY vendor ./vendor
+' "${dockerfile}" >"${tmp}"
+        mv "${tmp}" "${dockerfile}"
+    fi
 }
 
 cleanup() {
@@ -124,7 +150,7 @@ step_down() {
 trap cleanup EXIT
 
 step_init
-ensure_local_data_plane_image
+vendor_sdk
 preclean_stack
 step_up
 step_logs

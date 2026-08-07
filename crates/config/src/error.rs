@@ -16,4 +16,6 @@ pub enum NitrumConfigError {
     },
     #[error("invalid `project.name` override: {message}")]
     NameOverrideInvalid { message: String },
+    #[error("invalid runtime image override {key}: {message}")]
+    RuntimeOverrideInvalid { key: String, message: String },
 }

@@ -1,0 +1,21 @@
+# Keep workspace-root builds small (samples, bake, platform images).
+# Without this, local `target/` alone can be tens of GB.
+.git
+.github
+.cursor
+.husky
+**/.nitrum
+target
+.cargo-home
+**/node_modules
+dist
+.venv
+.venv-diagrams
+**/__pycache__
+docs
+internal
+tests
+*.eif
+**/.DS_Store
+**/.env
+**/.env.*

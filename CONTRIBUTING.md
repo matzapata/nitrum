@@ -103,6 +103,48 @@ done
 
 Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
 
+## Building platform images for development
+
+Runtime images come from `[runtime]` in `nitrum.toml`. Override them for a session with:
+
+- `NITRUM_RUNTIME_DATA_PLANE_IMAGE`
+- `NITRUM_RUNTIME_CONTROL_PLANE_IMAGE`
+- `NITRUM_RUNTIME_NITRO_CLI_IMAGE`
+
+`nitrum local up` automatically appends `-local` to the resolved `data_plane` tag (for example `${NITRUM_RUNTIME_DATA_PLANE_IMAGE}-local` or `${NITRUM_RUNTIME_DATA_PLANE_IMAGE}:latest-local`). Cloud / `nitrum build` use the resolved image as-is.
+
+Build with the repo-root [`docker-bake.hcl`](docker-bake.hcl):
+
+```bash
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata
+export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+export NITRUM_RUNTIME_NITRO_CLI_IMAGE="${IMAGE_PREFIX}/nitro-cli:${TAG}"
+
+# Cloud / EIF path: enclave data-plane + control-plane + nitro-cli (push to a registry).
+docker buildx bake --push control-plane data-plane nitro-cli
+
+./tests/e2e/cloud.sh
+```
+
+```bash
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata
+export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+export NITRUM_RUNTIME_NITRO_CLI_IMAGE="${IMAGE_PREFIX}/nitro-cli:${TAG}"
+
+# Local Data Plane: uses pebble backend and disables enclave-only features
+docker buildx bake data-plane-local
+
+./tests/e2e/local.sh
+```
+
+E2E scripts (`tests/e2e/local.sh`, `tests/e2e/cloud.sh`) never build platform images themselves — bake first, then export the overrides.
+
 ## Pull requests
 
 - Keep changes focused and describe the motivation in the PR description.

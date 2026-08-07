@@ -5,7 +5,7 @@
 - Tags use [Semantic Versioning](https://semver.org/): `vMAJOR.MINOR.PATCH` (for example `v0.2.1`).
 - Pushing a `v*` tag runs the [Release workflow](../.github/workflows/release.yml), which:
   1. Runs the full [CI workflow](../.github/workflows/ci.yml) (Rust, `nitrum-node`, `cargo-deny`, CHANGELOG check).
-  2. Pushes Docker images to GHCR (`control-plane`, `data-plane`, `data-plane:*-dev`, `nitro-cli`).
+  2. Pushes Docker images to GHCR (`control-plane`, `data-plane`, `data-plane:*-local`, `nitro-cli`).
   3. Builds and attaches multi-platform CLI binaries to the GitHub Release.
 
 Before tagging, add a section to [CHANGELOG.md](../CHANGELOG.md) for the version (see `## [0.1.0]` format). CI verifies this for tag builds.

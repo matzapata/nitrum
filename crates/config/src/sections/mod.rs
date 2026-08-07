@@ -9,7 +9,10 @@ mod well_known;
 pub use egress::{Egress, EgressPattern, EgressPatternError};
 pub use health_check::{HealthCheck, HealthCheckPath, HealthCheckPathError};
 pub use project::{Project, ProjectName, ProjectNameError};
-pub use runtime::{DockerImageRef, DockerImageRefError, Runtime};
+pub use runtime::{
+    DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,
+    ENV_RUNTIME_DATA_PLANE_IMAGE, ENV_RUNTIME_NITRO_CLI_IMAGE, Runtime,
+};
 pub use scaling::{Scaling, ScalingError};
 pub use tls_termination::{TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError};
 pub use well_known::WellKnown;

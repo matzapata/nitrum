@@ -28,7 +28,8 @@ use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::filter::FilterFn;
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Telemetry configuration supplied by each binary at startup.
 pub struct TelemetryConfig {
@@ -179,7 +180,15 @@ fn install_with_otlp(providers: otel::Providers) -> TelemetryGuard {
     // events as OTLP log records. Both are bound to the registry below.
     let trace_layer =
         tracing_opentelemetry::layer().with_tracer(providers.tracer_provider.tracer("nitrum"));
-    let logs_layer = OpenTelemetryTracingBridge::new(&providers.logger_provider);
+    // Filter SDK/internal targets out of the bridge. Their own AfterShutdown
+    // warnings are emitted via `tracing`; feeding them back into the logger
+    // provider recurses until the tokio worker stack overflows.
+    let logs_layer = OpenTelemetryTracingBridge::new(&providers.logger_provider).with_filter(
+        FilterFn::new(|metadata| {
+            let target = metadata.target();
+            !(target.starts_with("opentelemetry") || target.starts_with("tonic"))
+        }),
+    );
 
     // Register globals so `opentelemetry::global::{tracer,meter}` resolve to the
     // OTLP providers (used by `metrics` and any library emitting OTel directly).

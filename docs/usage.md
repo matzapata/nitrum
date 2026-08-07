@@ -195,7 +195,14 @@ Local development via Docker Compose:
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
 
-The enclave Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from the environment variable `NITRUM_LOCAL_DATA_PLANE_IMAGE` if set; otherwise it defaults to `ghcr.io/matzapata/nitrum/data-plane:latest-dev`. Use a local or Pebble-enabled build when you are not using that default (for example the image produced by `tests/e2e/local.sh`).
+The enclave Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
+`[runtime].data_plane` in `nitrum.toml` (overridable via
+`NITRUM_RUNTIME_DATA_PLANE_IMAGE`), with a `-local` tag suffix applied
+automatically so Compose uses the pebble-enabled image
+(e.g. `…/data-plane:latest` → `…/data-plane:latest-local`). Digest pins from
+`nitrum init` map to `:latest-local` on the same repository. See
+[CONTRIBUTING.md](../CONTRIBUTING.md#building-platform-images-for-development)
+for `docker buildx bake` snippets.
 
 Use this while iterating on your application code before pushing a new EIF to AWS.
 
@@ -251,7 +258,7 @@ Options are defined in the `shared` crate; the sample project comments point to 
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.
   - **Implicit allows** (always merged when egress is enabled): IMDS (`169.254.169.254`), hostnames from `NITRUM_IMDS_BASE_URL` and `NITRUM_*_ENDPOINT_URL`, ACME directory host when `tls_termination.acme` or `NITRUM_ACME_DIRECTORY_URL` is set, regional AWS API endpoints (`kms`, `ssm`, `dynamodb`) using the AWS region resolved during data-plane bootstrap, and the effective OTLP collector endpoint (`NITRUM_OTLP_ENDPOINT` or the platform default).
   - **Environment:** `NITRUM_EGRESS_UPSTREAM_DNS` overrides the upstream resolver (`host:port`) used by the in-enclave DNS proxy (default: first `nameserver` from `/etc/resolv.conf`, typically gvproxy `192.168.127.1:53` on Nitro or Docker `127.0.0.11:53` locally).
-  - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the data-plane image after changes (`NITRUM_E2E_REBUILD_DATA_PLANE=1 ./tests/e2e/local.sh`).
+  - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the pebble data-plane with `docker buildx bake data-plane-local` after changes (see [CONTRIBUTING.md](../CONTRIBUTING.md#building-platform-images-for-development)).
   - **Limits:** UDP egress other than DNS is not filtered; IPv6 TCP is not redirected by the transparent proxy and may bypass the whitelist; connections to raw IPs that never went through an allowed DNS lookup are blocked unless they match implicit platform IPs.
 
 Edit `nitrum.toml` to match your app’s port, domain, and infrastructure expectations, then rebuild the EIF and redeploy when you change enclave-related settings.
@@ -287,7 +294,7 @@ docker pull ghcr.io/OWNER/nitrum/data-plane:v0.1.0
 docker inspect --format '{{ index .RepoDigests 0 }}' ghcr.io/OWNER/nitrum/data-plane:v0.1.0
 ```
 
-Floating tags (`:latest`, `:latest-dev`) are convenient for local iteration; production stacks should use digests so deploys cannot shift underneath you. See [releases.md](releases.md) for versioning policy.
+Floating tags (`:latest`, `:latest-local`) are convenient for local iteration; production stacks should use digests so deploys cannot shift underneath you. See [releases.md](releases.md) for versioning policy.
 
 ## Reproducible builds
 

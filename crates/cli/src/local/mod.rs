@@ -14,7 +14,8 @@ pub struct EnclaveLocalStack<'a> {
     project_root: &'a Path,
     /// Local compose tag for the app image (`nitrum-{name}:dev`).
     enclave_image: String,
-    /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`); pebble build for local Compose.
+    /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`);
+    /// pebble / local Compose build derived from `[runtime].data_plane` with a `-local` tag suffix.
     data_plane_image: String,
     /// Docker build context (workspace root for in-repo samples, else project dir).
     build_context: PathBuf,
@@ -32,8 +33,7 @@ impl<'a> EnclaveLocalStack<'a> {
         Ok(Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
-            data_plane_image: std::env::var("NITRUM_LOCAL_DATA_PLANE_IMAGE")
-                .unwrap_or_else(|_| "ghcr.io/matzapata/nitrum/data-plane:latest-dev".to_string()),
+            data_plane_image: cfg.runtime.data_plane.with_tag_suffix("local").to_string(),
             build_context,
             dockerfile,
         })
@@ -63,38 +63,27 @@ impl<'a> EnclaveLocalStack<'a> {
             .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .env("COMPOSE_DOCKER_CLI_BUILD", "0")
             .arg("compose")
+            // Inherit stdio (not `--progress quiet` + pipes): OrbStack's compose plugin can
+            // spin forever when stdout is a pipe, and quiet mode hides the enclave image build.
             .arg("--progress")
-            .arg("quiet")
+            .arg("plain")
             .arg("-f")
             .arg(compose_file)
             .args(["up", "--build", "-d"])
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
 
-        let output = cmd
-            .output()
+        let status = cmd
+            .status()
             .await
             .context("failed to spawn `docker compose`")?;
 
-        if output.status.success() {
+        if status.success() {
             return Ok(());
         }
 
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = [&*stderr, &*stdout]
-            .into_iter()
-            .map(str::trim)
-            .find(|s| !s.is_empty())
-            .unwrap_or("");
-
-        bail!(
-            "docker compose failed ({}){}{}",
-            output.status,
-            if detail.is_empty() { "" } else { "\n\n" },
-            detail,
-        );
+        bail!("docker compose failed ({status})");
     }
 
     /// Stop the local stack (equivalent to `docker compose down` with the Nitrum template).

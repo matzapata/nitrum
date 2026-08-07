@@ -106,8 +106,16 @@ pub fn resolve_docker_build_paths(project_root: &Path) -> Result<(PathBuf, Strin
 }
 
 /// Walk parents for a `Cargo.toml` that both is a workspace and contains `crates/sdk`.
+///
+/// Projects living under a `target/` directory (e.g. e2e workspaces created at
+/// `<repo>/target/nitrum-e2e-workspace/…`) must stay as standalone Docker contexts.
+/// Walking past `target/` would incorrectly treat them as in-repo samples and send
+/// the entire monorepo — including a huge `target/` tree — as the build context.
 fn find_nitrum_workspace_root(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
+        if dir.file_name().is_some_and(|name| name == "target") {
+            return None;
+        }
         let manifest = dir.join("Cargo.toml");
         let Ok(text) = std::fs::read_to_string(&manifest) else {
             continue;
@@ -202,4 +210,37 @@ pub async fn build_enclave_eif(
         if detail.is_empty() { "" } else { "\n\n" },
         detail,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn in_repo_sample_uses_workspace_root_context() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let sample = workspace.join("samples/hello");
+        let (ctx, dockerfile) = resolve_docker_build_paths(&sample).unwrap();
+        assert_eq!(ctx, workspace);
+        assert_eq!(dockerfile, "samples/hello/Dockerfile");
+    }
+
+    #[test]
+    fn project_under_target_stays_standalone_context() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let project = workspace.join("target/nitrum-docker-context-test/demo");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("Dockerfile"), "FROM scratch\n").unwrap();
+        let (ctx, dockerfile) = resolve_docker_build_paths(&project).unwrap();
+        assert_eq!(ctx, project.canonicalize().unwrap());
+        assert_eq!(dockerfile, "Dockerfile");
+        let _ = fs::remove_dir_all(workspace.join("target/nitrum-docker-context-test"));
+    }
 }
