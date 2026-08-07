@@ -11,8 +11,14 @@ name = "wallet-enclave"
 path = "src/main.rs"
 
 [dependencies]
+alloy = { version = "2.3", default-features = false, features = [
+    "std",
+    "consensus",
+    "eips",
+    "network",
+    "signer-local",
+] }
 axum = "0.8"
-ethers = { version = "2.0", default-features = false, features = ["rustls"] }
 hex = "0.4"
 hmac = "0.12"
 sdk = { git = "https://github.com/matzapata/nitrum.git", package = "nitrum-sdk", branch = "develop" }

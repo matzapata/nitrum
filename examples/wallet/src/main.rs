@@ -1,13 +1,15 @@
 //! Wallet enclave sample — generate encrypted keys and sign EIP-1559 txs.
 
+use alloy::consensus::{SignableTransaction, TxEip1559};
+use alloy::eips::eip2718::Encodable2718;
+use alloy::network::TxSignerSync;
+use alloy::primitives::{Address, Bytes, TxKind, U256};
+use alloy::signers::local::PrivateKeySigner;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use ethers::signers::{LocalWallet, Signer};
-use ethers::types::transaction::eip2718::TypedTransaction;
-use ethers::types::{Eip1559TransactionRequest, H160, NameOrAddress, U256};
 use hmac::{Hmac, Mac};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
@@ -245,32 +247,32 @@ async fn sign_wallet_inner(state: &AppState, body: SignBody) -> Result<String, A
         return Err(AppError::Internal("failed to sign transaction"));
     }
 
-    let wallet = LocalWallet::from_str(private_key_hex).map_err(|e| {
+    let signer: PrivateKeySigner = private_key_hex.parse().map_err(|e| {
         error!(error = %e, "invalid private key");
         AppError::Internal("failed to sign transaction")
     })?;
 
-    let to = H160::from_str(&body.tx_data.to).map_err(|e| {
+    let to = Address::from_str(&body.tx_data.to).map_err(|e| {
         error!(error = %e, "invalid to");
         AppError::Internal("failed to sign transaction")
     })?;
-    let req = Eip1559TransactionRequest {
-        to: Some(NameOrAddress::Address(to)),
-        nonce: Some(parse_u256(&body.tx_data.nonce)?),
-        chain_id: Some(parse_u64(&body.tx_data.chain_id)?.into()),
-        gas: Some(parse_u256(&body.tx_data.gas_limit)?),
-        max_fee_per_gas: Some(parse_u256(&body.tx_data.max_fee_per_gas)?),
-        max_priority_fee_per_gas: Some(parse_u256(&body.tx_data.max_priority_fee_per_gas)?),
-        value: Some(parse_u256(&body.tx_data.value)?),
-        ..Default::default()
+    let mut tx = TxEip1559 {
+        chain_id: parse_u64(&body.tx_data.chain_id)?,
+        nonce: parse_u64(&body.tx_data.nonce)?,
+        gas_limit: parse_u64(&body.tx_data.gas_limit)?,
+        max_fee_per_gas: parse_u128(&body.tx_data.max_fee_per_gas)?,
+        max_priority_fee_per_gas: parse_u128(&body.tx_data.max_priority_fee_per_gas)?,
+        to: TxKind::Call(to),
+        value: parse_u256(&body.tx_data.value)?,
+        access_list: Default::default(),
+        input: Bytes::new(),
     };
 
-    let typed: TypedTransaction = req.into();
-    let signature = wallet.sign_transaction(&typed).await.map_err(|e| {
+    let signature = signer.sign_transaction_sync(&mut tx).map_err(|e| {
         error!(error = %e, "sign_transaction failed");
         AppError::Internal("failed to sign transaction")
     })?;
-    let encoded = typed.rlp_signed(&signature);
+    let encoded = tx.into_signed(signature).encoded_2718();
     Ok(format!("0x{}", hex::encode(encoded)))
 }
 
@@ -314,8 +316,15 @@ fn parse_u64(v: &serde_json::Value) -> Result<u64, AppError> {
     })
 }
 
+fn parse_u128(v: &serde_json::Value) -> Result<u128, AppError> {
+    json_number_str(v)?.parse().map_err(|e| {
+        error!(error = %e, "u128 parse");
+        AppError::Internal("failed to sign transaction")
+    })
+}
+
 fn parse_u256(v: &serde_json::Value) -> Result<U256, AppError> {
-    U256::from_dec_str(&json_number_str(v)?).map_err(|e| {
+    U256::from_str(&json_number_str(v)?).map_err(|e| {
         error!(error = %e, "U256 parse");
         AppError::Internal("failed to sign transaction")
     })
