@@ -1,0 +1,33 @@
+[package]
+name = "wallet-enclave"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "wallet-enclave"
+path = "src/main.rs"
+
+[dependencies]
+alloy = { version = "2.3", default-features = false, features = [
+    "std",
+    "consensus",
+    "eips",
+    "network",
+    "signer-local",
+] }
+axum = "0.8"
+hex = "0.4"
+hmac = "0.12"
+sdk = { git = "https://github.com/matzapata/nitrum.git", package = "nitrum-sdk", branch = "develop" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "metrics"] }

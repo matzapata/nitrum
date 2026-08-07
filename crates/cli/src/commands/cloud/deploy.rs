@@ -1,4 +1,4 @@
-//! Deploy with AWS `CloudFormation` (bundled `samples/hello` template) and S3 EIF upload.
+//! Deploy with AWS `CloudFormation` (bundled `examples/hello` template) and S3 EIF upload.
 
 use anyhow::Result;
 use clap::Args;

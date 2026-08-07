@@ -1,5 +1,16 @@
 [workspace]
-members = ["crates/cli", "crates/control-plane", "crates/data-plane", "crates/config", "crates/telemetry"]
+members = [
+    "crates/cli",
+    "crates/control-plane",
+    "crates/data-plane",
+    "crates/config",
+    "crates/telemetry",
+    "crates/verify",
+    "crates/sdk",
+    "packages/node",
+    "examples/hello",
+    "examples/wallet",
+]
 resolver = "2"
 
 [workspace.package]
@@ -31,3 +42,8 @@ unused_self = "allow"
 
 [workspace.dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
+# Examples declare nitrum-sdk via git (same as `nitrum init` / Docker builds). In-repo
+# `cargo build -p hello` still uses the local crate.
+[patch."https://github.com/matzapata/nitrum.git"]
+nitrum-sdk = { path = "crates/sdk" }

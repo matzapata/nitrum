@@ -6,6 +6,7 @@ use tokio::process::Command;
 
 /// Build the project Dockerfile with a given data-plane base image and local tag (quiet).
 ///
+/// Build context is always the project directory (where `Dockerfile` and `nitrum.toml` live).
 /// The image should include `nitrum.toml`; the data-plane reads fixed SSM paths from `project.name`.
 ///
 /// # Errors
@@ -17,6 +18,9 @@ pub async fn build_enclave_image(
     data_plane_image: &str,
     image_tag: &str,
 ) -> Result<()> {
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("canonicalize {}", root.display()))?;
     let dockerfile = root.join("Dockerfile");
     if !dockerfile.is_file() {
         bail!(
@@ -27,7 +31,10 @@ pub async fn build_enclave_image(
     }
 
     let output = Command::new("docker")
-        .current_dir(root)
+        .current_dir(&root)
+        // BuildKit / buildx may try to pull local-only tags from a registry.
+        // Disable it so tags such as `…:latest-local` work as `FROM` inputs.
+        .env("DOCKER_BUILDKIT", "0")
         .arg("build")
         .arg("-q")
         .arg("--platform")

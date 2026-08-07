@@ -1,0 +1,7 @@
+node_modules/
+npm/
+target/
+*.node
+index.js
+index.d.ts
+Cargo.lock

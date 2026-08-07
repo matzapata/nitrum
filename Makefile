@@ -1,4 +1,4 @@
-.PHONY: lint format check deny test docs-diagrams lint-node typecheck-node test-node check-node
+.PHONY: lint format check deny test docs-diagrams test-node check-node
 
 lint:
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -18,13 +18,8 @@ docs-diagrams:
 	poetry install --no-root --with diagrams
 	poetry run python docs/diagrams/render_all.py
 
-lint-node:
-	npm run lint -w nitrum-node
-
-typecheck-node:
-	npm run typecheck -w nitrum-node
-
 test-node:
+	npm run build -w nitrum-node
 	npm test -w nitrum-node
 
-check-node: lint-node typecheck-node test-node
+check-node: test-node

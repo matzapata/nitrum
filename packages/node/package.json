@@ -1,0 +1,65 @@
+{
+  "name": "nitrum-node",
+  "version": "0.0.1",
+  "description": "Verify AWS Nitro Enclave attestation documents in Node.js (Rust-backed).",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "import": "./index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/matzapata/nitrum.git",
+    "directory": "packages/node"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "napi": {
+    "binaryName": "nitrum-node",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "create-npm-dirs": "napi create-npm-dirs",
+    "prepublishOnly": "napi prepublish -t npm --skip-gh-release",
+    "test": "node --test tests/smoke.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "aws",
+    "nitro",
+    "enclave",
+    "attestation",
+    "tee",
+    "cose",
+    "cbor",
+    "x509"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "3.8.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

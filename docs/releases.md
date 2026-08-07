@@ -4,11 +4,18 @@
 
 - Tags use [Semantic Versioning](https://semver.org/): `vMAJOR.MINOR.PATCH` (for example `v0.2.1`).
 - Pushing a `v*` tag runs the [Release workflow](../.github/workflows/release.yml), which:
-  1. Runs the full [CI workflow](../.github/workflows/ci.yml) (Rust, `nitrum-node`, `cargo-deny`, CHANGELOG check).
-  2. Pushes Docker images to GHCR (`control-plane`, `data-plane`, `data-plane:*-dev`, `nitro-cli`).
-  3. Builds and attaches multi-platform CLI binaries to the GitHub Release.
+  1. Runs the full [CI workflow](../.github/workflows/ci.yml) (Rust, multi-platform `nitrum-node` prebuilds, `cargo-deny`, CHANGELOG check).
+  2. Pushes Docker images to GHCR (`control-plane`, `data-plane`, `data-plane:*-local`, `nitro-cli`).
+  3. Publishes `nitrum-node` (and per-platform optional packages) to npm from the CI prebuilds.
+  4. Builds and attaches multi-platform CLI binaries to the GitHub Release.
 
-Before tagging, add a section to [CHANGELOG.md](../CHANGELOG.md) for the version (see `## [0.1.0]` format). CI verifies this for tag builds.
+Before tagging, add a section to [CHANGELOG.md](../CHANGELOG.md) for the version (see `## [0.1.0]` format). CI verifies this for tag builds. Set the npm package version via the git tag (`v1.2.3` → `nitrum-node@1.2.3`).
+
+### Secrets
+
+| Secret | Used by |
+|--------|---------|
+| `NPM_TOKEN` | Automation token (or granular token) that can publish `nitrum-node` and `nitrum-node-*` platform packages |
 
 ## Rust workspace
 
@@ -54,7 +61,7 @@ Pin images by digest in `nitrum.toml` when possible. See [usage.md — Runtime i
 In repository settings, you can require these CI jobs before merge:
 
 - Rust Format, Rust Lint, Rust Check, Rust Test
-- nitrum-node
+- nitrum-node (per-platform matrix)
 - Supply chain (cargo-deny)
 - CHANGELOG (on tag pushes only)
 

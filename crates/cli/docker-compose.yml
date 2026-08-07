@@ -1,7 +1,10 @@
 # Local development compose for the enclaves.
 #
+# The enclave image is built by `nitrum local up` (CLI), not by Compose.
+# Compose only runs the pre-tagged `ENCLAVE_IMAGE`.
+#
 # Usage:
-#   docker compose up            # start (previously built hello image)
+#   docker compose up            # start (requires ENCLAVE_IMAGE already built)
 #   docker compose down          # stop
 #
 # For domain nitrum.local (e.g. ACME cert), add to your host /etc/hosts:
@@ -25,8 +28,8 @@
 # Open Grafana at http://localhost:3000 to explore metrics, traces, and logs.
 #
 # Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
-# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production). Delete
-# `.nitrum/local-stack.yml` to refresh this template after upgrading the CLI.
+# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production).
+# `nitrum local` rewrites `.nitrum/local-stack.yml` from the CLI template on each up/down/logs.
 
 configs:
   pebble-config:
@@ -231,15 +234,12 @@ services:
       - "4318:4318" # OTLP/HTTP
 
   enclave:
+    # Image is built by `nitrum local up` via `build_enclave_image`.
     image: ${ENCLAVE_IMAGE}
     platform: linux/amd64
     pull_policy: never
     cap_add:
       - NET_ADMIN
-    build:
-      context: ..
-      args:
-        DATA_PLANE_IMAGE: ${DATA_PLANE_IMAGE}
     hostname: nitrum.local
     ports:
       - "443:443"

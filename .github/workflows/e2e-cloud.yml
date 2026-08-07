@@ -120,9 +120,9 @@ jobs:
       - name: Run E2E cloud tests
         env:
           AWS_REGION: ${{ inputs.aws_region }}
-          NITRUM_E2E_RUNTIME_CONTROL_PLANE: ${{ env.GHCR_PREFIX }}/control-plane:${{ github.sha }}
-          NITRUM_E2E_RUNTIME_DATA_PLANE: ${{ env.GHCR_PREFIX }}/data-plane:${{ github.sha }}
-          NITRUM_E2E_RUNTIME_NITRO_CLI: ${{ env.GHCR_PREFIX }}/nitro-cli:${{ github.sha }}
+          NITRUM_RUNTIME_CONTROL_PLANE_IMAGE: ${{ env.GHCR_PREFIX }}/control-plane:${{ github.sha }}
+          NITRUM_RUNTIME_DATA_PLANE_IMAGE: ${{ env.GHCR_PREFIX }}/data-plane:${{ github.sha }}
+          NITRUM_RUNTIME_NITRO_CLI_IMAGE: ${{ env.GHCR_PREFIX }}/nitro-cli:${{ github.sha }}
         run: |
           chmod +x ./tests/e2e/cloud.sh
           ./tests/e2e/cloud.sh

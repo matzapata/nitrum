@@ -16,7 +16,7 @@ pub struct UpArgs {
 
 pub async fn run(args: UpArgs) -> Result<()> {
     let project = CliProject::load(args.path, args.as_name)?;
-    let local_stack = EnclaveLocalStack::new(&project.root, &project.config);
+    let local_stack = EnclaveLocalStack::new(&project.root, &project.config)?;
     utils::with_spinner(
         "Starting local stack…",
         "Local stack started.",

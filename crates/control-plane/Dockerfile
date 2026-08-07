@@ -28,16 +28,30 @@ COPY crates/config/Cargo.toml crates/config/Cargo.toml
 COPY crates/data-plane/Cargo.toml crates/data-plane/Cargo.toml
 COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
 COPY crates/telemetry/Cargo.toml crates/telemetry/Cargo.toml
+COPY crates/verify/Cargo.toml crates/verify/Cargo.toml
+COPY crates/sdk/Cargo.toml crates/sdk/Cargo.toml
+COPY packages/node/Cargo.toml packages/node/Cargo.toml
+COPY examples/hello/Cargo.toml examples/hello/Cargo.toml
+COPY examples/wallet/Cargo.toml examples/wallet/Cargo.toml
 
-# Stub sources so workspace members parse (control-plane depends on config/telemetry; cli/data-plane are workspace members).
-RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/data-plane/benches crates/telemetry/src \
+# Stub sources so workspace members parse (control-plane depends on config/telemetry;
+# other crates are workspace members only).
+RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crates/data-plane/benches \
+    crates/telemetry/src crates/verify/src crates/sdk/src \
+    packages/node/src \
+    examples/hello/src examples/wallet/src \
     && echo 'fn main() {}' > crates/cli/src/main.rs \
     && echo 'fn main() {}' > crates/data-plane/src/main.rs \
     && echo 'fn main() {}' > crates/control-plane/src/main.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/crypto.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/ingress.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/tls_handshake.rs \
-    && touch crates/telemetry/src/lib.rs
+    && echo 'fn main() {}' > examples/hello/src/main.rs \
+    && echo 'fn main() {}' > examples/wallet/src/main.rs \
+    && touch crates/telemetry/src/lib.rs \
+    && touch crates/verify/src/lib.rs \
+    && touch crates/sdk/src/lib.rs \
+    && touch packages/node/src/lib.rs
 
 COPY crates/config/src crates/config/src
 COPY crates/telemetry/src crates/telemetry/src

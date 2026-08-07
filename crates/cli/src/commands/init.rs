@@ -8,7 +8,6 @@ use config::{
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
-use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -46,6 +45,8 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     fs::create_dir_all(directory.join("src"))
         .with_context(|| format!("create {}", directory.join("src").display()))?;
+    fs::create_dir_all(directory.join("tests"))
+        .with_context(|| format!("create {}", directory.join("tests").display()))?;
 
     let spinner = utils::style_spinner(
         ProgressBar::new_spinner(),
@@ -68,7 +69,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
         project: Project {
             name: project_name,
             port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
-            start_command: vec!["node".to_string(), "/app/src/main.js".to_string()],
+            start_command: vec!["/app/hello".to_string()],
         },
         runtime: Runtime {
             data_plane: DockerImageRef::try_new(&data_plane)?,
@@ -85,18 +86,16 @@ pub async fn run(args: InitArgs) -> Result<()> {
         },
     };
 
-    let writes: Vec<(&str, String)> = vec![
-        (
-            "src/instrumentation.js",
-            sample_instrumentation_js().to_string(),
-        ),
-        ("src/main.js", sample_main_js().to_string()),
-        ("package.json", sample_package_json(&args.name)?),
-        ("Dockerfile", sample_dockerfile().to_string()),
+    let writes: Vec<(&str, &str)> = vec![
+        ("src/main.rs", template_main_rs()),
+        ("Cargo.toml", template_cargo_toml()),
+        ("Dockerfile", template_dockerfile()),
         (
             "tests/integration.test.mjs",
-            sample_integration_test_mjs().to_string(),
+            template_integration_test_mjs(),
         ),
+        ("package.json", template_package_json()),
+        (".gitignore", "/target\n/Cargo.lock\n"),
     ];
 
     for (relative_path, contents) in writes {
@@ -127,51 +126,30 @@ fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
 
-const fn sample_main_js() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/src/main.js"
-    ))
+/// Files under `template/` — customer scaffold + stack YAML for the CLI
+/// (not the monorepo `examples/hello` git-`nitrum-sdk` demos).
+macro_rules! bundled_template {
+    ($rel:literal) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/template/", $rel))
+    };
 }
 
-const fn sample_instrumentation_js() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/src/instrumentation.js"
-    ))
+const fn template_main_rs() -> &'static str {
+    bundled_template!("src/main.rs")
 }
 
-fn sample_package_json(name: &str) -> Result<String> {
-    let mut value: Value = serde_json::from_str(sample_package_json_template())
-        .context("parse sample package.json")?;
-    if let Value::Object(map) = &mut value {
-        map.insert("name".to_string(), Value::String(name.to_string()));
-    }
-    serde_json::to_string_pretty(&value).context("serialize package.json")
+const fn template_cargo_toml() -> &'static str {
+    bundled_template!("Cargo.toml")
 }
 
-const fn sample_package_json_template() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/package.json"
-    ))
+const fn template_dockerfile() -> &'static str {
+    bundled_template!("Dockerfile")
 }
 
-const fn sample_dockerfile() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/Dockerfile"
-    ))
+const fn template_integration_test_mjs() -> &'static str {
+    bundled_template!("tests/integration.test.mjs")
 }
 
-const fn sample_integration_test_mjs() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "samples/hello/tests/integration.test.mjs"
-    ))
+const fn template_package_json() -> &'static str {
+    bundled_template!("package.json")
 }

@@ -72,7 +72,7 @@ feature-depth = 1
 # Documented exceptions for transitive deps without a fixed upgrade path yet.
 ignore = [
     { id = "RUSTSEC-2021-0127", reason = "serde_cbor via aws-nitro-enclaves-nsm-api; upstream crate archived." },
-    { id = "RUSTSEC-2025-0119", reason = "number_prefix via indicatif; unmaintained, no security impact for CLI." },
+    { id = "RUSTSEC-2024-0436", reason = "paste via alloy-primitives; unmaintained macro crate, no runtime security impact." },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile via rustls 0.23; ecosystem migration in progress." },
     { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.101.x via AWS SDK rustls 0.21; app TLS uses rustls 0.23 + webpki 0.103." },
     { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101.x via AWS SDK rustls 0.21; app TLS uses rustls 0.23 + webpki 0.103." },

@@ -16,7 +16,7 @@ pub struct DownArgs {
 
 pub async fn run(args: DownArgs) -> Result<()> {
     let project = CliProject::load(args.path, args.as_name)?;
-    let local_stack = EnclaveLocalStack::new(&project.root, &project.config);
+    let local_stack = EnclaveLocalStack::new(&project.root, &project.config)?;
     utils::with_spinner(
         "Stopping local stack…",
         "Local stack stopped.",

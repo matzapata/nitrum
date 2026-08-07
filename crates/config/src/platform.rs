@@ -3,7 +3,7 @@ use crate::sections::{Project, ProjectName};
 /// AWS naming contract for a Nitrum deployment: SSM paths, log groups, stack, and bucket names.
 ///
 /// Parameterized by [`ProjectName`] so multiple projects can share the same layout template.
-/// CloudFormation (`stack.yml`) creates resources at these paths; CLI and data-plane consume them.
+/// CloudFormation (`template/cloud-stack.yml`) creates resources at these paths; CLI and data-plane consume them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformLayout {
     /// Project identifier from `nitrum.toml` (`project.name`).

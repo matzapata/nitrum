@@ -18,15 +18,14 @@ Needed only if you use `**nitrum cloud`** (deploy, env, logs, destroy). Local-on
 
 ## Project layout and example
 
-`nitrum init [name]` by default creates a sample Node.js server, but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
+`nitrum init [name]` scaffolds from [`crates/cli/template`](../crates/cli/template) (git `nitrum-sdk` dependency, project-directory Docker build). You can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
 
-The repository includes a reference project under `samples/hello` which shows the end‑to‑end flow:
+In-repo demos under `examples/hello` and `examples/wallet` use the same project-directory Docker layout (git `nitrum-sdk` + workspace `[patch]` to local [`crates/sdk`](../crates/sdk)); they are not what `nitrum init` copies. Typical flow on a scaffolded or example project:
 
 - Build the EIF: `nitrum build`.
 - Set a simple environment variable: `nitrum cloud env set DEMO hello`.
 - Deploy the enclave: `nitrum cloud deploy`
 
-Use that sample as a concrete reference when wiring your own projects.
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
@@ -117,7 +116,7 @@ The request may be empty or use `Content-Type: application/json` with an optiona
   }
   ```
 
-The `samples/hello/src/main.js` file demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `samples/wallet/enclave/src/main.js` sample uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext` while still returning it in the HTTP response for the client-driven signing flow.
+The `examples/hello` Rust app demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `examples/wallet` example uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext`; see `examples/wallet/tests/integration.test.mjs` for the create-and-sign flow.
 
 ## Observability
 
@@ -131,7 +130,7 @@ Nitrum separates **platform** telemetry from **application** telemetry in OpenTe
 |-------|----------------|--------------------|--------------------------|
 | Control-plane | `control-plane` | `core` | `nitrum.enclave.restarts` |
 | Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.kms.duration.ms` |
-| Your app | `project.name` from `nitrum.toml` | `user-app` | your choice (samples use `app.*`) |
+| Your app | `project.name` from `nitrum.toml` | `user-app` | your choice (examples use `app.*`) |
 
 Platform binaries always set `service.namespace=nitrum`. When OTLP export is enabled, the data-plane also injects standard OpenTelemetry environment variables into your application process before it starts:
 
@@ -144,7 +143,7 @@ Platform binaries always set `service.namespace=nitrum`. When OTLP export is ena
 
 Your app uses the OpenTelemetry SDK for your language and reads those variables — no Nitrum-specific client is required. In `nitrum local`, open Grafana at `http://localhost:3000` and filter by `service.name` or `nitrum.component` to compare platform and app series. In the cloud, CloudWatch EMF uses `ServiceName` (from `service.name`) as the log stream name under `/nitrum/{project}/metrics`.
 
-See `samples/hello/src/instrumentation.js` and `samples/hello/src/main.js` for a minimal Node.js example (`app.crypto.ops`, `app.kv.duration.ms`).
+See `examples/hello/src/main.rs` for a minimal Rust example (`app.crypto.ops`, `app.kv.duration.ms`).
 
 ### `NITRUM_OTLP_ENDPOINT`
 
@@ -170,7 +169,7 @@ Telemetry only ever carries low-cardinality, non-sensitive attributes: service n
 
 ### `nitrum init [NAME]`
 
-Scaffold a new project with a sample app, default `nitrum.toml`, and `tests/integration.test.mjs` (Node’s test runner + optional `nitrum-node` attestation checks when `ENCLAVE_URL` points at a real deployment).
+Scaffold a new project from [`crates/cli/template`](../crates/cli/template): sample Rust app, `Dockerfile`, default `nitrum.toml`, and `tests/integration.test.mjs` (Node’s test runner + optional `nitrum-node` attestation checks when `ENCLAVE_URL` points at a real deployment).
 
 Typical first steps:
 
@@ -191,11 +190,18 @@ This command is the core of reproducible builds; see the dedicated section below
 
 Local development via Docker Compose:
 
-- `nitrum local up` — start the stack in the background.
+- `nitrum local up` — build the enclave image, then start the stack in the background.
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
 
-The enclave Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from the environment variable `NITRUM_LOCAL_DATA_PLANE_IMAGE` if set; otherwise it defaults to `ghcr.io/matzapata/nitrum/data-plane:latest-dev`. Use a local or Pebble-enabled build when you are not using that default (for example the image produced by `tests/e2e/local.sh`).
+The enclave image is built by the CLI (not Compose) before `up`. The Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
+`[runtime].data_plane` in `nitrum.toml` (overridable via
+`NITRUM_RUNTIME_DATA_PLANE_IMAGE`), with a `-local` tag suffix applied
+automatically so the pebble-enabled image is used
+(e.g. `…/data-plane:latest` → `…/data-plane:latest-local`). Digest pins from
+`nitrum init` map to `:latest-local` on the same repository. See
+[CONTRIBUTING.md](../CONTRIBUTING.md#building-platform-images-for-development)
+for `docker buildx bake` snippets.
 
 Use this while iterating on your application code before pushing a new EIF to AWS.
 
@@ -251,7 +257,7 @@ Options are defined in the `shared` crate; the sample project comments point to 
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.
   - **Implicit allows** (always merged when egress is enabled): IMDS (`169.254.169.254`), hostnames from `NITRUM_IMDS_BASE_URL` and `NITRUM_*_ENDPOINT_URL`, ACME directory host when `tls_termination.acme` or `NITRUM_ACME_DIRECTORY_URL` is set, regional AWS API endpoints (`kms`, `ssm`, `dynamodb`) using the AWS region resolved during data-plane bootstrap, and the effective OTLP collector endpoint (`NITRUM_OTLP_ENDPOINT` or the platform default).
   - **Environment:** `NITRUM_EGRESS_UPSTREAM_DNS` overrides the upstream resolver (`host:port`) used by the in-enclave DNS proxy (default: first `nameserver` from `/etc/resolv.conf`, typically gvproxy `192.168.127.1:53` on Nitro or Docker `127.0.0.11:53` locally).
-  - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the data-plane image after changes (`NITRUM_E2E_REBUILD_DATA_PLANE=1 ./tests/e2e/local.sh`).
+  - **Local dev:** the Compose `enclave` service needs `CAP_NET_ADMIN`; rebuild the pebble data-plane with `docker buildx bake data-plane-local` after changes (see [CONTRIBUTING.md](../CONTRIBUTING.md#building-platform-images-for-development)).
   - **Limits:** UDP egress other than DNS is not filtered; IPv6 TCP is not redirected by the transparent proxy and may bypass the whitelist; connections to raw IPs that never went through an allowed DNS lookup are blocked unless they match implicit platform IPs.
 
 Edit `nitrum.toml` to match your app’s port, domain, and infrastructure expectations, then rebuild the EIF and redeploy when you change enclave-related settings.
@@ -287,7 +293,7 @@ docker pull ghcr.io/OWNER/nitrum/data-plane:v0.1.0
 docker inspect --format '{{ index .RepoDigests 0 }}' ghcr.io/OWNER/nitrum/data-plane:v0.1.0
 ```
 
-Floating tags (`:latest`, `:latest-dev`) are convenient for local iteration; production stacks should use digests so deploys cannot shift underneath you. See [releases.md](releases.md) for versioning policy.
+Floating tags (`:latest`, `:latest-local`) are convenient for local iteration; production stacks should use digests so deploys cannot shift underneath you. See [releases.md](releases.md) for versioning policy.
 
 ## Reproducible builds
 

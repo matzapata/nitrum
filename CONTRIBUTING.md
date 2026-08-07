@@ -5,12 +5,12 @@ Thanks for your interest in Nitrum. This document describes how to work on the r
 ## Development setup
 
 - **Rust**: MSRV **1.95** ([rustup](https://rustup.rs/)); pinned in [`rust-toolchain.toml`](rust-toolchain.toml) and [`Cargo.toml`](Cargo.toml) `workspace.package.rust-version`.
-- **Node.js**: **22** recommended for `packages/nitrum-node` (engines: `>=18`).
+- **Node.js**: **22** recommended for `packages/node` / `nitrum-node` (engines: `>=18`).
 - **Docker**: Used for local enclave builds (`nitrum build`), `nitrum describe`, and `nitrum local` (Compose).
 - **Python**: `3.11+` for documentation tooling.
 - **Graphviz**: Required to render diagram PNG files (`dot` binary must be on `PATH`).
 - **Poetry**: Python dependency manager used for docs diagram generation.
-- **make** (optional): Targets in the [`Makefile`](Makefile) — `format`, `lint`, `check` (format+lint), `deny`, `test`, `lint-node` / `typecheck-node` / `test-node` / `check-node`, `docs-diagrams`.
+- **make** (optional): Targets in the [`Makefile`](Makefile) — `format`, `lint`, `check` (format+lint), `deny`, `test`, `test-node` / `check-node`, `docs-diagrams`.
 
 Clone the repo and run from the workspace root:
 
@@ -20,7 +20,7 @@ make test
 make deny
 ```
 
-For the TypeScript verifier package (run `npm ci` once after clone):
+For the Node napi bindings (run `npm ci` once after clone):
 
 ```bash
 make check-node
@@ -60,10 +60,10 @@ Before opening a pull request:
 ```bash
 make check
 make deny
-make lint-node
+make check-node
 ```
 
-CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` lint/typecheck/test, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
+CI runs Rust fmt/clippy/check/test (with `--all-features`), multi-platform `nitrum-node` builds/smoke tests, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
 
 ## Releases
 
@@ -77,17 +77,17 @@ Reproducible k6 load against a **deployed** enclave (not `nitrum local`). Prefer
 
 ```bash
 # macOS
-brew install k6 jq
+brew install k6 jq git
 
 # Amazon Linux 2023
 sudo dnf install -y https://dl.k6.io/rpm/repo.rpm
-sudo dnf install -y k6 jq
+sudo dnf install -y k6 jq git
 ```
 
 **Single run** (default: `GET /health` then `POST /crypto`, 50 VUs × 30s):
 
 ```bash
-ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
+ENCLAVE_URL=https://nitrum-Nitro-tdBLyChTb8X7-3f340fbc356dd2ad.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
 ```
 
 **VU sweep** (capacity curve; run `run-macro.sh` at several concurrencies):
@@ -102,6 +102,54 @@ done
 ```
 
 Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
+
+## Building platform images for development
+
+Runtime images come from `[runtime]` in `nitrum.toml`. Override them for a session with:
+
+- `NITRUM_RUNTIME_DATA_PLANE_IMAGE`
+- `NITRUM_RUNTIME_CONTROL_PLANE_IMAGE`
+- `NITRUM_RUNTIME_NITRO_CLI_IMAGE`
+
+`nitrum local up` automatically appends `-local` to the resolved `data_plane` tag (for example `${NITRUM_RUNTIME_DATA_PLANE_IMAGE}-local` or `${NITRUM_RUNTIME_DATA_PLANE_IMAGE}:latest-local`). Cloud / `nitrum build` use the resolved image as-is.
+
+Build with the repo-root [`docker-bake.hcl`](docker-bake.hcl):
+
+```bash
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata
+
+# Aws overrides
+export AWS_PROFILE=nitrum
+export AWS_REGION=us-east-1
+
+# Overrides for cloud.sh running the cli
+export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+export NITRUM_RUNTIME_NITRO_CLI_IMAGE="${IMAGE_PREFIX}/nitro-cli:${TAG}"
+
+# Cloud / EIF path: enclave data-plane + control-plane + nitro-cli (push to a registry).
+docker buildx bake --push control-plane data-plane nitro-cli
+
+./tests/e2e/cloud.sh
+```
+
+```bash
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata
+
+# Locally we only use data-plane
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+
+# Local Data Plane: uses pebble backend and disables enclave-only features
+docker buildx bake data-plane-local
+
+./tests/e2e/local.sh
+```
+
+E2E scripts (`tests/e2e/local.sh`, `tests/e2e/cloud.sh`) never build platform images themselves — bake first, then export the overrides.
 
 ## Pull requests
 

@@ -282,15 +282,17 @@ sequenceDiagram
 
 ### Local development
 
-`nitrum local` brings up a Docker Compose stack so you can iterate without launching a full AWS deployment. The exact topology is defined in the bundled Compose template the CLI materializes under your project.
+`nitrum local` builds the enclave Docker image first, then brings up a Docker Compose stack (image only—no Compose `build:`) so you can iterate without launching a full AWS deployment. The exact topology is defined in the bundled Compose template the CLI materializes under your project.
 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
     participant CLI as nitrum
+    participant Docker as Docker
     participant DC as Docker Compose
 
     Dev->>CLI: nitrum local up
+    CLI->>Docker: build enclave image
     CLI->>DC: up -d
     DC-->>Dev: services running
     Dev->>CLI: nitrum local logs

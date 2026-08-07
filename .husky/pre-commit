@@ -12,13 +12,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 echo "3. Running Rust tests..."
 cargo test --all-features
 
-echo "4. Running Node.js linter..."
-npm run lint -w nitrum-node
+echo "4. Building Node.js native bindings..."
+npm run build -w nitrum-node
 
-echo "5. Running Node.js typecheck..."
-npm run typecheck -w nitrum-node
-
-echo "6. Running Node.js tests..."
+echo "5. Running Node.js tests..."
 npm test -w nitrum-node
 
 echo "=== All checks passed successfully! ==="
