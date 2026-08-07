@@ -102,15 +102,11 @@ async fn run(state: Arc<IngressState>, crypto: Arc<CryptoClient>) -> anyhow::Res
 /// Build the HTTPS ingress router (well-known routes + proxy fallback).
 #[doc(hidden)]
 pub fn build_https_router(state: Arc<IngressState>) -> Router {
-    let mut https_router = Router::new();
-    if state.config.well_known.enclave_status {
-        https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
-    }
-    if state.config.well_known.enclave_attestation {
-        https_router =
-            https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
-    }
-    https_router.fallback(ingress_proxy).with_state(state)
+    Router::new()
+        .route("/.well-known/enclave/status", get(ingress_status))
+        .route("/.well-known/enclave/attestation", get(ingress_attestation))
+        .fallback(ingress_proxy)
+        .with_state(state)
 }
 
 async fn ingress_status() -> impl IntoResponse {

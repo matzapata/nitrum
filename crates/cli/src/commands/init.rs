@@ -3,8 +3,8 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    DockerImageRef, Egress, EgressPattern, HealthCheck, NitrumConfig, Project, ProjectName,
-    Runtime, Scaling, TlsTermination, WellKnown,
+    Cloud, DockerImageRef, Egress, EgressPattern, HealthCheck, NitrumConfig, Project, ProjectName,
+    Runtime, Scaling, TlsTermination,
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
@@ -76,7 +76,6 @@ pub async fn run(args: InitArgs) -> Result<()> {
             control_plane: DockerImageRef::try_new(&control_plane)?,
             nitro_cli: DockerImageRef::try_new(&nitro_cli)?,
         },
-        well_known: WellKnown::default(),
         health_check: HealthCheck::default(),
         scaling: Scaling::default(),
         tls_termination: TlsTermination::default(),
@@ -84,6 +83,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
             enabled: true,
             destinations: vec![EgressPattern::try_new(r"ipify\.org$")?],
         },
+        cloud: Cloud::default(),
     };
 
     let writes: Vec<(&str, &str)> = vec![

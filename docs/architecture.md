@@ -18,7 +18,7 @@ The generated diagrams used in this document are stored in `docs/diagrams/output
 
 | Crate | Notable modules |
 | ----- | --------------- |
-| `config` | `sections/` (`project`, `runtime`, `health_check`, `scaling`, `tls_termination`, `egress`, `well_known`), `platform` (`PlatformLayout` for SSM/S3/CFN paths), `artifact` (EIF naming conventions) |
+| `config` | `sections/` (`project`, `runtime`, `health_check`, `scaling`, `cloud`, `tls_termination`, `egress`), `platform` (`PlatformLayout` for SSM/S3/CFN paths), `artifact` (EIF naming conventions) |
 | `cli` | `artifact/` (build, describe), `cloud/`, `storage/`, `local/`, `project/` (`CliProject`), `commands/` |
 | `control-plane` | `bootstrap/` (orchestration, config), `enclave/` (supervisor, nitro-cli), `networking/` (gvproxy, forwarder), `storage/` |
 | `data-plane` | `bootstrap/` (config, IMDS, SSM), `networking/` (tap, vsock, forwarding), `ingress/` (TLS, ACME), `crypto/`, `storage/`, `egress/`, `runner/` |
@@ -50,7 +50,7 @@ The control-plane stays on the host: it manages gvproxy (VSOCK, TAP, port forwar
 
 ## Control-plane and data-plane (detailed)
 
-In Nitrum the `data-plane` crate: `ingress/server.rs` terminates TLS, optionally exposes `/.well-known/enclave/*` per `[well_known]` in `nitrum.toml`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and `project.port` from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
+In Nitrum the `data-plane` crate: `ingress/server.rs` terminates TLS, always exposes `/.well-known/enclave/status` and `/.well-known/enclave/attestation`, drives ACME HTTP-01 when enabled, and reverse-proxies everything else to your process on `127.0.0.1` and `project.port` from `nitrum.toml`. The control-plane crate kicks it all off, downloads the artifacts, runs gvproxy and nitro-cli; it does not terminate application HTTPS.
 
 ### TLS termination, certificate storage, and sync
 
@@ -90,6 +90,11 @@ That key is derived from a KMS data key:
   - It calls `Decrypt` with a Nitro `Recipient` so that KMS only returns the plaintext to enclaves whose PCRs match the configured policy.
   - It re-derives the data-plane encryption key and decrypts the previously stored certificate and other internal secrets.
 
+**KMS key policy (CloudFormation):**
+
+- **Decrypt** is allowed for the account root principal with a condition on `kms:RecipientAttestation:ImageSha384` equal to the deployed EIF’s PCR0 (`EifImageSha384`). IAM still decides which roles may call `kms:Decrypt`; only a genuine enclave with that measurement can satisfy the attestation condition. This is the standard Nitro Enclave pattern.
+- **Administrator** (`KmsAdministrator` statement): either account root (`cloud.kms_administrator_role_arn` empty / `AWS_ACCOUNT_ROOT`) or a specific IAM principal ARN. That principal alone may call `kms:PutKeyPolicy` and related admin APIs — including rotating the PCR0 condition when you deploy a new EIF. The deploying identity must match that ARN (or assume that role), or stack updates fail with `AccessDenied` on `kms:PutKeyPolicy`.
+
 This gives you a single logical encryption key per project, enforced by KMS policy and Nitro attestation, while allowing any healthy enclave instance in that project to restore and use the same TLS identity and platform secrets.
 
 ### Attestation and platform APIs
@@ -101,7 +106,7 @@ The data-plane exposes a small HTTP surface alongside your application:
   - Binds the document to the current TLS certificate by including a hash of the certificate in the NSM request.
   - Returns a base64‑encoded document that clients can verify against a known PCR policy and the expected TLS public key.
 - `GET /.well-known/enclave/status`
-  - Returns a small JSON object describing the data-plane’s health (for example, whether ACME completed, whether storage/KMS are reachable, and whether the application health check passes).
+  - Returns `{"status":"ok"}`. Used by NLB HTTPS health checks; it is not a deep readiness probe for ACME/KMS/app.
 - Application routes
   - Everything that is not under `/.well-known/enclave/*` (when those routes are enabled) is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<project.port>`.
 
@@ -336,7 +341,7 @@ sequenceDiagram
 
 ## Secrets and configuration
 
-Runtime and deployment parameters live in `nitrum.toml` at the project root (`[project]`, `[runtime]`, service port, health checks, scaling hints, TLS, egress options). The `config` crate defines the schema; see [usage.md](usage.md) for a short reference.
+Runtime and deployment parameters live in `nitrum.toml` at the project root (`[project]`, `[runtime]`, `[scaling]`, `[cloud]`, TLS, egress, and related sections). The `config` crate defines the schema; see [usage.md](usage.md) for a short reference.
 
 Application secrets are kept separate from platform encryption keys and certificates:
 

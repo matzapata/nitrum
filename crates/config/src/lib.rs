@@ -7,11 +7,13 @@ mod sections;
 pub use error::NitrumConfigError;
 pub use platform::PlatformLayout;
 pub use sections::{
-    DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,
-    ENV_RUNTIME_DATA_PLANE_IMAGE, ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern,
-    EgressPatternError, HealthCheck, HealthCheckPath, HealthCheckPathError, Project, ProjectName,
-    ProjectNameError, Runtime, Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination,
-    TlsTerminationError, WellKnown,
+    ALLOWED_INSTANCE_TYPES, ALLOWED_LOG_RETENTION_DAYS, Cloud, CloudError, DockerImageRef,
+    DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE, ENV_RUNTIME_DATA_PLANE_IMAGE,
+    ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern, EgressPatternError,
+    HOST_MEMORY_RESERVE_MIB, HOST_VCPU_RESERVE, HealthCheck, HealthCheckPath, HealthCheckPathError,
+    InstanceTypeCapacity, Project, ProjectName, ProjectNameError, Runtime, Scaling, ScalingError,
+    TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError, lookup_instance_type,
+    validate_enclave_fit,
 };
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -19,16 +21,29 @@ pub struct NitrumConfig {
     pub project: Project,
     #[serde(default)]
     pub runtime: Runtime,
-    #[serde(default)]
-    pub well_known: WellKnown,
     pub health_check: HealthCheck,
     pub scaling: Scaling,
     pub tls_termination: TlsTermination,
     #[serde(default)]
     pub egress: Egress,
+    /// CloudFormation-only settings (`nitrum local` ignores this section).
+    #[serde(default)]
+    pub cloud: Cloud,
 }
 
 impl NitrumConfig {
+    /// Validate `[cloud]` rules that depend on `[scaling]` (e.g. safe rolling headroom).
+    ///
+    /// Call before cloud deploy. Not enforced on parse so local-only configs with
+    /// `max_replicas == desired` still load when `[cloud]` uses defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CloudError`] when cloud settings are inconsistent with scaling.
+    pub fn validate_cloud(&self) -> Result<(), CloudError> {
+        self.cloud.validate_with_scaling(&self.scaling)
+    }
+
     /// Replace [`Project::name`] when `override_name` is [`Some`], using the same
     /// rules as `project.name` in `nitrum.toml`.
     ///

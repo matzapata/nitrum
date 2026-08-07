@@ -72,9 +72,9 @@ Parameters:
 
   AsgMaxSize:
     Type: Number
-    Default: 1
+    Default: 2
     MinValue: 1
-    Description: Auto Scaling group maximum size (raise to scale out).
+    Description: Auto Scaling group maximum size (raise to scale out; need desired+1 for safe rolling).
 
   AsgDesiredCapacity:
     Type: Number
@@ -97,6 +97,48 @@ Parameters:
     MaxValue: 61440
     Description: >
       Enclave memory in MiB (nitro-cli --memory). Must fit the instance and match allocator memory_mib.
+
+  InstanceType:
+    Type: String
+    Default: m6i.xlarge
+    Description: >
+      EC2 instance type for Nitro Enclave hosts. Must be Nitro Enclave–capable and large enough
+      for EnclaveCpuCount / EnclaveMemoryMib (parent reserves 2 vCPUs and 2048 MiB).
+
+  RollingMinInstancesInService:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: >
+      AutoScalingRollingUpdate MinInstancesInService. Use 1 (or more) for zero-downtime rolling;
+      0 for faster/cheaper replace-in-place (brief downtime).
+
+  RollingPauseTime:
+    Type: String
+    Default: PT5M
+    Description: >
+      AutoScalingRollingUpdate PauseTime (ISO-8601 duration). PT5M gives enclaves time to become
+      healthy; PT0S for fastest updates when RollingMinInstancesInService is 0.
+
+  EnableXRayTracing:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      When true, ADOT exports OTLP traces to X-Ray. When false (default), metrics and CloudWatch
+      Logs still export; no X-Ray ingestion (cheaper for development).
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 7
+    Description: CloudWatch Logs retention for data-plane, control-plane, and metrics log groups.
+
+  SnsAlarmTopicArn:
+    Type: String
+    Default: ''
+    Description: >
+      Optional SNS topic ARN for CloudWatch alarms (unhealthy NLB targets, ASG capacity).
+      Empty string disables alarm resources.
 
   LatestAmazonLinux2023Ami:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -143,6 +185,8 @@ Parameters:
 Conditions:
   RetainData: !Equals [!Ref Retain, 'true']
   KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
+  EnableXRay: !Equals [!Ref EnableXRayTracing, 'true']
+  HasSnsAlarmTopic: !Not [!Equals [!Ref SnsAlarmTopicArn, '']]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -573,6 +617,9 @@ Resources:
         Enabled: true
       SSESpecification:
         SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [RetainData, true, false]
+      DeletionProtectionEnabled: !If [RetainData, true, false]
 
   # ── SSM Parameters ───────────────────────────────────────────────────────────
   NitrumKmsKeyParam:
@@ -602,7 +649,7 @@ Resources:
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
       LogGroupName: !Sub "/nitrum/${ProjectName}/data-plane"
-      RetentionInDays: 7
+      RetentionInDays: !Ref LogRetentionInDays
 
   ControlPlaneLogGroup:
     Type: AWS::Logs::LogGroup
@@ -610,7 +657,7 @@ Resources:
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
       LogGroupName: !Sub "/nitrum/${ProjectName}/control-plane"
-      RetentionInDays: 7
+      RetentionInDays: !Ref LogRetentionInDays
 
   # Target log group for the ADOT collector's awsemf exporter (CloudWatch extracts metrics from
   # the EMF documents written here into the "Nitrum" namespace).
@@ -620,7 +667,7 @@ Resources:
     UpdateReplacePolicy: !If [RetainData, Retain, Delete]
     Properties:
       LogGroupName: !Sub "/nitrum/${ProjectName}/metrics"
-      RetentionInDays: 7
+      RetentionInDays: !Ref LogRetentionInDays
 
   # ── IAM (CloudFormation-generated physical names) ────────────────────────────
   InstanceRole:
@@ -684,14 +731,17 @@ Resources:
                   - !Sub "${MetricsLogGroup.Arn}:*"
 
               # X-Ray ingestion for the ADOT collector's awsxray exporter (trace segments).
-              - Sid: XRayTraceIngestion
-                Effect: Allow
-                Action:
-                  - xray:PutTraceSegments
-                  - xray:PutTelemetryRecords
-                  - xray:GetSamplingRules
-                  - xray:GetSamplingTargets
-                Resource: "*"
+              - !If
+                - EnableXRay
+                - Sid: XRayTraceIngestion
+                  Effect: Allow
+                  Action:
+                    - xray:PutTraceSegments
+                    - xray:PutTelemetryRecords
+                    - xray:GetSamplingRules
+                    - xray:GetSamplingTargets
+                  Resource: "*"
+                - !Ref AWS::NoValue
 
               - Sid: SsmParams
                 Effect: Allow
@@ -720,7 +770,7 @@ Resources:
       LaunchTemplateName: !Sub "${ProjectName}-${EifVersionLabel}"
       LaunchTemplateData:
         ImageId: !Ref LatestAmazonLinux2023Ami
-        InstanceType: m6i.xlarge
+        InstanceType: !Ref InstanceType
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
         SecurityGroupIds: [!Ref NitroInstanceSG]
@@ -805,11 +855,11 @@ Resources:
 
               # ── OpenTelemetry Collector (ADOT) ─────────────────────────────────────────────
               # Receives OTLP/gRPC on :4317 and exports to CloudWatch (EMF metrics in the
-              # "Nitrum" namespace), CloudWatch Logs (per-service log groups), and X-Ray.
-              # Runs in the control-plane container's network namespace. The control-plane
-              # reaches it at 127.0.0.1:4317, and Docker publishes the same port on the
-              # parent host so the enclave can reach it via the parent private IPv4 from IMDS.
+              # "Nitrum" namespace), CloudWatch Logs (per-service log groups), and optionally X-Ray
+              # when EnableXRayTracing=true. Runs in the control-plane container's network namespace.
               mkdir -p /opt/nitrum
+              ENABLE_XRAY="${EnableXRayTracing}"
+              if [ "$ENABLE_XRAY" = "true" ]; then
               cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
               receivers:
                 otlp:
@@ -842,6 +892,35 @@ Resources:
                     processors: [batch]
                     exporters: [awscloudwatchlogs]
               OTEL_EOF
+              else
+              cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
+              receivers:
+                otlp:
+                  protocols:
+                    grpc:
+                      endpoint: 0.0.0.0:4317
+              processors:
+                batch:
+              exporters:
+                awsemf:
+                  namespace: Nitrum
+                  log_group_name: "/nitrum/${ProjectName}/metrics"
+                  log_stream_name: "{ServiceName}"
+                awscloudwatchlogs:
+                  log_group_name: "/nitrum/${ProjectName}/{ServiceName}"
+                  log_stream_name: "otel"
+              service:
+                pipelines:
+                  metrics:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsemf]
+                  logs:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awscloudwatchlogs]
+              OTEL_EOF
+              fi
 
               docker pull "${OtelCollectorImage}"
 
@@ -874,8 +953,8 @@ Resources:
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MaxBatchSize: 1
-        MinInstancesInService: 0
-        PauseTime: PT0S
+        MinInstancesInService: !Ref RollingMinInstancesInService
+        PauseTime: !Ref RollingPauseTime
     Properties:
       MinSize: !Ref AsgMinSize
       MaxSize: !Ref AsgMaxSize
@@ -914,8 +993,13 @@ Resources:
       Protocol: TCP
       Port: 443
       TargetType: instance
-      HealthCheckProtocol: TCP
+      # HTTPS path check to in-enclave ingress (NLB does not verify target certs).
+      # Verifies /.well-known/enclave/status, not the app [health_check] route.
+      HealthCheckProtocol: HTTPS
       HealthCheckPort: "443"
+      HealthCheckPath: /.well-known/enclave/status
+      Matcher:
+        HttpCode: "200"
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 2
@@ -924,8 +1008,8 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-tg"
 
-  # TCP 80 to instances for ACME HTTP-01. Health check uses 443 so targets stay healthy when ACME
-  # is disabled (nothing may listen on enclave :80 in that case).
+  # TCP 80 to instances for ACME HTTP-01. Health check uses HTTPS :443 status so targets stay
+  # healthy when ACME is disabled (nothing may listen on enclave :80 in that case).
   NitroTargetGroupHttp:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
@@ -933,8 +1017,11 @@ Resources:
       Protocol: TCP
       Port: 80
       TargetType: instance
-      HealthCheckProtocol: TCP
+      HealthCheckProtocol: HTTPS
       HealthCheckPort: "443"
+      HealthCheckPath: /.well-known/enclave/status
+      Matcher:
+        HttpCode: "200"
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 2
@@ -962,6 +1049,53 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref NitroTargetGroupHttp
+
+  # ── CloudWatch Alarms (optional SNS) ─────────────────────────────────────────
+  UnhealthyHostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSnsAlarmTopic
+    Properties:
+      AlarmName: !Sub "${ProjectName}-nlb-unhealthy-hosts"
+      AlarmDescription: !Sub "NLB HTTPS target group has unhealthy hosts (${ProjectName})"
+      Namespace: AWS/NetworkELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt NitroTargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt NitroNLB.LoadBalancerFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SnsAlarmTopicArn
+      OKActions:
+        - !Ref SnsAlarmTopicArn
+
+  AsgInServiceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSnsAlarmTopic
+    Properties:
+      AlarmName: !Sub "${ProjectName}-asg-low-capacity"
+      AlarmDescription: !Sub "ASG in-service instances below minimum (${ProjectName})"
+      Namespace: AWS/AutoScaling
+      MetricName: GroupInServiceInstances
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref NitroASG
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: !Ref AsgMinSize
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref SnsAlarmTopicArn
+      OKActions:
+        - !Ref SnsAlarmTopicArn
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Outputs

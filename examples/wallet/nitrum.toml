@@ -16,16 +16,18 @@ path = "/health"
 port = 8080
 interval = 10
 
-[well_known]
-enclave_status = true
-enclave_attestation = true
-
 [scaling]
 desired_replicas = 1
-max_replicas = 1
+max_replicas = 2
 min_replicas = 1
 num_cpus = 2
 ram_size_mib = 4320
+instance_type = "m6i.xlarge"
+
+[cloud]
+xray_tracing = false
+log_retention_days = 7
+safe_rolling = true
 
 [tls_termination]
 acme = false

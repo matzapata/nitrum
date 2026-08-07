@@ -2077,6 +2077,7 @@ dependencies = [
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-s3",
  "aws-sdk-ssm",
+ "aws-sdk-sts",
  "bollard",
  "bytes",
  "clap",
