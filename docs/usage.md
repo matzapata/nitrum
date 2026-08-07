@@ -33,7 +33,7 @@ The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR`
 
 #### Endpoints reachable from the Internet (or local TLS client)
 
-- `GET /.well-known/enclave/status` — minimal liveness payload for the ingress/data-plane. On success: `200 OK` and `{"status":"ok"}`. NLB HTTPS health checks use this path.
+- `GET /.well-known/enclave/status` — readiness for the hosted app. On success: `200 OK` and `{"status":"ok"}` when `[health_check]` probes succeed (or there is no `start_command`). On failure: `503` and `{"status":"unhealthy"}`. NLB HTTPS health checks use this path.
 
 - `GET /.well-known/enclave/attestation` — **AWS Nitro attestation document** for the running enclave, with the **current TLS leaf certificate** bound into the NSM request (certificate hash as `public_key` material). Optional query: `nonce` (standard Base64 of raw nonce bytes). On success: `200 OK` and `{"data":"<base64-encoded attestation document>"}`. If the TLS certificate is not yet available: `503` with `{"error":"TLS certificate not yet available"}`. Attestation errors may return `500` with `{"error":"attestation failed: ..."}`.
 
@@ -267,7 +267,7 @@ Options are defined in the `config` crate; the sample project comments point to 
 - `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
-- `[health_check]` — path, port, and interval for **application** health checks (used by the platform for app readiness semantics; not the NLB probe path). NLB HTTPS health checks always hit `/.well-known/enclave/status` (platform route, not configurable).
+- `[health_check]` — path, port, and interval for **application** health checks. The data-plane probes `http://127.0.0.1:{port}{path}` and gates `GET /.well-known/enclave/status` on the result (NLB uses that route). Probe timeout and consecutive-failure threshold are platform constants (2s / 3 failures).
 - `[scaling]` — replica counts, enclave CPU/RAM, and `instance_type` (Nitro Enclave–capable EC2 type allowlist; default `m6i.xlarge`). For zero-downtime rolling, keep `max_replicas >= desired_replicas + 1`.
 - `[cloud]` — CloudFormation-only settings (ignored by `nitrum local`):
   - `xray_tracing` — ADOT → X-Ray (default `false`; logs and EMF metrics still export).

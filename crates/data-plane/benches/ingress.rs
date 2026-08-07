@@ -34,6 +34,7 @@ impl BenchEnv {
             storage,
             proxy_client: reqwest::Client::new(),
             tls_cert_hash: Arc::new(RwLock::new(None)),
+            app_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         });
         let app = build_https_router(state);
 

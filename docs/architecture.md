@@ -106,7 +106,7 @@ The data-plane exposes a small HTTP surface alongside your application:
   - Binds the document to the current TLS certificate by including a hash of the certificate in the NSM request.
   - Returns a base64‑encoded document that clients can verify against a known PCR policy and the expected TLS public key.
 - `GET /.well-known/enclave/status`
-  - Returns `{"status":"ok"}`. Used by NLB HTTPS health checks; it is not a deep readiness probe for ACME/KMS/app.
+  - Returns `200` `{"status":"ok"}` when the user app passes `[health_check]` probes (or when no `start_command` is configured). Returns `503` `{"status":"unhealthy"}` otherwise. NLB HTTPS health checks use this path so unhealthy apps stop receiving traffic.
 - Application routes
   - Everything that is not under `/.well-known/enclave/*` (when those routes are enabled) is treated as application traffic and reverse‑proxied over HTTP to your process on `127.0.0.1:<project.port>`.
 

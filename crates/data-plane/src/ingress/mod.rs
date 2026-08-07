@@ -4,7 +4,8 @@
 //!
 //! Platform well-known paths are always handled directly (the user app is not invoked):
 //!   - GET /.well-known/enclave/status
-//!     -> Responds with 200 {"status":"ok"} (NLB HTTPS health checks use this path)
+//!     -> 200 {"status":"ok"} when `[health_check]` probes succeed (or no start_command);
+//!     503 {"status":"unhealthy"} otherwise. NLB HTTPS health checks use this path.
 //!   - GET /.well-known/enclave/attestation
 //!     -> Responds with 200 and base64-encoded attestation document
 //!     Optional query: `nonce` — standard base64 of raw nonce bytes (same encoding as the crypto API)
@@ -17,6 +18,7 @@
 //! the background and can be reloaded without restarting the ingress server.
 
 pub mod acme;
+mod health;
 pub mod server;
 mod state;
 pub mod tls;

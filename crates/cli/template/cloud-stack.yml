@@ -994,7 +994,7 @@ Resources:
       Port: 443
       TargetType: instance
       # HTTPS path check to in-enclave ingress (NLB does not verify target certs).
-      # Verifies /.well-known/enclave/status, not the app [health_check] route.
+      # Status reflects data-plane [health_check] probes of the user app.
       HealthCheckProtocol: HTTPS
       HealthCheckPort: "443"
       HealthCheckPath: /.well-known/enclave/status

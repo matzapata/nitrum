@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Data-plane probes `[health_check]` and gates `GET /.well-known/enclave/status` on app readiness (`200` / `503`) so NLB stops sending traffic to unhealthy instances.
 - `[cloud]` in `nitrum.toml` for CloudFormation knobs: `xray_tracing`, `log_retention_days`, `sns_alarm_topic_arn`, `safe_rolling`, `kms_administrator_role_arn` (ignored by `nitrum local`).
 - `[scaling].instance_type` with a Nitro Enclave–capable EC2 allowlist and enclave CPU/RAM fit checks (default `m6i.xlarge`).
 - Safe ASG rolling updates (`MinInstancesInService` / `PauseTime`), optional X-Ray export, configurable log retention, SNS alarms, HTTPS NLB health checks to `/.well-known/enclave/status`, and DynamoDB PITR + deletion protection when `--retain`.
