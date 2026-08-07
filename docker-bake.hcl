@@ -27,7 +27,7 @@ variable "IMAGE_PREFIX" {
 }
 
 variable "TAG" {
-  default = "dev"
+  default = "latest"
 }
 
 variable "GIT_SHA" {

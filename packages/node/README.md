@@ -18,7 +18,6 @@ npm install nitrum-node
 const {
   verifyAttestation,
   verifyTlsLeafBindsAttestation,
-  awsNitroRootCa,
 } = require("nitrum-node");
 
 const result = verifyAttestation(rawDocument, {
@@ -36,8 +35,6 @@ if (!binds) {
   throw new Error("TLS leaf does not match attestation public_key");
 }
 ```
-
-`awsNitroRootCa()` returns the AWS Nitro root CA PEM used by default.
 
 ## Development
 

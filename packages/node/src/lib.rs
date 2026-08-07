@@ -6,17 +6,10 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::collections::BTreeMap;
 use verify::{
-    AWS_NITRO_ROOT_CA_PEM, AttestationResult as CoreAttestationResult,
-    ParsedAttestation as CoreParsedAttestation, VerifyOptions as CoreVerifyOptions,
-    verify_attestation as verify_attestation_core, verify_tls_leaf_binds,
+    AttestationResult as CoreAttestationResult, ParsedAttestation as CoreParsedAttestation,
+    VerifyOptions as CoreVerifyOptions, verify_attestation as verify_attestation_core,
+    verify_tls_leaf_binds,
 };
-
-/// AWS Nitro Enclaves root CA certificate (PEM).
-#[napi]
-#[must_use]
-pub fn aws_nitro_root_ca() -> String {
-    AWS_NITRO_ROOT_CA_PEM.to_owned()
-}
 
 /// Options accepted by [`verify_attestation`].
 #[napi(object)]
