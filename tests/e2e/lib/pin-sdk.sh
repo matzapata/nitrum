@@ -1,4 +1,4 @@
-# Shared helper: pin the scaffold's git `sdk` dep to this checkout's branch + rev.
+# Shared helper: pin the scaffold's git `sdk` dep to this checkout's rev.
 # Requires REPO_ROOT and PROJECT. Sourced by local.sh / cloud.sh / build.sh.
 
 pin_sdk_git() {
@@ -16,7 +16,7 @@ pin_sdk_git() {
     rev="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
     short_rev="$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 
-    new_line="sdk = { git = \"${git_url}\", package = \"${package}\", branch = \"${branch}\", rev = \"${rev}\" }"
+    new_line="sdk = { git = \"${git_url}\", package = \"${package}\", rev = \"${rev}\" }"
 
     if ! grep -qE '^sdk = \{ git = "https://github.com/matzapata/nitrum.git"' "${cargo_toml}"; then
         echo "error: pin_sdk_git: expected sdk git dependency in ${cargo_toml}" >&2

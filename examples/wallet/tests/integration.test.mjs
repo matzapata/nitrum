@@ -56,7 +56,7 @@ async function verifyEnclaveAttestation(origin, { rejectUnauthorized }) {
   if (!body.data) throw new Error("attestation: missing document");
 
   const raw = Uint8Array.from(Buffer.from(body.data, "base64"));
-  const result = verifyAttestation(raw, {
+  const result = await verifyAttestation(raw, {
     nonce: Uint8Array.from(nonce),
     maxAgeMs: 5 * 60_000,
   });
@@ -70,7 +70,7 @@ async function verifyEnclaveAttestation(origin, { rejectUnauthorized }) {
   }
   const port = u.port ? Number(u.port) : 443;
   const leafDer = await getTlsLeafDer(u.hostname, port, rejectUnauthorized);
-  if (!verifyTlsLeafBindsAttestation(result.document.public_key, leafDer)) {
+  if (!(await verifyTlsLeafBindsAttestation(result.document, leafDer))) {
     throw new Error("TLS leaf does not match attestation public_key");
   }
   return result.document;

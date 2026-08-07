@@ -77,17 +77,17 @@ Reproducible k6 load against a **deployed** enclave (not `nitrum local`). Prefer
 
 ```bash
 # macOS
-brew install k6 jq
+brew install k6 jq git
 
 # Amazon Linux 2023
 sudo dnf install -y https://dl.k6.io/rpm/repo.rpm
-sudo dnf install -y k6 jq
+sudo dnf install -y k6 jq git
 ```
 
 **Single run** (default: `GET /health` then `POST /crypto`, 50 VUs × 30s):
 
 ```bash
-ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
+ENCLAVE_URL=https://nitrum-Nitro-tdBLyChTb8X7-3f340fbc356dd2ad.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
 ```
 
 **VU sweep** (capacity curve; run `run-macro.sh` at several concurrencies):
@@ -118,7 +118,11 @@ Build with the repo-root [`docker-bake.hcl`](docker-bake.hcl):
 ```bash
 export TAG=dev
 export GIT_SHA=$(git rev-parse HEAD)
-export IMAGE_PREFIX=docker.io/{username}
+export IMAGE_PREFIX=docker.io/matzapata
+
+# Aws overrides
+export AWS_PROFILE=nitrum
+export AWS_REGION=us-east-1
 
 # Overrides for cloud.sh running the cli
 export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
@@ -134,7 +138,7 @@ docker buildx bake --push control-plane data-plane nitro-cli
 ```bash
 export TAG=dev
 export GIT_SHA=$(git rev-parse HEAD)
-export IMAGE_PREFIX=docker.io/{username}
+export IMAGE_PREFIX=docker.io/matzapata
 
 # Locally we only use data-plane
 export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
