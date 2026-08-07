@@ -10,7 +10,7 @@ Thin napi-rs bindings over `crates/verify` (COSE, certificate chain, PCRs, nonce
 npm install nitrum-node
 ```
 
-**Native addon:** this package compiles Rust via `napi` on `npm install` (`prepare`). You need a **Rust toolchain** (rustc/cargo, MSRV 1.95+) unless you consume a release that ships prebuilt `*.node` binaries for your platform (not published yet — from-source install only for now).
+**Native addon:** published releases ship prebuilt `*.node` binaries via optional platform packages (`nitrum-node-darwin-arm64`, etc.). A **Rust toolchain** (MSRV 1.95+) is only needed when building from this repo.
 
 ## Usage
 

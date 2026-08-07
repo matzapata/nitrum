@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::{local::EnclaveLocalStack, project::CliProject};
+use crate::{local::EnclaveLocalStack, project::CliProject, utils};
 
 #[derive(Args)]
 pub struct UpArgs {
@@ -17,10 +17,12 @@ pub struct UpArgs {
 pub async fn run(args: UpArgs) -> Result<()> {
     let project = CliProject::load(args.path, args.as_name)?;
     let local_stack = EnclaveLocalStack::new(&project.root, &project.config)?;
-    // Compose prints its own build/pull progress; a spinner would hide it.
-    println!("Starting local stack…");
-    local_stack.up().await?;
-    println!("Local stack started.");
+    utils::with_spinner(
+        "Starting local stack…",
+        "Local stack started.",
+        local_stack.up(),
+    )
+    .await?;
 
     println!();
     println!("Stack is running.");

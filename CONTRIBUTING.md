@@ -63,7 +63,7 @@ make deny
 make check-node
 ```
 
-CI runs Rust fmt/clippy/check/test (with `--all-features`), `nitrum-node` build/smoke tests, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
+CI runs Rust fmt/clippy/check/test (with `--all-features`), multi-platform `nitrum-node` builds/smoke tests, and `cargo deny` on Linux. Some crates use Linux-only dependencies (for example around Nitro Enclaves networking); if something fails only on your machine, compare with CI logs.
 
 ## Releases
 
@@ -118,7 +118,9 @@ Build with the repo-root [`docker-bake.hcl`](docker-bake.hcl):
 ```bash
 export TAG=dev
 export GIT_SHA=$(git rev-parse HEAD)
-export IMAGE_PREFIX=docker.io/matzapata
+export IMAGE_PREFIX=docker.io/{username}
+
+# Overrides for cloud.sh running the cli
 export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
 export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
 export NITRUM_RUNTIME_NITRO_CLI_IMAGE="${IMAGE_PREFIX}/nitro-cli:${TAG}"
@@ -132,10 +134,10 @@ docker buildx bake --push control-plane data-plane nitro-cli
 ```bash
 export TAG=dev
 export GIT_SHA=$(git rev-parse HEAD)
-export IMAGE_PREFIX=docker.io/matzapata
-export NITRUM_RUNTIME_CONTROL_PLANE_IMAGE="${IMAGE_PREFIX}/control-plane:${TAG}"
+export IMAGE_PREFIX=docker.io/{username}
+
+# Locally we only use data-plane
 export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
-export NITRUM_RUNTIME_NITRO_CLI_IMAGE="${IMAGE_PREFIX}/nitro-cli:${TAG}"
 
 # Local Data Plane: uses pebble backend and disables enclave-only features
 docker buildx bake data-plane-local

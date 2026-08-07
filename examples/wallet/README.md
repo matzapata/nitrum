@@ -4,8 +4,11 @@ Rust enclave app that generates an encrypted wallet key via the Nitrum crypto AP
 and signs EIP-1559 transactions after HMAC proof verification.
 
 Uses workspace [`crates/sdk`](../../crates/sdk) for `encrypt`, `decrypt`, `random`,
-and `kv/set`. After each successful `/wallet` creation it persists
+and `kv/set` (git `sdk` dep + workspace `[patch]` to the local crate; Docker build
+context is the project directory). After each successful `/wallet` creation it persists
 `wallet:demo_last_ciphertext`. Metrics: `app.wallet.created`, `app.wallet.sign.duration.ms`.
+
+`nitrum init` does not scaffold this project — see [`crates/cli/template`](../../crates/cli/template) for the customer hello template.
 
 ```bash
 cd examples/wallet

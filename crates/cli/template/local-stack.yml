@@ -222,7 +222,7 @@ services:
 
   # All-in-one Grafana observability backend (OpenTelemetry Collector + Prometheus +
   # Tempo + Loki + Grafana) for local dev. Mirrors the role the ADOT collector plays in
-  # production (crates/cli/stack.yml): receives OTLP from the data-plane and renders it as
+  # production (crates/cli/template/cloud-stack.yml): receives OTLP from the data-plane and renders it as
   # metrics, traces, and logs. Open the Grafana UI at http://localhost:3000 (anonymous,
   # admin) to explore dashboards.
   observability:
@@ -234,7 +234,7 @@ services:
       - "4318:4318" # OTLP/HTTP
 
   enclave:
-    # Image is built by `nitrum local up` via `build_enclave_image`.
+    # Image is built by `nitrum local up` via `build_enclave_image` (not Compose).
     image: ${ENCLAVE_IMAGE}
     platform: linux/amd64
     pull_policy: never

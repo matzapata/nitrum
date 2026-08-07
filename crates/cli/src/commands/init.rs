@@ -86,16 +86,16 @@ pub async fn run(args: InitArgs) -> Result<()> {
         },
     };
 
-    let writes: Vec<(&str, String)> = vec![
-        ("src/main.rs", sample_main_rs().to_string()),
-        ("Cargo.toml", init_cargo_toml()),
-        ("Dockerfile", init_dockerfile().to_string()),
+    let writes: Vec<(&str, &str)> = vec![
+        ("src/main.rs", template_main_rs()),
+        ("Cargo.toml", template_cargo_toml()),
+        ("Dockerfile", template_dockerfile()),
         (
             "tests/integration.test.mjs",
-            sample_integration_test_mjs().to_string(),
+            template_integration_test_mjs(),
         ),
-        ("package.json", sample_package_json().to_string()),
-        (".gitignore", "/target\n/Cargo.lock\n".into()),
+        ("package.json", template_package_json()),
+        (".gitignore", "/target\n/Cargo.lock\n"),
     ];
 
     for (relative_path, contents) in writes {
@@ -126,83 +126,30 @@ fn write_sample_config(path: &Path, config: &NitrumConfig) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("write {}", path.display()))
 }
 
-const fn sample_main_rs() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "examples/hello/src/main.rs"
-    ))
+/// Files under `template/` — customer scaffold + stack YAML for the CLI
+/// (not the monorepo `examples/hello` path-sdk demos).
+macro_rules! bundled_template {
+    ($rel:literal) => {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/template/", $rel))
+    };
 }
 
-/// Standalone Cargo.toml for `nitrum init` (git dep on `sdk`, not a monorepo path).
-fn init_cargo_toml() -> String {
-    r#"[package]
-name = "hello"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
-license = "MIT"
-publish = false
-
-[[bin]]
-name = "hello"
-path = "src/main.rs"
-
-[dependencies]
-axum = "0.8"
-base64 = "0.22"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sdk = { git = "https://github.com/matzapata/nitrum.git", package = "sdk", branch = "develop" }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-opentelemetry = "0.28"
-opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "metrics"] }
-"#
-    .to_string()
+const fn template_main_rs() -> &'static str {
+    bundled_template!("src/main.rs")
 }
 
-/// Standalone Dockerfile for `nitrum init` (project-dir build context).
-///
-/// The data-plane runtime image is Alpine/musl, so the app must be linked for
-/// `x86_64-unknown-linux-musl` (glibc bookworm binaries fail with
-/// `Dynamic loader not found: /lib64/ld-linux-x86-64.so.2`).
-const fn init_dockerfile() -> &'static str {
-    r#"ARG DATA_PLANE_IMAGE=ghcr.io/matzapata/nitrum/data-plane:latest-local
-ARG RUST_IMAGE=rust:1.95-bookworm
-
-FROM --platform=linux/amd64 ${RUST_IMAGE} AS builder
-WORKDIR /build
-RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
-    && rm -rf /var/lib/apt/lists/* \
-    && rustup target add x86_64-unknown-linux-musl
-COPY Cargo.toml ./
-COPY src ./src
-RUN cargo build --release --target x86_64-unknown-linux-musl
-
-FROM --platform=linux/amd64 ${DATA_PLANE_IMAGE}
-WORKDIR /app
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/hello /app/hello
-COPY nitrum.toml /app/nitrum.toml
-CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]
-"#
+const fn template_cargo_toml() -> &'static str {
+    bundled_template!("Cargo.toml")
 }
 
-const fn sample_integration_test_mjs() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "examples/hello/tests/integration.test.mjs"
-    ))
+const fn template_dockerfile() -> &'static str {
+    bundled_template!("Dockerfile")
 }
 
-const fn sample_package_json() -> &'static str {
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../",
-        "examples/hello/package.json"
-    ))
+const fn template_integration_test_mjs() -> &'static str {
+    bundled_template!("tests/integration.test.mjs")
+}
+
+const fn template_package_json() -> &'static str {
+    bundled_template!("package.json")
 }

@@ -140,6 +140,9 @@ impl EnclaveCloudStack {
     }
 
     const fn cloud_stack_template() -> &'static str {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/stack.yml"))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/template/cloud-stack.yml"
+        ))
     }
 }

@@ -8,11 +8,7 @@ publish = false
 autobins = false
 include = [
     "src/**/*",
-    "../../infra/cloudformation/template.yml",
-    "../../infra/docker/compose.yml",
-    "../../examples/hello/src/main.rs",
-    "../../examples/hello/package.json",
-    "../../examples/hello/tests/integration.test.mjs",
+    "template/**/*",
 ]
 
 [lib]

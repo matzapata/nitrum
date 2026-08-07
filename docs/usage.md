@@ -18,15 +18,14 @@ Needed only if you use `**nitrum cloud`** (deploy, env, logs, destroy). Local-on
 
 ## Project layout and example
 
-`nitrum init [name]` by default creates an example **Rust** server (axum + `sdk`), but you can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
+`nitrum init [name]` scaffolds from [`crates/cli/template`](../crates/cli/template) (git `sdk` dependency, project-directory Docker build). You can use any language or stack as long as the project includes a **Dockerfile** that exposes the **application port** from `[project].port` in `nitrum.toml` and runs the data-plane with your bundled `nitrum.toml` (for example `CMD ["/app/data-plane", "--config", "/app/nitrum.toml"]`). The data-plane reads `[project].start_command` from that file and starts the user process.
 
-The repository includes a reference project under `examples/hello` which shows the end‑to‑end flow:
+In-repo demos under `examples/hello` and `examples/wallet` use the same project-directory Docker layout (git `sdk` + workspace `[patch]` to local [`crates/sdk`](../crates/sdk)); they are not what `nitrum init` copies. Typical flow on a scaffolded or example project:
 
 - Build the EIF: `nitrum build`.
 - Set a simple environment variable: `nitrum cloud env set DEMO hello`.
 - Deploy the enclave: `nitrum cloud deploy`
 
-Use that example as a concrete reference when wiring your own projects.
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
@@ -170,7 +169,7 @@ Telemetry only ever carries low-cardinality, non-sensitive attributes: service n
 
 ### `nitrum init [NAME]`
 
-Scaffold a new project with a sample app, default `nitrum.toml`, and `tests/integration.test.mjs` (Node’s test runner + optional `nitrum-node` attestation checks when `ENCLAVE_URL` points at a real deployment).
+Scaffold a new project from [`crates/cli/template`](../crates/cli/template): sample Rust app, `Dockerfile`, default `nitrum.toml`, and `tests/integration.test.mjs` (Node’s test runner + optional `nitrum-node` attestation checks when `ENCLAVE_URL` points at a real deployment).
 
 Typical first steps:
 
@@ -191,14 +190,14 @@ This command is the core of reproducible builds; see the dedicated section below
 
 Local development via Docker Compose:
 
-- `nitrum local up` — start the stack in the background.
+- `nitrum local up` — build the enclave image, then start the stack in the background.
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
 
-The enclave Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
+The enclave image is built by the CLI (not Compose) before `up`. The Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
 `[runtime].data_plane` in `nitrum.toml` (overridable via
 `NITRUM_RUNTIME_DATA_PLANE_IMAGE`), with a `-local` tag suffix applied
-automatically so Compose uses the pebble-enabled image
+automatically so the pebble-enabled image is used
 (e.g. `…/data-plane:latest` → `…/data-plane:latest-local`). Digest pins from
 `nitrum init` map to `:latest-local` on the same repository. See
 [CONTRIBUTING.md](../CONTRIBUTING.md#building-platform-images-for-development)
