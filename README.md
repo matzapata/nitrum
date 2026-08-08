@@ -80,15 +80,15 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
 
 ### Performance
 
-Macro load on a real Nitro enclave (`m6i.xlarge`, 2 enclave vCPU / 4320 MiB, same-VPC k6 client, 50 VUs × 30s, git `b8bf492`):
+Macro load on a real Nitro enclave (`m6i.xlarge`, 2 enclave vCPU / 4320 MiB, same-VPC k6 client, 50 VUs × 30s, git `55e29f1`):
 
 | Route | RPS | p50 | p99 | Errors |
 |-------|-----|-----|-----|--------|
-| `GET /.well-known/enclave/status` | ~8.4k | ~5 ms | ~19 ms | 0% |
-| `GET /health` (proxied app) | ~625 | ~79 ms | ~166 ms | 0% |
-| `POST /crypto` (proxy + encrypt/decrypt) | ~438 | ~112 ms | ~174 ms | 0% |
+| `GET /.well-known/enclave/status` | ~8.4k | ~5 ms | ~18 ms | 0% |
+| `GET /health` (proxied app) | ~710 | ~70 ms | ~127 ms | 0% |
+| `POST /crypto` (proxy + encrypt/decrypt) | ~659 | ~75 ms | ~143 ms | 0% |
 
-VU sweeps show proxied routes saturate around **~50 VUs** (~450 RPS crypto / ~630 RPS health); more concurrency mostly raises latency. In-enclave status alone plateaus near **~9.5k RPS**.
+VU sweeps (10→200 VUs × 30s): proxied routes plateau by ~50–100 VUs (**~732 RPS** health / **~676 RPS** crypto); extra concurrency mostly raises latency. In-enclave status alone climbs to **~10k RPS** @ 200 VUs.
 
 Load harness: see [CONTRIBUTING.md](CONTRIBUTING.md#macro-load-testing-ec2-nitro).
 
