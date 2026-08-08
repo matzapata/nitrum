@@ -57,6 +57,9 @@ impl EnclaveCloudStack {
 
     /// Upload EIF artifact and create/update the stack, then return stack outputs.
     ///
+    /// All CloudFormation parameters are passed explicitly on every deploy so
+    /// `UpdateStack` never resets omitted params with template defaults (e.g. KMS admin).
+    ///
     /// # Errors
     ///
     /// Returns an error when S3 bucket creation/upload or CloudFormation
@@ -67,9 +70,9 @@ impl EnclaveCloudStack {
         retain: bool,
         debug_mode: bool,
         config: &NitrumConfig,
-        kms_administrator_role_arn: Option<&str>,
     ) -> Result<BTreeMap<String, String>> {
         let scaling: &Scaling = &config.scaling;
+        let cloud = &config.cloud;
         let eif_label = eif_version_label_from_hash(&artifact.hash);
         let eif_s3_key = eif_s3_key(&eif_label);
         let retain_str = if retain { "true" } else { "false" };
@@ -86,7 +89,13 @@ impl EnclaveCloudStack {
             );
         }
 
-        let mut params = vec![
+        let (rolling_min_in_service, rolling_pause) = if cloud.safe_rolling {
+            ("1", "PT5M")
+        } else {
+            ("0", "PT0S")
+        };
+
+        let params = vec![
             ("ProjectName".to_string(), config.project.name.to_string()),
             ("Retain".to_string(), retain_str.to_string()),
             ("EifS3Bucket".to_string(), self.bucket.name().to_string()),
@@ -103,6 +112,28 @@ impl EnclaveCloudStack {
                 "EnclaveMemoryMib".to_string(),
                 scaling.ram_size_mib.to_string(),
             ),
+            ("InstanceType".to_string(), scaling.instance_type.clone()),
+            (
+                "RollingMinInstancesInService".to_string(),
+                rolling_min_in_service.to_string(),
+            ),
+            ("RollingPauseTime".to_string(), rolling_pause.to_string()),
+            (
+                "EnableXRayTracing".to_string(),
+                if cloud.xray_tracing {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                },
+            ),
+            (
+                "LogRetentionInDays".to_string(),
+                cloud.log_retention_days.to_string(),
+            ),
+            (
+                "SnsAlarmTopicArn".to_string(),
+                cloud.sns_alarm_topic_arn.clone().unwrap_or_default(),
+            ),
             (
                 "ControlPlaneImage".to_string(),
                 config.runtime.control_plane.to_string(),
@@ -112,10 +143,11 @@ impl EnclaveCloudStack {
                 control_plane_debug_arg.to_string(),
             ),
             ("EifImageSha384".to_string(), pcr0.to_string()),
+            (
+                "KmsAdministratorRoleArn".to_string(),
+                cloud.kms_administrator_cfn_value().to_string(),
+            ),
         ];
-        if let Some(arn) = kms_administrator_role_arn {
-            params.push(("KmsAdministratorRoleArn".to_string(), arn.to_string()));
-        }
 
         self.bucket.create_if_non_existent().await?;
         self.bucket.upload(&eif_s3_key, &artifact.eif_path).await?;

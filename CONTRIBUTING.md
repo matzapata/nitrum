@@ -87,7 +87,7 @@ sudo dnf install -y k6 jq git
 **Single run** (default: `GET /health` then `POST /crypto`, 50 VUs × 30s):
 
 ```bash
-ENCLAVE_URL=https://nitrum-Nitro-tdBLyChTb8X7-3f340fbc356dd2ad.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
+ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
 ```
 
 **VU sweep** (capacity curve; run `run-macro.sh` at several concurrencies):
@@ -99,9 +99,22 @@ for vus in 10 50 100 200; do
     PERF_RESULTS_DIR="tests/perf/results/vus-$vus-crypto" \
     ./tests/perf/run-macro.sh
 done
+
+export ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com
+for vus in 10 50 100 200; do
+  PERF_VUS=$vus PERF_ROUTES=health \
+    PERF_RESULTS_DIR="tests/perf/results/vus-$vus-health" \
+    ./tests/perf/run-macro.sh
+done
+
+for vus in 10 50 100 200; do
+  PERF_VUS=$vus PERF_ROUTES=status \
+    PERF_RESULTS_DIR="tests/perf/results/vus-$vus-status" \
+    ./tests/perf/run-macro.sh
+done
 ```
 
-Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
+Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `status`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
 
 ## Building platform images for development
 

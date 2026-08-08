@@ -1,5 +1,6 @@
 //! Ingress HTTP/HTTPS server: TLS termination, well-known endpoints, and app proxying.
 
+use super::health;
 use super::state::IngressState;
 use super::tls::{TlsState, challenge_handler};
 use crate::DataPlaneConfig;
@@ -18,16 +19,22 @@ use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
 /// Spawn the ingress server in the background.
 pub fn init(config: &DataPlaneConfig, storage: &Arc<StorageClient>, crypto: &Arc<CryptoClient>) {
+    let has_user_process = !config.project.start_command.is_empty();
+    let app_ready = Arc::new(AtomicBool::new(!has_user_process));
+    health::spawn(config, app_ready.clone());
+
     let state = Arc::new(IngressState {
         config: config.clone(),
         storage: storage.clone(),
         proxy_client: reqwest::Client::new(),
         tls_cert_hash: Arc::new(RwLock::new(None)),
+        app_ready,
     });
     let crypto = crypto.clone();
     tokio::spawn(async move {
@@ -102,23 +109,117 @@ async fn run(state: Arc<IngressState>, crypto: Arc<CryptoClient>) -> anyhow::Res
 /// Build the HTTPS ingress router (well-known routes + proxy fallback).
 #[doc(hidden)]
 pub fn build_https_router(state: Arc<IngressState>) -> Router {
-    let mut https_router = Router::new();
-    if state.config.well_known.enclave_status {
-        https_router = https_router.route("/.well-known/enclave/status", get(ingress_status));
-    }
-    if state.config.well_known.enclave_attestation {
-        https_router =
-            https_router.route("/.well-known/enclave/attestation", get(ingress_attestation));
-    }
-    https_router.fallback(ingress_proxy).with_state(state)
+    Router::new()
+        .route("/.well-known/enclave/status", get(ingress_status))
+        .route("/.well-known/enclave/attestation", get(ingress_attestation))
+        .fallback(ingress_proxy)
+        .with_state(state)
 }
 
-async fn ingress_status() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        r#"{"status":"ok"}"#,
-    )
+async fn ingress_status(State(state): State<Arc<IngressState>>) -> impl IntoResponse {
+    if state.app_ready.load(Ordering::Relaxed) {
+        (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            r#"{"status":"ok"}"#,
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [("content-type", "application/json")],
+            r#"{"status":"unhealthy"}"#,
+        )
+            .into_response()
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    use crate::{DataPlaneConfig, ListenAddrs};
+    use aws_config::{BehaviorVersion, Region};
+    use axum::body::Body;
+    use axum::http::Request;
+    use config::{NitrumConfig, PlatformLayout};
+    use std::collections::HashMap;
+    use tower::ServiceExt;
+
+    fn inert_config() -> DataPlaneConfig {
+        let nitrum: NitrumConfig =
+            toml::from_str(include_str!("../../../../examples/hello/nitrum.toml"))
+                .expect("parse sample nitrum.toml");
+        let layout = PlatformLayout::from_project(&nitrum.project);
+        let aws = Arc::new(
+            aws_config::SdkConfig::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .region(Region::new("us-east-1"))
+                .build(),
+        );
+        DataPlaneConfig {
+            nitrum,
+            layout,
+            aws,
+            imds_base_url: "http://127.0.0.1/latest".to_string(),
+            instance_id: "i-test".to_string(),
+            kms_key_id: "test-key".to_string(),
+            dynamodb_table: "test-table".to_string(),
+            otlp_endpoint: None,
+            listen_addrs: ListenAddrs {
+                ingress_listen_addr: "127.0.0.1:443".parse().unwrap(),
+                acme_http01_listen_addr: "127.0.0.1:80".parse().unwrap(),
+                crypto_api_listen_addr: "127.0.0.1:3000".parse().unwrap(),
+            },
+            user_env: HashMap::new(),
+        }
+    }
+
+    fn router_with_ready(ready: bool) -> Router {
+        let config = inert_config();
+        let storage = Arc::new(StorageClient::from_config(&config));
+        let state = Arc::new(IngressState {
+            config,
+            storage,
+            proxy_client: reqwest::Client::new(),
+            tls_cert_hash: Arc::new(RwLock::new(None)),
+            app_ready: Arc::new(AtomicBool::new(ready)),
+        });
+        build_https_router(state)
+    }
+
+    #[tokio::test]
+    async fn status_ok_when_app_ready() {
+        let app = router_with_ready(true);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/enclave/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], br#"{"status":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn status_unhealthy_when_app_not_ready() {
+        let app = router_with_ready(false);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/enclave/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], br#"{"status":"unhealthy"}"#);
+    }
 }
 
 #[derive(Deserialize)]

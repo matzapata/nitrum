@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use common::{data_plane_config, with_backend_port};
-use config::{NitrumConfig, WellKnown};
+use config::NitrumConfig;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, black_box};
 use data_plane::StorageClient;
 use data_plane::ingress::{IngressState, build_https_router};
@@ -25,12 +25,7 @@ struct BenchEnv {
 
 impl BenchEnv {
     fn new(backend_port: u16) -> Self {
-        let mut nitrum: NitrumConfig =
-            toml::from_str(NITRUM_TOML).expect("parse sample nitrum.toml");
-        nitrum.well_known = WellKnown {
-            enclave_status: false,
-            enclave_attestation: false,
-        };
+        let nitrum: NitrumConfig = toml::from_str(NITRUM_TOML).expect("parse sample nitrum.toml");
 
         let data_plane_cfg = with_backend_port(data_plane_config(nitrum), backend_port);
         let storage = Arc::new(StorageClient::from_config(&data_plane_cfg));
@@ -39,6 +34,7 @@ impl BenchEnv {
             storage,
             proxy_client: reqwest::Client::new(),
             tls_cert_hash: Arc::new(RwLock::new(None)),
+            app_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         });
         let app = build_https_router(state);
 

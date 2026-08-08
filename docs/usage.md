@@ -29,15 +29,11 @@ In-repo demos under `examples/hello` and `examples/wallet` use the same project-
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
-The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Requests on the paths below are handled **inside the ingress** when enabled via `[well_known]`; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
+The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Platform paths below are always handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
 
 #### Endpoints reachable from the Internet (or local TLS client)
 
-When `[well_known].enclave_status` is true (default):
-
-- `GET /.well-known/enclave/status` — minimal liveness payload for the ingress/data-plane. On success: `200 OK` and `{"status":"ok"}`.
-
-When `[well_known].enclave_attestation` is true (default):
+- `GET /.well-known/enclave/status` — readiness for the hosted app. On success: `200 OK` and `{"status":"ok"}` when `[health_check]` probes succeed (or there is no `start_command`). On failure: `503` and `{"status":"unhealthy"}`. NLB HTTPS health checks use this path.
 
 - `GET /.well-known/enclave/attestation` — **AWS Nitro attestation document** for the running enclave, with the **current TLS leaf certificate** bound into the NSM request (certificate hash as `public_key` material). Optional query: `nonce` (standard Base64 of raw nonce bytes). On success: `200 OK` and `{"data":"<base64-encoded attestation document>"}`. If the TLS certificate is not yet available: `503` with `{"error":"TLS certificate not yet available"}`. Attestation errors may return `500` with `{"error":"attestation failed: ..."}`.
 
@@ -120,7 +116,7 @@ The `examples/hello` Rust app demonstrates an encrypt/decrypt round-trip, `/rand
 
 ## Observability
 
-Nitrum emits telemetry through a single path: OpenTelemetry. Both the control-plane (on the EC2 host) and the data-plane (inside the enclave) always write structured logs to stdout and, when an OTLP collector endpoint is configured, additionally export **traces, metrics, and logs** over OTLP/gRPC to a local OpenTelemetry Collector. The collector (the AWS Distro for OpenTelemetry, ADOT, on the EC2 host) translates OTLP into CloudWatch metrics (`Nitrum` namespace via EMF), CloudWatch Logs (`/nitrum/{project}/data-plane` and `/nitrum/{project}/control-plane`), and X-Ray traces. The binaries still emit backend-neutral OTLP; the deployed data-plane only uses IMDS to discover the parent host address for its default collector endpoint.
+Nitrum emits telemetry through a single path: OpenTelemetry. Both the control-plane (on the EC2 host) and the data-plane (inside the enclave) always write structured logs to stdout and, when an OTLP collector endpoint is configured, additionally export **traces, metrics, and logs** over OTLP/gRPC to a local OpenTelemetry Collector. The collector (the AWS Distro for OpenTelemetry, ADOT, on the EC2 host) translates OTLP into CloudWatch metrics (`Nitrum` namespace via EMF), CloudWatch Logs (`/nitrum/{project}/data-plane` and `/nitrum/{project}/control-plane`), and — when `cloud.xray_tracing = true` — X-Ray traces. The binaries still emit backend-neutral OTLP; the deployed data-plane only uses IMDS to discover the parent host address for its default collector endpoint.
 
 ### Platform vs application telemetry
 
@@ -210,10 +206,32 @@ Use this while iterating on your application code before pushing a new EIF to AW
 Uploads the EIF (built from source if omitted) and creates or updates the CloudFormation stack using the bundled template and your `nitrum.toml`. Useful flags (see `nitrum cloud deploy --help`):
 
 - `--eif` — path to an existing EIF file.
-- `--retain` — retain resources on stack delete (set this to true for production deployments).
-- `--kms-administrator-role-arn` — optional full IAM role or user ARN passed through as CloudFormation `KmsAdministratorRoleArn`. If you omit the flag, that parameter is not supplied and the template default applies. To look up your account ID when building ARNs, run: `aws sts get-caller-identity | jq -r '.Account'`.
+- `--retain` — retain resources on stack delete (set this for production). Also enables DynamoDB point-in-time recovery and deletion protection.
+- `--debug-mode` — pass `--debug-mode` to the control-plane (and use an all-zero PCR0 in the KMS policy for that deploy).
+- `--force` — skip the confirmation prompt.
+
+CloudFormation knobs that used to be one-shot CLI flags now live under **`[cloud]`** in `nitrum.toml` (see below) so every deploy re-supplies them. In particular, **`cloud.kms_administrator_role_arn`** replaced `--kms-administrator-role-arn`: omitting that flag on a later update used to reset the KMS admin principal to account root.
 
 The `runtime.control_plane` field in `nitrum.toml` is the full Docker image reference (for example `my-registry/control-plane@sha256:…`) passed to CloudFormation for the EC2 control-plane service.
+
+#### Updating a deployment
+
+Each `nitrum cloud deploy` with a new EIF:
+
+1. Uploads `{sha12}.eif` and sets `EifVersionLabel` / `EifS3Key` so the launch template changes and the **ASG rolls** instances (with `cloud.safe_rolling`, at least one instance stays in service and the update pauses ~5 minutes for enclave boot).
+2. Sets `EifImageSha384` to the new EIF’s **PCR0**, which updates the KMS key policy’s `kms:RecipientAttestation:ImageSha384` condition **in place** (same key id).
+3. New hosts download the new EIF; attested `Decrypt` succeeds only for the new PCR0. During the roll, old enclaves may briefly fail attested Decrypt after the policy swaps.
+
+Only the KMS **administrator** principal (`cloud.kms_administrator_role_arn`, or account root when empty) can change that PCR0 condition (`kms:PutKeyPolicy`). The identity running `nitrum cloud deploy` must match that principal (or assume that role); otherwise the stack update fails with `AccessDenied`. The CLI warns when `sts:GetCallerIdentity` does not match a configured admin ARN.
+
+#### Production checklist
+
+- Deploy with `--retain`.
+- Set `scaling.max_replicas >= desired_replicas + 1` and keep `cloud.safe_rolling = true`.
+- Pin `cloud.kms_administrator_role_arn` to your deployer/admin role (and deploy *as* that role).
+- Set `cloud.sns_alarm_topic_arn` to an existing SNS topic for NLB unhealthy-host and ASG capacity alarms.
+- Enable `cloud.xray_tracing = true` only if you want X-Ray (CloudWatch logs/metrics still work when it is false).
+- Point DNS for `[tls_termination].domain` at the NLB.
 
 ### `nitrum cloud destroy`
 
@@ -241,7 +259,7 @@ Runs `nitro-cli describe-eif` in Docker against an EIF path (wrapper for inspect
 
 ## `nitrum.toml` overview
 
-Options are defined in the `shared` crate; the sample project comments point to the source. Common sections:
+Options are defined in the `config` crate; the sample project comments point to the source. Common sections:
 
 - `[project]` `name` — project identifier; CloudFormation stack name and `ProjectName` match it; S3 bucket is `nitrum-{name}`; SSM paths use `/nitrum/{name}/…` (data-plane infra and app env).
 - `[project]` `port` — TCP port your app listens on at `127.0.0.1` (ingress proxies here after TLS).
@@ -249,9 +267,14 @@ Options are defined in the `shared` crate; the sample project comments point to 
 - `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
-- `[well_known]` — `enclave_status` / `enclave_attestation` toggle the `/.well-known/enclave/*` routes on the TLS listener (defaults: enabled).
-- `[health_check]` — path, port, and interval for health checks.
-- `[scaling]` — replica hints and enclave CPU/RAM (used in deployment templates).
+- `[health_check]` — path, port, and interval for **application** health checks. The data-plane probes `http://127.0.0.1:{port}{path}` and gates `GET /.well-known/enclave/status` on the result (NLB uses that route). While not ready it retries every 500ms; once ready it uses `interval`. Probe timeout and consecutive-failure threshold are platform constants (2s / 3 failures).
+- `[scaling]` — replica counts, enclave CPU/RAM, and `instance_type` (Nitro Enclave–capable EC2 type allowlist; default `m6i.xlarge`). For zero-downtime rolling, keep `max_replicas >= desired_replicas + 1`.
+- `[cloud]` — CloudFormation-only settings (ignored by `nitrum local`):
+  - `xray_tracing` — ADOT → X-Ray (default `false`; logs and EMF metrics still export).
+  - `log_retention_days` — CloudWatch Logs retention (default `7`).
+  - `sns_alarm_topic_arn` — optional SNS topic for unhealthy NLB / low ASG capacity alarms.
+  - `safe_rolling` — ASG `MinInstancesInService ≥ 1` and `PauseTime=PT5M` when true (default).
+  - `kms_administrator_role_arn` — durable KMS key admin principal (empty → account root). Always re-passed on deploy.
 - `[tls_termination]` — `acme` and `domain` for certificates.
 - `[egress]` — outbound whitelist enforced inside the data-plane when `enabled = true`:
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.
