@@ -149,6 +149,7 @@ describe("nitrum project (integration)", () => {
   it("GET /.well-known/enclave/status returns JSON", async () => {
     const data = await fetchJson(`${baseUrl}/.well-known/enclave/status`);
     assert.ok(data && typeof data === "object");
+    assert.equal(data.status, "ok");
   });
 
   it("GET /health returns OK", async () => {

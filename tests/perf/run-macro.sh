@@ -39,6 +39,7 @@ trim() {
 script_for_route() {
     case "$1" in
         health) echo "load-health.js" ;;
+        status) echo "load-status.js" ;;
         crypto) echo "load-crypto.js" ;;
         *) return 1 ;;
     esac
@@ -47,6 +48,7 @@ script_for_route() {
 label_for_route() {
     case "$1" in
         health) echo "GET /health" ;;
+        status) echo "GET /.well-known/enclave/status" ;;
         crypto) echo "POST /crypto" ;;
         *) echo "$1" ;;
     esac
@@ -236,7 +238,7 @@ main() {
         route="$(trim "${route}")"
         [[ -n "${route}" ]] || continue
         if ! script="$(script_for_route "${route}")"; then
-            echo "error: unknown route '${route}' (allowed: health,crypto)" >&2
+            echo "error: unknown route '${route}' (allowed: health,status,crypto)" >&2
             exit 1
         fi
         run_scenario "${route}" "${script}"

@@ -12,6 +12,12 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Consecutive probe failures required to clear [`IngressState::app_ready`].
 const FAILURE_THRESHOLD: u32 = 3;
 
+/// Retry delay while the app is not yet ready (cold start / recovering).
+///
+/// Using the full `[health_check].interval` here would leave status at 503 for too long
+/// after the process starts listening (e.g. first probe races bind).
+const STARTUP_RETRY: Duration = Duration::from_millis(500);
+
 /// Spawn a background task that probes the user app and updates `app_ready`.
 ///
 /// No-op when `[project].start_command` is empty (platform-only mode).
@@ -75,7 +81,13 @@ async fn run_probe_loop(url: &str, interval: Duration, app_ready: &AtomicBool) {
             }
         }
 
-        tokio::time::sleep(interval).await;
+        // Poll quickly until ready; use the configured interval only while healthy.
+        let delay = if app_ready.load(Ordering::Relaxed) {
+            interval
+        } else {
+            STARTUP_RETRY.min(interval)
+        };
+        tokio::time::sleep(delay).await;
     }
 }
 
