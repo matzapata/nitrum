@@ -1,6 +1,6 @@
 //! TLS `ServerConfig` build from PEM and full loopback handshakes.
 
-use criterion::{Criterion, black_box};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use data_plane::ingress::tls::build_server_config_from_pem;
 use std::sync::Arc;
 use std::sync::Once;
@@ -105,15 +105,21 @@ fn tls_handshake(c: &mut Criterion, fixture: &PemFixture) {
     });
 }
 
-fn tls_benches(c: &mut Criterion) {
+fn build_server_config_from_pem_benches(c: &mut Criterion) {
     ensure_rustls_provider();
     let fixture = generate_pem_fixture();
     pem_config_build(c, &fixture);
+}
+
+fn tls_handshake_loopback_benches(c: &mut Criterion) {
+    ensure_rustls_provider();
+    let fixture = generate_pem_fixture();
     tls_handshake(c, &fixture);
 }
 
-fn main() {
-    let mut c = criterion::Criterion::default().configure_from_args();
-    tls_benches(&mut c);
-    c.final_summary();
-}
+criterion_group!(
+    benches,
+    build_server_config_from_pem_benches,
+    tls_handshake_loopback_benches,
+);
+criterion_main!(benches);

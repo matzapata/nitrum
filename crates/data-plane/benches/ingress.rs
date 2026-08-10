@@ -1,46 +1,19 @@
 //! Ingress proxy routing via `tower::ServiceExt::oneshot` against a mock loopback backend.
 //!
-//! Measures the full proxy path, including request body buffering and backend
-//! round-trip — not router dispatch alone.
+//! Measures the full proxy path, including request body buffering, backend
+//! round-trip, and response body drain — not router dispatch alone.
 
 mod common;
 
-use axum::Router;
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
-use common::{data_plane_config, with_backend_port};
-use config::NitrumConfig;
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, black_box};
-use data_plane::StorageClient;
-use data_plane::ingress::{IngressState, build_https_router};
-use std::sync::{Arc, RwLock};
-use tokio::net::TcpListener;
+use common::{ingress_router, spawn_mock_backend};
+use criterion::{
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
+};
 use tower::ServiceExt;
 
-const NITRUM_TOML: &str = include_str!("../../../examples/hello/nitrum.toml");
-
-struct BenchEnv {
-    app: Router,
-}
-
-impl BenchEnv {
-    fn new(backend_port: u16) -> Self {
-        let nitrum: NitrumConfig = toml::from_str(NITRUM_TOML).expect("parse sample nitrum.toml");
-
-        let data_plane_cfg = with_backend_port(data_plane_config(nitrum), backend_port);
-        let storage = Arc::new(StorageClient::from_config(&data_plane_cfg));
-        let state = Arc::new(IngressState {
-            config: data_plane_cfg,
-            storage,
-            proxy_client: reqwest::Client::new(),
-            tls_cert_hash: Arc::new(RwLock::new(None)),
-            app_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        });
-        let app = build_https_router(state);
-
-        Self { app }
-    }
-}
+const BODY_LIMIT: usize = 1024 * 1024;
 
 struct ProxyCase {
     name: &'static str,
@@ -59,29 +32,10 @@ fn build_request(case: &ProxyCase) -> Request<Body> {
         .expect("build request")
 }
 
-fn spawn_mock_backend(rt: &tokio::runtime::Runtime) -> u16 {
-    rt.block_on(async {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind mock backend");
-        let addr = listener.local_addr().expect("local addr");
-
-        let app = Router::new().fallback(|_: Request<Body>| async { (StatusCode::OK, "ok") });
-
-        tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("mock backend serve");
-        });
-
-        addr.port()
-    })
-}
-
 fn ingress_benches(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let backend_port = spawn_mock_backend(&rt);
-    let env = BenchEnv::new(backend_port);
+    let app = ingress_router(backend_port, false);
 
     let cases = [
         ProxyCase {
@@ -107,19 +61,22 @@ fn ingress_benches(c: &mut Criterion) {
     {
         let mut group = c.benchmark_group("ingress");
         for case in &cases {
-            if !case.body.is_empty() {
+            if case.body.is_empty() {
+                group.throughput(Throughput::Elements(1));
+            } else {
                 group.throughput(Throughput::Bytes(case.body.len() as u64));
             }
-            let app = env.app.clone();
+            let app = app.clone();
             group.bench_with_input(BenchmarkId::new("proxy", case.name), case, |b, case| {
                 b.to_async(&rt).iter_batched(
-                    || build_request(case),
-                    |req| {
-                        let app = app.clone();
-                        async move {
-                            let resp = app.oneshot(req).await.expect("oneshot");
-                            black_box(resp.status())
-                        }
+                    || (app.clone(), build_request(case)),
+                    |(app, req)| async move {
+                        let resp = app.oneshot(req).await.expect("oneshot");
+                        assert_eq!(resp.status(), StatusCode::OK);
+                        let body = to_bytes(resp.into_body(), BODY_LIMIT)
+                            .await
+                            .expect("response body");
+                        black_box(body);
                     },
                     BatchSize::SmallInput,
                 );
@@ -129,8 +86,5 @@ fn ingress_benches(c: &mut Criterion) {
     }
 }
 
-fn main() {
-    let mut c = criterion::Criterion::default().configure_from_args();
-    ingress_benches(&mut c);
-    c.final_summary();
-}
+criterion_group!(benches, ingress_benches);
+criterion_main!(benches);

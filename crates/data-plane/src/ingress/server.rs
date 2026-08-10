@@ -19,8 +19,8 @@ use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Deserialize;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
 /// Spawn the ingress server in the background.
@@ -29,13 +29,11 @@ pub fn init(config: &DataPlaneConfig, storage: &Arc<StorageClient>, crypto: &Arc
     let app_ready = Arc::new(AtomicBool::new(!has_user_process));
     health::spawn(config, app_ready.clone());
 
-    let state = Arc::new(IngressState {
-        config: config.clone(),
-        storage: storage.clone(),
-        proxy_client: reqwest::Client::new(),
-        tls_cert_hash: Arc::new(RwLock::new(None)),
+    let state = Arc::new(IngressState::new(
+        config.clone(),
+        storage.clone(),
         app_ready,
-    });
+    ));
     let crypto = crypto.clone();
     tokio::spawn(async move {
         info!("ingress task starting");
@@ -177,13 +175,11 @@ mod status_tests {
     fn router_with_ready(ready: bool) -> Router {
         let config = inert_config();
         let storage = Arc::new(StorageClient::from_config(&config));
-        let state = Arc::new(IngressState {
+        let state = Arc::new(IngressState::new(
             config,
             storage,
-            proxy_client: reqwest::Client::new(),
-            tls_cert_hash: Arc::new(RwLock::new(None)),
-            app_ready: Arc::new(AtomicBool::new(ready)),
-        });
+            Arc::new(AtomicBool::new(ready)),
+        ));
         build_https_router(state)
     }
 
@@ -273,8 +269,7 @@ async fn ingress_proxy(
         .uri()
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
-    let forward_to = format!("127.0.0.1:{}", state.config.nitrum.project.port.get());
-    let url = format!("http://{forward_to}{path_and_query}");
+    let url = state.proxy_url(path_and_query);
     info!(url = %url, "ingress: proxying to app");
 
     let (parts, body) = req.into_parts();
