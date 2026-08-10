@@ -11,7 +11,7 @@ use axum::{
     Router,
     body::Body,
     extract::{Query, State},
-    http::{HeaderMap, HeaderName, Request, Response, StatusCode, uri::PathAndQuery},
+    http::{HeaderMap, Request, Response, StatusCode, uri::PathAndQuery},
     response::IntoResponse,
     routing::get,
 };
@@ -262,26 +262,19 @@ async fn ingress_attestation(
 }
 
 /// Hop-by-hop headers must not be forwarded by a reverse proxy (RFC 7230 §6.1).
-fn is_hop_by_hop(name: &HeaderName) -> bool {
-    matches!(
-        name.as_str(),
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailers"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
-fn copy_proxied_headers(src: &HeaderMap, dst: &mut HeaderMap) {
-    for (name, value) in src {
-        if is_hop_by_hop(name) {
-            continue;
-        }
-        dst.append(name.clone(), value.clone());
+/// Removes all values for the static hop-by-hop name set in place.
+fn strip_hop_by_hop(headers: &mut HeaderMap) {
+    for name in [
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    ] {
+        headers.remove(name);
     }
 }
 
@@ -297,8 +290,8 @@ async fn ingress_proxy(
         .unwrap_or_else(|| PathAndQuery::from_static("/"));
     let uri = state.proxy_uri(path_and_query);
 
-    let mut fwd_headers = HeaderMap::new();
-    copy_proxied_headers(&parts.headers, &mut fwd_headers);
+    let mut fwd_headers = parts.headers;
+    strip_hop_by_hop(&mut fwd_headers);
 
     // Forward the client body as-is — `axum::body::Body` is already an
     // `http_body::Body`, so no stream adapter / buffering is needed.
@@ -323,11 +316,234 @@ async fn ingress_proxy(
         }
     };
 
-    let status = backend_resp.status();
-    let headers = backend_resp.headers().clone();
+    let (parts, body) = backend_resp.into_parts();
     // Stream the backend body to the client without an intermediate buffer.
-    let mut resp = Response::new(Body::new(backend_resp.into_body()));
-    *resp.status_mut() = status;
-    copy_proxied_headers(&headers, resp.headers_mut());
+    let mut resp = Response::from_parts(parts, Body::new(body));
+    strip_hop_by_hop(resp.headers_mut());
     resp
+}
+
+#[cfg(test)]
+mod proxy_header_tests {
+    use super::*;
+    use crate::{DataPlaneConfig, ListenAddrs};
+    use aws_config::{BehaviorVersion, Region};
+    use axum::body::{Body, to_bytes};
+    use axum::http::{HeaderName, HeaderValue, Request};
+    use config::{NitrumConfig, PlatformLayout};
+    use std::collections::HashMap;
+    use std::num::NonZeroU16;
+    use std::sync::Mutex;
+    use tokio::net::TcpListener;
+    use tower::ServiceExt;
+
+    const HOP_BY_HOP: &[&str] = &[
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    ];
+
+    fn inert_config(backend_port: u16) -> DataPlaneConfig {
+        let nitrum: NitrumConfig =
+            toml::from_str(include_str!("../../../../examples/hello/nitrum.toml"))
+                .expect("parse sample nitrum.toml");
+        let layout = PlatformLayout::from_project(&nitrum.project);
+        let aws = Arc::new(
+            aws_config::SdkConfig::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .region(Region::new("us-east-1"))
+                .build(),
+        );
+        let mut config = DataPlaneConfig {
+            nitrum,
+            layout,
+            aws,
+            imds_base_url: "http://127.0.0.1/latest".to_string(),
+            instance_id: "i-test".to_string(),
+            kms_key_id: "test-key".to_string(),
+            dynamodb_table: "test-table".to_string(),
+            otlp_endpoint: None,
+            listen_addrs: ListenAddrs {
+                ingress_listen_addr: "127.0.0.1:443".parse().unwrap(),
+                acme_http01_listen_addr: "127.0.0.1:80".parse().unwrap(),
+                crypto_api_listen_addr: "127.0.0.1:3000".parse().unwrap(),
+            },
+            user_env: HashMap::new(),
+        };
+        config.nitrum.project.port = NonZeroU16::new(backend_port).expect("non-zero port");
+        config
+    }
+
+    fn ingress_router(backend_port: u16) -> Router {
+        let config = inert_config(backend_port);
+        let storage = Arc::new(StorageClient::from_config(&config));
+        let state = Arc::new(IngressState::new(
+            config,
+            storage,
+            Arc::new(AtomicBool::new(true)),
+        ));
+        build_https_router(state)
+    }
+
+    /// Mock backend that records inbound headers and returns a fixed header set.
+    async fn spawn_backend(response_headers: HeaderMap) -> (u16, Arc<Mutex<Option<HeaderMap>>>) {
+        let captured = Arc::new(Mutex::new(None));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let captured_for_task = captured.clone();
+        tokio::spawn(async move {
+            let app = Router::new().fallback(move |req: Request<Body>| {
+                let captured = captured_for_task.clone();
+                let response_headers = response_headers.clone();
+                async move {
+                    *captured.lock().expect("lock") = Some(req.headers().clone());
+                    let mut resp = Response::new(Body::from("ok"));
+                    *resp.headers_mut() = response_headers;
+                    resp
+                }
+            });
+            axum::serve(listener, app).await.expect("serve");
+        });
+        tokio::task::yield_now().await;
+        (port, captured)
+    }
+
+    #[test]
+    fn strip_hop_by_hop_removes_static_set_and_keeps_end_to_end() {
+        let mut headers = HeaderMap::new();
+        for name in HOP_BY_HOP {
+            headers.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_static("drop-me"),
+            );
+        }
+        headers.insert("x-request-id", HeaderValue::from_static("abc"));
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        // Case-insensitive remove (RFC 7230 header names).
+        headers.insert("Connection", HeaderValue::from_static("Upgrade"));
+        headers.append("connection", HeaderValue::from_static("close"));
+
+        strip_hop_by_hop(&mut headers);
+
+        for name in HOP_BY_HOP {
+            assert!(
+                !headers.contains_key(*name),
+                "expected hop-by-hop `{name}` to be stripped"
+            );
+        }
+        assert_eq!(
+            headers.get("x-request-id").map(HeaderValue::as_bytes),
+            Some(b"abc".as_slice())
+        );
+        assert_eq!(
+            headers.get("content-type").map(HeaderValue::as_bytes),
+            Some(b"application/json".as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_strips_hop_by_hop_request_headers() {
+        let mut backend_resp_headers = HeaderMap::new();
+        backend_resp_headers.insert("x-backend", HeaderValue::from_static("1"));
+
+        let (port, captured) = spawn_backend(backend_resp_headers).await;
+        let app = ingress_router(port);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/echo")
+                    .header("connection", "keep-alive, upgrade")
+                    .header("keep-alive", "timeout=5")
+                    .header("proxy-authorization", "Basic dXNlcjpwYXNz")
+                    .header("te", "trailers")
+                    .header("trailers", "X-Checksum")
+                    .header("transfer-encoding", "chunked")
+                    .header("upgrade", "websocket")
+                    .header("x-request-id", "req-42")
+                    .header("content-type", "text/plain")
+                    .body(Body::from("hi"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let seen = captured
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("backend should have received a request");
+        for name in HOP_BY_HOP {
+            assert!(
+                !seen.contains_key(*name),
+                "backend must not see hop-by-hop `{name}`"
+            );
+        }
+        assert_eq!(
+            seen.get("x-request-id").map(HeaderValue::as_bytes),
+            Some(b"req-42".as_slice())
+        );
+        assert_eq!(
+            seen.get("content-type").map(HeaderValue::as_bytes),
+            Some(b"text/plain".as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_strips_hop_by_hop_response_headers() {
+        let mut backend_resp_headers = HeaderMap::new();
+        backend_resp_headers.insert("connection", HeaderValue::from_static("close"));
+        backend_resp_headers.insert("keep-alive", HeaderValue::from_static("timeout=5"));
+        backend_resp_headers.insert(
+            "proxy-authenticate",
+            HeaderValue::from_static("Basic realm=\"api\""),
+        );
+        backend_resp_headers.insert("upgrade", HeaderValue::from_static("websocket"));
+        backend_resp_headers.insert("te", HeaderValue::from_static("trailers"));
+        backend_resp_headers.insert("trailers", HeaderValue::from_static("X-Checksum"));
+        backend_resp_headers.insert("x-backend", HeaderValue::from_static("from-app"));
+        backend_resp_headers.insert("content-type", HeaderValue::from_static("text/plain"));
+
+        let (port, _) = spawn_backend(backend_resp_headers).await;
+        let app = ingress_router(port);
+
+        let response = app
+            .oneshot(Request::builder().uri("/echo").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let headers = response.headers();
+        for name in [
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "te",
+            "trailers",
+            "upgrade",
+            "transfer-encoding",
+        ] {
+            assert!(
+                !headers.contains_key(name),
+                "client must not see hop-by-hop `{name}`"
+            );
+        }
+        assert_eq!(
+            headers.get("x-backend").map(HeaderValue::as_bytes),
+            Some(b"from-app".as_slice())
+        );
+        assert_eq!(
+            headers.get("content-type").map(HeaderValue::as_bytes),
+            Some(b"text/plain".as_slice())
+        );
+
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"ok");
+    }
 }

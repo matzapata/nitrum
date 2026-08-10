@@ -42,13 +42,12 @@ pub struct IngressState {
 impl IngressState {
     /// HTTP client for loopback reverse-proxy to the user app.
     ///
-    /// Enables `TCP_NODELAY` and an explicit per-host idle pool so concurrent
-    /// proxied requests reuse keep-alive connections. Uses raw `hyper_util`
-    /// (no reqwest redirect/proxy/URL-parse layers) for the fixed loopback hop.
+    /// Uses an explicit per-host idle pool so concurrent proxied requests reuse
+    /// keep-alive connections. Uses raw `hyper_util` (no reqwest redirect/proxy/
+    /// URL-parse layers) for the fixed loopback hop.
     #[must_use]
     pub fn build_proxy_client() -> ProxyClient {
-        let mut connector = HttpConnector::new();
-        connector.set_nodelay(true);
+        let connector = HttpConnector::new();
         Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(PROXY_POOL_MAX_IDLE_PER_HOST)
             .build(connector)

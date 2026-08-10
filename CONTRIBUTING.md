@@ -158,11 +158,11 @@ cargo bench -p data-plane --features bench --bench ingress
 cargo bench -p data-plane --features bench --bench tls_handshake
 
 # Concurrent throughput (1/10/50/100/200):
-#   status vs proxy, with/without OTel, tuned reqwest client, crypto round-trip
+#   status vs proxy, with/without OTel, crypto round-trip
 cargo bench -p data-plane --features bench --bench throughput -- --save-baseline before-opt
 ```
 
-`throughput` fans out N concurrent `oneshot` calls per iteration so Criterion elems/sec tracks ops/sec under concurrency. Compare `throughput_ingress_status` vs `throughput_ingress_proxy` for the in-process hop tax; `*_otel` and `*_tuned` isolate instrumentation and `reqwest` pool/`TCP_NODELAY` cost. Body streaming still uses `--bench ingress` (1KiB / 64KiB payloads).
+`throughput` fans out N concurrent `oneshot` calls per iteration so Criterion elems/sec tracks ops/sec under concurrency. Compare `throughput_ingress_status` vs `throughput_ingress_proxy` for the in-process hop tax; `*_otel` isolates instrumentation cost. Body streaming still uses `--bench ingress` (1KiB / 64KiB payloads).
 
 ## Building platform images for development
 
