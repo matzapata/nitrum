@@ -21,7 +21,7 @@ use tracing::{info, warn};
 
 /// Dependencies required by the crypto API server and its handlers.
 #[derive(Clone)]
-struct CryptoApiState {
+pub struct CryptoApiState {
     /// Crypto client for encrypting/decrypting data.
     crypto: Arc<CryptoClient>,
     /// Storage client for encrypted KV persistence.
@@ -52,6 +52,18 @@ async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::
 
     info!(addr = %addr, "API server listening");
 
+    axum::serve(listener, build_router(state))
+        .await
+        .context("API server error")?;
+
+    Ok(())
+}
+
+/// Build the crypto API router (attestation, encrypt, decrypt, KV).
+///
+/// Exposed for benchmarks and tests that drive handlers via `tower::ServiceExt::oneshot`.
+#[doc(hidden)]
+pub fn build_router(state: Arc<CryptoApiState>) -> Router {
     let router = Router::new()
         .route("/health", get(health))
         .route("/random", post(random))
@@ -61,13 +73,14 @@ async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::
         .route("/kv/set", post(kv_set))
         .route("/kv/get", post(kv_get))
         .with_state(state);
-    let router = telemetry::http::instrument_router(router, "data-plane.crypto-api");
+    telemetry::http::instrument_router(router, "data-plane.crypto-api")
+}
 
-    axum::serve(listener, router)
-        .await
-        .context("API server error")?;
-
-    Ok(())
+/// Build [`CryptoApiState`] for benches/tests (no live AWS required for encrypt/decrypt).
+#[doc(hidden)]
+#[must_use]
+pub fn api_state(crypto: Arc<CryptoClient>, storage: Arc<StorageClient>) -> Arc<CryptoApiState> {
+    Arc::new(CryptoApiState { crypto, storage })
 }
 
 // ── Health ────────────────────────────────────────────────────

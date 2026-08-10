@@ -64,6 +64,7 @@ regex = "1"
 
 [dev-dependencies]
 criterion = { workspace = true }
+futures = "0.3"
 tower = "0.5"
 toml = "1"
 
@@ -82,5 +83,11 @@ required-features = ["bench"]
 [[bench]]
 name = "tls_handshake"
 path = "benches/tls_handshake.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "throughput"
+path = "benches/throughput.rs"
 harness = false
 required-features = ["bench"]

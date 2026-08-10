@@ -100,7 +100,6 @@ for vus in 10 50 100 200; do
     ./tests/perf/run-macro.sh
 done
 
-export ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com
 for vus in 10 50 100 200; do
   PERF_VUS=$vus PERF_ROUTES=health \
     PERF_RESULTS_DIR="tests/perf/results/vus-$vus-health" \
@@ -115,6 +114,23 @@ done
 ```
 
 Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `status`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
+
+### Criterion micro / throughput benches
+
+In-process benches (no Docker) live under `crates/data-plane/benches/`:
+
+```bash
+# Latency benches (crypto, ingress proxy, TLS handshake)
+cargo bench -p data-plane --features bench --bench crypto
+cargo bench -p data-plane --features bench --bench ingress
+cargo bench -p data-plane --features bench --bench tls_handshake
+
+# Concurrent throughput (1/10/50/100/200):
+#   status vs proxy, with/without OTel, tuned reqwest client, crypto round-trip
+cargo bench -p data-plane --features bench --bench throughput -- --save-baseline before-opt
+```
+
+`throughput` fans out N concurrent `oneshot` calls per iteration so Criterion elems/sec tracks ops/sec under concurrency. Compare `throughput_ingress_status` vs `throughput_ingress_proxy` for the in-process hop tax; `*_otel` and `*_tuned` isolate instrumentation and `reqwest` pool/`TCP_NODELAY` cost. Body streaming still uses `--bench ingress` (1KiB / 64KiB payloads). Keep-alive / connection reuse needs a non-Criterion check (`strace` or pool metrics under a long-lived client).
 
 ## Building platform images for development
 
