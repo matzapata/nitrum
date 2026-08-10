@@ -9,15 +9,16 @@ use crate::storage::StorageClient;
 use anyhow::Context;
 use axum::{
     Router,
-    body::{Body, to_bytes},
+    body::Body,
     extract::{Query, State},
-    http::{Request, StatusCode},
+    http::{HeaderMap, HeaderName, Request, Response, StatusCode},
     response::IntoResponse,
     routing::get,
 };
 use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use futures_util::TryStreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -137,7 +138,7 @@ mod status_tests {
     use super::*;
     use crate::{DataPlaneConfig, ListenAddrs};
     use aws_config::{BehaviorVersion, Region};
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use config::{NitrumConfig, PlatformLayout};
     use std::collections::HashMap;
@@ -261,42 +262,52 @@ async fn ingress_attestation(
     }
 }
 
+/// Hop-by-hop headers must not be forwarded by a reverse proxy (RFC 7230 §6.1).
+fn is_hop_by_hop(name: &HeaderName) -> bool {
+    matches!(
+        name.as_str(),
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailers"
+            | "transfer-encoding"
+            | "upgrade"
+    )
+}
+
+fn copy_proxied_headers(src: &HeaderMap, dst: &mut HeaderMap) {
+    for (name, value) in src {
+        if is_hop_by_hop(name) {
+            continue;
+        }
+        dst.append(name.clone(), value.clone());
+    }
+}
+
 async fn ingress_proxy(
     State(state): State<Arc<IngressState>>,
     req: Request<Body>,
-) -> impl IntoResponse {
+) -> Response<Body> {
     let path_and_query = req
         .uri()
         .path_and_query()
         .map_or("/", axum::http::uri::PathAndQuery::as_str);
     let url = state.proxy_url(path_and_query);
-    info!(url = %url, "ingress: proxying to app");
 
     let (parts, body) = req.into_parts();
-    let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
-        Ok(b) => b,
-        Err(e) => {
-            warn!(error = %e, "ingress: failed to read request body");
-            return (StatusCode::BAD_REQUEST, "body read error").into_response();
-        }
-    };
+    let mut fwd_headers = HeaderMap::new();
+    copy_proxied_headers(&parts.headers, &mut fwd_headers);
 
-    let mut backend_req = state
+    // Stream the client body to the backend — avoid buffering up to 10 MiB in memory.
+    let backend_req = state
         .proxy_client
         .request(parts.method.clone(), &url)
-        .body(body_bytes);
-    for (name, value) in &parts.headers {
-        let name_str = name.as_str();
-        if name_str.eq_ignore_ascii_case("connection")
-            || name_str.eq_ignore_ascii_case("keep-alive")
-            || name_str.eq_ignore_ascii_case("transfer-encoding")
-        {
-            continue;
-        }
-        if let Ok(v) = value.to_str() {
-            backend_req = backend_req.header(name_str, v);
-        }
-    }
+        .headers(fwd_headers)
+        .body(reqwest::Body::wrap_stream(
+            body.into_data_stream().map_err(std::io::Error::other),
+        ));
 
     let backend_resp = match backend_req.send().await {
         Ok(r) => r,
@@ -308,18 +319,11 @@ async fn ingress_proxy(
 
     let status = backend_resp.status();
     let headers = backend_resp.headers().clone();
-    let body = match backend_resp.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            warn!(error = %e, "ingress: failed to read backend body");
-            return (StatusCode::BAD_GATEWAY, "backend body error").into_response();
-        }
-    };
+    // Stream the backend body to the client — avoid a second full-buffer copy.
+    let stream = backend_resp.bytes_stream().map_err(std::io::Error::other);
 
-    let mut resp = (status, body).into_response();
-    for (name, value) in &headers {
-        resp.headers_mut().insert(name.clone(), value.clone());
-    }
-
+    let mut resp = Response::new(Body::from_stream(stream));
+    *resp.status_mut() = status;
+    copy_proxied_headers(&headers, resp.headers_mut());
     resp
 }

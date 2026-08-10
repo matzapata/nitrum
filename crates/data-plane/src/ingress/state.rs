@@ -5,6 +5,12 @@ use crate::storage::StorageClient;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
+/// Idle keep-alive sockets retained per backend host for the reverse proxy.
+///
+/// Must stay well above typical concurrent proxied load; capping too low
+/// (e.g. 64) forces connection churn under burst and tanks throughput.
+const PROXY_POOL_MAX_IDLE_PER_HOST: usize = 256;
+
 /// Dependencies required by the ingress server and its handlers.
 #[derive(Clone)]
 pub struct IngressState {
@@ -26,7 +32,20 @@ pub struct IngressState {
 }
 
 impl IngressState {
-    /// Build ingress state with a default proxy client and empty TLS cert hash.
+    /// HTTP client for loopback reverse-proxy to the user app.
+    ///
+    /// Enables `TCP_NODELAY` and an explicit per-host idle pool so concurrent
+    /// proxied requests reuse keep-alive connections.
+    #[must_use]
+    pub fn build_proxy_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .tcp_nodelay(true)
+            .pool_max_idle_per_host(PROXY_POOL_MAX_IDLE_PER_HOST)
+            .build()
+            .expect("ingress proxy reqwest client")
+    }
+
+    /// Build ingress state with a tuned proxy client and empty TLS cert hash.
     ///
     /// Precomputes the loopback proxy base URL from `[project].port`.
     #[must_use]
@@ -40,7 +59,7 @@ impl IngressState {
         Self {
             config,
             storage,
-            proxy_client: reqwest::Client::new(),
+            proxy_client: Self::build_proxy_client(),
             proxy_base_url,
             tls_cert_hash: Arc::new(RwLock::new(None)),
             app_ready,

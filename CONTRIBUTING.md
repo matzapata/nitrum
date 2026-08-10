@@ -115,6 +115,38 @@ done
 
 Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `status`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
 
+### Local capacity sweep (`nitrum local` + CPU pin)
+
+TODO: docker-compose cpus: 2
+Local Compose does **not** apply `scaling.num_cpus` (that knob is cloud-only). To reproduce the enclave's 2-vCPU ceiling on a dev machine, pin the running enclave container and reuse the same k6 harness against `https://127.0.0.1:443`.
+
+```bash
+# 1. Build the local data-plane image and start examples/hello
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata   # or your local prefix
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+
+docker buildx bake data-plane-local
+
+cargo run -p cli --bin nitrum -- local up --path examples/hello
+
+
+# 3. Same VU sweep as Nitro, pointed at the local stack
+export ENCLAVE_URL=https://127.0.0.1:443
+for route in status health crypto; do
+  for vus in 10 50 100 200; do
+    PERF_VUS=$vus PERF_ROUTES=$route \
+      PERF_RESULTS_DIR="tests/perf/results/local-vus-$vus-$route" \
+      ./tests/perf/run-macro.sh
+  done
+done > tests/perf/results/local.txt
+
+cargo run -p cli --bin nitrum -- local down --path examples/hello
+```
+
+Compare the local plateau shape (RPS vs VUs) against the Nitro sweep. If the ~700 RPS proxied-route ceiling reproduces under the 2-vCPU pin, cross-process CPU contention is the dominant cost and further iteration can stay local.
+
 ### Criterion micro / throughput benches
 
 In-process benches (no Docker) live under `crates/data-plane/benches/`:
@@ -130,7 +162,7 @@ cargo bench -p data-plane --features bench --bench tls_handshake
 cargo bench -p data-plane --features bench --bench throughput -- --save-baseline before-opt
 ```
 
-`throughput` fans out N concurrent `oneshot` calls per iteration so Criterion elems/sec tracks ops/sec under concurrency. Compare `throughput_ingress_status` vs `throughput_ingress_proxy` for the in-process hop tax; `*_otel` and `*_tuned` isolate instrumentation and `reqwest` pool/`TCP_NODELAY` cost. Body streaming still uses `--bench ingress` (1KiB / 64KiB payloads). Keep-alive / connection reuse needs a non-Criterion check (`strace` or pool metrics under a long-lived client).
+`throughput` fans out N concurrent `oneshot` calls per iteration so Criterion elems/sec tracks ops/sec under concurrency. Compare `throughput_ingress_status` vs `throughput_ingress_proxy` for the in-process hop tax; `*_otel` and `*_tuned` isolate instrumentation and `reqwest` pool/`TCP_NODELAY` cost. Body streaming still uses `--bench ingress` (1KiB / 64KiB payloads).
 
 ## Building platform images for development
 

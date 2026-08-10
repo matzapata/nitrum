@@ -9,7 +9,8 @@
 //!   (in-process status handler vs reverse-proxy to a mock loopback backend)
 //! - `*_otel` — same paths with `telemetry::http::instrument_router` applied
 //!   (production wraps ingress this way)
-//! - `throughput_ingress_proxy_tuned` — proxy with `tcp_nodelay` + larger idle pool
+//! - `throughput_ingress_proxy_tuned` — same as proxy using [`IngressState::build_proxy_client`]
+//!   explicitly (default path already uses it; kept for A/B vs a plain `Client::new()`)
 //! - `throughput_crypto_roundtrip` — encrypt+decrypt via the crypto API router
 
 mod common;
@@ -54,25 +55,20 @@ fn spawn_mock_backend(rt: &tokio::runtime::Runtime) -> u16 {
     })
 }
 
-fn tuned_proxy_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .tcp_nodelay(true)
-        .pool_max_idle_per_host(64)
-        .build()
-        .expect("build tuned proxy client")
+fn plain_proxy_client() -> reqwest::Client {
+    reqwest::Client::new()
 }
 
-fn ingress_router(
-    backend_port: u16,
-    with_otel: bool,
-    proxy_client: Option<reqwest::Client>,
-) -> Router {
+/// `use_tuned_client`: `None` / `Some(true)` → production builder;
+/// `Some(false)` → plain `Client::new()` for A/B.
+fn ingress_router(backend_port: u16, with_otel: bool, use_tuned_client: Option<bool>) -> Router {
     let nitrum: NitrumConfig = toml::from_str(NITRUM_TOML).expect("parse sample nitrum.toml");
     let data_plane_cfg = with_backend_port(data_plane_config(nitrum), backend_port);
     let storage = Arc::new(StorageClient::from_config(&data_plane_cfg));
     let mut state = IngressState::new(data_plane_cfg, storage, Arc::new(AtomicBool::new(true)));
-    if let Some(proxy_client) = proxy_client {
-        state.proxy_client = proxy_client;
+    match use_tuned_client {
+        None | Some(true) => {}
+        Some(false) => state.proxy_client = plain_proxy_client(),
     }
     let router = build_https_router(Arc::new(state));
     if with_otel {
@@ -186,7 +182,7 @@ fn throughput_benches(c: &mut Criterion) {
 
     let ingress_plain = ingress_router(backend_port, false, None);
     let ingress_otel = ingress_router(backend_port, true, None);
-    let ingress_tuned = ingress_router(backend_port, false, Some(tuned_proxy_client()));
+    let ingress_tuned = ingress_router(backend_port, false, Some(true));
     let crypto_app = crypto_api_router();
 
     {
