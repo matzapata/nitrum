@@ -11,14 +11,13 @@ use axum::{
     Router,
     body::Body,
     extract::{Query, State},
-    http::{HeaderMap, HeaderName, Request, Response, StatusCode},
+    http::{HeaderMap, HeaderName, Request, Response, StatusCode, uri::PathAndQuery},
     response::IntoResponse,
     routing::get,
 };
 use axum_server::bind;
 use axum_server::tls_rustls::bind_rustls;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use futures_util::TryStreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -290,39 +289,44 @@ async fn ingress_proxy(
     State(state): State<Arc<IngressState>>,
     req: Request<Body>,
 ) -> Response<Body> {
-    let path_and_query = req
-        .uri()
-        .path_and_query()
-        .map_or("/", axum::http::uri::PathAndQuery::as_str);
-    let url = state.proxy_url(path_and_query);
-
     let (parts, body) = req.into_parts();
+    let path_and_query = parts
+        .uri
+        .path_and_query()
+        .cloned()
+        .unwrap_or_else(|| PathAndQuery::from_static("/"));
+    let uri = state.proxy_uri(path_and_query);
+
     let mut fwd_headers = HeaderMap::new();
     copy_proxied_headers(&parts.headers, &mut fwd_headers);
 
-    // Stream the client body to the backend — avoid buffering up to 10 MiB in memory.
-    let backend_req = state
-        .proxy_client
-        .request(parts.method.clone(), &url)
-        .headers(fwd_headers)
-        .body(reqwest::Body::wrap_stream(
-            body.into_data_stream().map_err(std::io::Error::other),
-        ));
-
-    let backend_resp = match backend_req.send().await {
+    // Forward the client body as-is — `axum::body::Body` is already an
+    // `http_body::Body`, so no stream adapter / buffering is needed.
+    let mut backend_req = match Request::builder()
+        .method(parts.method)
+        .uri(uri.clone())
+        .body(body)
+    {
         Ok(r) => r,
         Err(e) => {
-            warn!(url = %url, error = %e, "ingress: proxy request failed");
+            warn!(uri = %uri, error = %e, "ingress: failed to build backend request");
+            return (StatusCode::BAD_REQUEST, "invalid request").into_response();
+        }
+    };
+    *backend_req.headers_mut() = fwd_headers;
+
+    let backend_resp = match state.proxy_client.request(backend_req).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(uri = %uri, error = %e, "ingress: proxy request failed");
             return (StatusCode::BAD_GATEWAY, "backend unreachable").into_response();
         }
     };
 
     let status = backend_resp.status();
     let headers = backend_resp.headers().clone();
-    // Stream the backend body to the client — avoid a second full-buffer copy.
-    let stream = backend_resp.bytes_stream().map_err(std::io::Error::other);
-
-    let mut resp = Response::new(Body::from_stream(stream));
+    // Stream the backend body to the client without an intermediate buffer.
+    let mut resp = Response::new(Body::new(backend_resp.into_body()));
     *resp.status_mut() = status;
     copy_proxied_headers(&headers, resp.headers_mut());
     resp

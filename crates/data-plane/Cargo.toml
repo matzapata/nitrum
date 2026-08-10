@@ -31,7 +31,7 @@ base64 = "0.22"
 bytes = "1"
 humantime = "2"
 hyper-rustls = "0.27"
-hyper-util = { version = "0.1", features = ["client-legacy"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 instant-acme = "0.8"
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
@@ -49,8 +49,7 @@ anyhow = "1"
 thiserror = "2"
 rand = "0.8"
 aes-gcm = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"
 aws-sdk-kms = "1"
