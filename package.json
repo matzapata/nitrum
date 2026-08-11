@@ -7,7 +7,7 @@
     "examples/wallet"
   ],
   "optionalDependencies": {
-    "@biomejs/cli-linux-x64": "2.4.16",
+    "@biomejs/cli-linux-x64": "2.5.7",
     "@rollup/rollup-linux-x64-gnu": "4.62.0"
   },
   "devDependencies": {
