@@ -61,7 +61,6 @@ RUN mkdir -p crates/cli/src crates/control-plane/src crates/data-plane/src crate
     && touch crates/data-plane/src/lib.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/crypto.rs \
     && echo 'fn main() {}' > crates/data-plane/benches/ingress.rs \
-    && echo 'fn main() {}' > crates/data-plane/benches/tls_handshake.rs \
     && echo 'fn main() {}' > examples/hello/src/main.rs \
     && echo 'fn main() {}' > examples/wallet/src/main.rs \
     && touch crates/config/src/lib.rs \

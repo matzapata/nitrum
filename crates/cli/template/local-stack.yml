@@ -2,6 +2,8 @@
 #
 # The enclave image is built by `nitrum local up` (CLI), not by Compose.
 # Compose only runs the pre-tagged `ENCLAVE_IMAGE`.
+# `nitrum local` also sets ENCLAVE_CPUS / ENCLAVE_MEMORY from `[scaling]` in nitrum.toml
+# so the enclave container matches cloud enclave CPU/RAM budget.
 #
 # Usage:
 #   docker compose up            # start (requires ENCLAVE_IMAGE already built)
@@ -235,9 +237,12 @@ services:
 
   enclave:
     # Image is built by `nitrum local up` via `build_enclave_image` (not Compose).
+    # CPU/RAM limits mirror `[scaling].num_cpus` / `ram_size_mib` (set by the CLI).
     image: ${ENCLAVE_IMAGE}
     platform: linux/amd64
     pull_policy: never
+    cpus: ${ENCLAVE_CPUS}
+    mem_limit: ${ENCLAVE_MEMORY}
     cap_add:
       - NET_ADMIN
     hostname: nitrum.local

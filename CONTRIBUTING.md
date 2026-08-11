@@ -71,20 +71,27 @@ See [docs/releases.md](docs/releases.md) for SemVer, `nitrum.toml` breaking-chan
 
 ## Macro load testing (EC2 Nitro)
 
-Reproducible k6 load against a **deployed** enclave (not `nitrum local`). Prefer a load client in the **same VPC** as the stack. The harness does not deploy or destroy stacks — use `nitrum cloud deploy` / `nitrum cloud destroy` (or `tests/e2e/cloud.sh`) for that.
+Reproducible k6 load against a **deployed** enclave. Prefer a load client in the **same VPC** as the stack. The harness does not deploy or destroy stacks — use `nitrum cloud deploy` / `nitrum cloud destroy` (or `tests/e2e/cloud.sh`) for that.
 
 **Prerequisites on the load client:** [`k6`](https://k6.io/), [`jq`](https://jqlang.github.io/jq/), and a live `ENCLAVE_URL` (NLB HTTPS origin).
 
 ```bash
 # macOS
-brew install k6 jq git
+brew install k6 jq
 
 # Amazon Linux 2023
 sudo dnf install -y https://dl.k6.io/rpm/repo.rpm
-sudo dnf install -y k6 jq git
+sudo dnf install -y k6 jq
 ```
 
-**Single run** (default: `GET /health` then `POST /crypto`, 50 VUs × 30s):
+If you're running these steps within an EC2 instance (recommended), make sure you have `git` installed and that you've cloned the repository first:
+
+```bash
+sudo dnf install -y git
+git clone https://github.com/matzapata/nitrum
+```
+
+**Single run** (default: `GET /.well-known/enclave/status`, `GET /health`, then `POST /crypto`, 50 VUs × 30s):
 
 ```bash
 ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com ./tests/perf/run-macro.sh
@@ -100,7 +107,6 @@ for vus in 10 50 100 200; do
     ./tests/perf/run-macro.sh
 done
 
-export ENCLAVE_URL=https://xxxx.elb.us-east-1.amazonaws.com
 for vus in 10 50 100 200; do
   PERF_VUS=$vus PERF_ROUTES=health \
     PERF_RESULTS_DIR="tests/perf/results/vus-$vus-health" \
@@ -115,6 +121,50 @@ done
 ```
 
 Useful knobs: `PERF_VUS`, `PERF_DURATION`, `PERF_ROUTES` (`health`, `status`, `crypto`), optional `tests/perf/.env` from `.env.example`. Results land under `tests/perf/results/` (gitignored). After a baseline run, update the **Performance** section in [`README.md`](README.md).
+
+### Local capacity sweep (`nitrum local`)
+
+`nitrum local up` applies `[scaling].num_cpus` and `ram_size_mib` as Compose `cpus` / `mem_limit` on the `enclave` service (same knobs cloud passes to `nitro-cli`). Reuse the k6 harness against `https://127.0.0.1:443`.
+
+Local numbers will **not** match a Nitro deployment (no real enclave, different networking/CPU isolation). Use this only as a quick reference for shape and regressions before you pay for a cloud sweep.
+
+```bash
+# Build the local data-plane image
+export TAG=dev
+export GIT_SHA=$(git rev-parse HEAD)
+export IMAGE_PREFIX=docker.io/matzapata   # or your local prefix
+export NITRUM_RUNTIME_DATA_PLANE_IMAGE="${IMAGE_PREFIX}/data-plane:${TAG}"
+docker buildx bake data-plane-local
+
+# For example, to start the `examples/hello` project:
+cargo run -p cli --bin nitrum -- local up --path examples/hello
+
+# Same VU sweep as Nitro, pointed at the local stack
+export ENCLAVE_URL=https://127.0.0.1:443
+for route in status health crypto; do
+  for vus in 10 50 100 200; do
+    PERF_VUS=$vus PERF_ROUTES=$route \
+      PERF_RESULTS_DIR="tests/perf/results/local-vus-$vus-$route" \
+      ./tests/perf/run-macro.sh
+  done
+done > tests/perf/results/local.txt
+
+# Tear down
+cargo run -p cli --bin nitrum -- local down --path examples/hello
+```
+
+Compare the local plateau shape (RPS vs VUs) against the Nitro sweep — relative trends matter more than absolute RPS.
+
+### Criterion micro benches
+
+In-process latency benches (no Docker) live under `crates/data-plane/benches/`:
+
+```bash
+cargo bench -p data-plane --features bench --bench crypto
+cargo bench -p data-plane --features bench --bench ingress
+```
+
+These measure single-operation latency and how it scales with payload size (`crypto`: AES-GCM encrypt/decrypt across sizes; `ingress`: full proxy hop including body buffering/drain for `get_empty`, `post_1kiB`, `post_64kiB`). They intentionally don't model concurrency — for throughput/capacity under concurrent load, use the k6 harness above (`tests/perf/run-macro.sh`), which drives real concurrent connections against a real server instead of in-process `oneshot` calls on a single thread.
 
 ## Building platform images for development
 

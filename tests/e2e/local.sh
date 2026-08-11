@@ -164,4 +164,3 @@ step_wait_ready
 step_logs
 step_tests
 step_down
-echo "=== local.sh finished ==="

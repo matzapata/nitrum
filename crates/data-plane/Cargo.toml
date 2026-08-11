@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+autobenches = false
 
 [lib]
 name = "data_plane"
@@ -31,7 +32,7 @@ base64 = "0.22"
 bytes = "1"
 humantime = "2"
 hyper-rustls = "0.27"
-hyper-util = { version = "0.1", features = ["client-legacy"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 instant-acme = "0.8"
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
@@ -64,6 +65,7 @@ regex = "1"
 
 [dev-dependencies]
 criterion = { workspace = true }
+futures = "0.3"
 tower = "0.5"
 toml = "1"
 
@@ -76,11 +78,5 @@ required-features = ["bench"]
 [[bench]]
 name = "ingress"
 path = "benches/ingress.rs"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "tls_handshake"
-path = "benches/tls_handshake.rs"
 harness = false
 required-features = ["bench"]

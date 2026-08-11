@@ -17,6 +17,10 @@ pub struct EnclaveLocalStack<'a> {
     /// Base image for the enclave Dockerfile (`DATA_PLANE_IMAGE`);
     /// derived from `[runtime].data_plane` with a `-local` tag suffix.
     data_plane_image: String,
+    /// From `[scaling].num_cpus` — Compose `cpus` on the enclave service.
+    enclave_cpus: u32,
+    /// From `[scaling].ram_size_mib` — Compose `mem_limit` (Docker `Nm` form).
+    enclave_memory: String,
 }
 
 impl<'a> EnclaveLocalStack<'a> {
@@ -24,15 +28,26 @@ impl<'a> EnclaveLocalStack<'a> {
     ///
     /// Returns an error when the project path cannot be used to construct the stack.
     pub fn new(project_root: &'a Path, cfg: &NitrumConfig) -> Result<Self> {
+        let ram_mib = cfg.scaling.ram_size_mib.get();
         Ok(Self {
             project_root,
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
             data_plane_image: cfg.runtime.data_plane.with_tag_suffix("local").to_string(),
+            enclave_cpus: cfg.scaling.num_cpus.get(),
+            enclave_memory: format!("{ram_mib}m"),
         })
+    }
+
+    /// Enclave Compose resource limits from `[scaling]` (for status messages).
+    #[must_use]
+    pub const fn resource_limits(&self) -> (u32, &str) {
+        (self.enclave_cpus, self.enclave_memory.as_str())
     }
 
     fn apply_stack_env<'cmd>(&self, cmd: &'cmd mut Command) -> &'cmd mut Command {
         cmd.env("ENCLAVE_IMAGE", &self.enclave_image)
+            .env("ENCLAVE_CPUS", self.enclave_cpus.to_string())
+            .env("ENCLAVE_MEMORY", &self.enclave_memory)
     }
 
     /// Start the local stack (build enclave image, then `docker compose up`).
@@ -176,5 +191,24 @@ impl<'a> EnclaveLocalStack<'a> {
         std::fs::write(&compose_path, Self::local_stack_template())
             .with_context(|| format!("write {}", compose_path.display()))?;
         Ok(constants::ENCLAVE_LOCAL_STACK_TEMPLATE_FILE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EnclaveLocalStack;
+    use config::NitrumConfig;
+    use std::path::Path;
+
+    #[test]
+    fn resource_limits_follow_scaling() {
+        let mut cfg: NitrumConfig =
+            toml::from_str(include_str!("../../../../examples/hello/nitrum.toml"))
+                .expect("hello nitrum.toml");
+        cfg.scaling.num_cpus = std::num::NonZeroU32::new(4).unwrap();
+        cfg.scaling.ram_size_mib = std::num::NonZeroU32::new(8192).unwrap();
+
+        let stack = EnclaveLocalStack::new(Path::new("/tmp"), &cfg).expect("stack");
+        assert_eq!(stack.resource_limits(), (4, "8192m"));
     }
 }
