@@ -186,7 +186,7 @@ This command is the core of reproducible builds; see the dedicated section below
 
 Local development via Docker Compose:
 
-- `nitrum local up` — build the enclave image, then start the stack in the background.
+- `nitrum local up` — build the enclave image, then start the stack in the background. Applies `[scaling].num_cpus` and `ram_size_mib` as Compose CPU/memory limits on the `enclave` service (same budget cloud passes to `nitro-cli`).
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
 
@@ -268,7 +268,7 @@ Options are defined in the `config` crate; the sample project comments point to 
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).
 - `[health_check]` — path, port, and interval for **application** health checks. The data-plane probes `http://127.0.0.1:{port}{path}` and gates `GET /.well-known/enclave/status` on the result (NLB uses that route). While not ready it retries every 500ms; once ready it uses `interval`. Probe timeout and consecutive-failure threshold are platform constants (2s / 3 failures).
-- `[scaling]` — replica counts, enclave CPU/RAM, and `instance_type` (Nitro Enclave–capable EC2 type allowlist; default `m6i.xlarge`). For zero-downtime rolling, keep `max_replicas >= desired_replicas + 1`.
+- `[scaling]` — replica counts, enclave CPU/RAM, and `instance_type` (Nitro Enclave–capable EC2 type allowlist; default `m6i.xlarge`). `num_cpus` / `ram_size_mib` apply to cloud enclaves and to the local Compose `enclave` service. For zero-downtime rolling, keep `max_replicas >= desired_replicas + 1`.
 - `[cloud]` — CloudFormation-only settings (ignored by `nitrum local`):
   - `xray_tracing` — ADOT → X-Ray (default `false`; logs and EMF metrics still export).
   - `log_retention_days` — CloudWatch Logs retention (default `7`).

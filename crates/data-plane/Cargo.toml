@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+autobenches = false
 
 [lib]
 name = "data_plane"
@@ -77,17 +78,5 @@ required-features = ["bench"]
 [[bench]]
 name = "ingress"
 path = "benches/ingress.rs"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "tls_handshake"
-path = "benches/tls_handshake.rs"
-harness = false
-required-features = ["bench"]
-
-[[bench]]
-name = "throughput"
-path = "benches/throughput.rs"
 harness = false
 required-features = ["bench"]

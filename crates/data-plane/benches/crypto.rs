@@ -12,34 +12,38 @@ const SIZES: &[(u64, &str)] = &[
     (384 * 1024, "384KiB"),
 ];
 
-fn encrypt_benches(c: &mut Criterion) {
+fn crypto_benches(c: &mut Criterion) {
     let client = CryptoClient::from_dek(&DEK).expect("valid DEK");
-    let mut group = c.benchmark_group("encrypt");
-    for &(size, label) in SIZES {
-        let payload = vec![0xABu8; size as usize];
-        group.throughput(Throughput::Bytes(size));
-        group.bench_with_input(BenchmarkId::new("encrypt", label), &payload, |b, data| {
-            b.iter(|| client.encrypt(black_box(data)).expect("encrypt"));
-        });
+
+    {
+        let mut group = c.benchmark_group("encrypt");
+        for &(size, label) in SIZES {
+            let payload = vec![0xABu8; size as usize];
+
+            group.throughput(Throughput::Bytes(size));
+            group.bench_with_input(BenchmarkId::new("encrypt", label), &payload, |b, data| {
+                b.iter(|| client.encrypt(black_box(data)).expect("encrypt"));
+            });
+        }
+        group.finish();
     }
-    group.finish();
+
+    {
+        let mut group = c.benchmark_group("decrypt");
+        for &(size, label) in SIZES {
+            let payload = vec![0xABu8; size as usize];
+            let ciphertext = client.encrypt(&payload).expect("encrypt for setup");
+
+            group.throughput(Throughput::Bytes(size));
+            group.bench_with_input(
+                BenchmarkId::new("decrypt", label),
+                &ciphertext,
+                |b, data| b.iter(|| client.decrypt(black_box(data)).expect("decrypt")),
+            );
+        }
+        group.finish();
+    }
 }
 
-fn decrypt_benches(c: &mut Criterion) {
-    let client = CryptoClient::from_dek(&DEK).expect("valid DEK");
-    let mut group = c.benchmark_group("decrypt");
-    for &(size, label) in SIZES {
-        let payload = vec![0xABu8; size as usize];
-        let ciphertext = client.encrypt(&payload).expect("encrypt for setup");
-        group.throughput(Throughput::Bytes(size));
-        group.bench_with_input(
-            BenchmarkId::new("decrypt", label),
-            &ciphertext,
-            |b, data| b.iter(|| client.decrypt(black_box(data)).expect("decrypt")),
-        );
-    }
-    group.finish();
-}
-
-criterion_group!(benches, encrypt_benches, decrypt_benches);
+criterion_group!(benches, crypto_benches);
 criterion_main!(benches);
