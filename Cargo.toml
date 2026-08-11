@@ -47,3 +47,7 @@ criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 # `cargo build -p hello` still uses the local crate.
 [patch."https://github.com/matzapata/nitrum.git"]
 nitrum-sdk = { path = "crates/sdk" }
+
+[profile.samply]
+inherits = "release"
+debug = true

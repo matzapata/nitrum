@@ -217,4 +217,3 @@ step_cloud_logs
 step_tests
 step_destroy
 step_env_delete
-echo "=== cloud.sh finished ==="
