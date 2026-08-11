@@ -6,7 +6,7 @@
 #                            cargo run -q ... (quiet compile; see NITRUM_E2E_RUST_LOG)
 #   NITRUM_E2E_RUST_LOG      tracing filter for default cargo path (default: warn,cli=info)
 #   NITRUM_E2E_PARENT_DIR, NITRUM_E2E_INIT_NAME, PROJECT path
-#   ENCLAVE_URL              default: https://127.0.0.1:443 (override for https://nitrum.local if preferred)
+#   ENCLAVE_URL              default: https://127.0.0.1:443 (override for https://nitrum.localhost if preferred)
 #   ENCLAVE_TLS_INSECURE     default: 1
 #   NITRUM_LOCAL_LOGS_TAIL   passed to `nitrum local logs --tail` (default: 80)
 #   NITRUM_LOCAL_WAIT_READY_TIMEOUT_SECONDS  default 60

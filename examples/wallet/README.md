@@ -15,7 +15,7 @@ cd examples/wallet
 nitrum local up   # or nitrum build / cloud deploy
 
 # Against a running enclave:
-ENCLAVE_URL=https://nitrum.local ENCLAVE_TLS_INSECURE=1 npm test
+ENCLAVE_URL=https://nitrum.localhost ENCLAVE_TLS_INSECURE=1 npm test
 ```
 
 Integration tests live under `tests/` (attestation when not local-dev TLS, `/health`,

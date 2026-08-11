@@ -5,7 +5,7 @@
  * - `ENCLAVE_URL` — primary (same as the sample client), or
  * - `NITRUM_E2E_BASE_URL` — fallback for the repo e2e scripts.
  *
- * Examples: deployed `https://…`; local `http://nitrum.local` or `http://localhost:8080`
+ * Examples: deployed `https://…`; local `https://nitrum.localhost` or `https://127.0.0.1:443`
  * after `nitrum local …`.
  *
  * Optional: `ENCLAVE_TLS_INSECURE=1` or `true` relaxes TLS verification for attestation
@@ -32,7 +32,7 @@ function resolveBaseUrl() {
 
 function isLocalDevelopment(url) {
   return (
-    url.includes("nitrum.local") ||
+    url.includes("nitrum.localhost") ||
     url.includes("localhost") ||
     url.includes("127.0.0.1")
   );
@@ -157,14 +157,16 @@ describe("nitrum project (integration)", () => {
     assert.equal(text.trim(), "OK");
   });
 
-  it("GET /egress returns JSON (outbound reachability)", async () => {
-    const data = await fetchJson(`${baseUrl}/egress`);
+  it("GET /egress?url= allows allowlisted host", async () => {
+    const url = encodeURIComponent("https://api.ipify.org/?format=json");
+    const data = await fetchJson(`${baseUrl}/egress?url=${url}`);
     assert.ok(data && typeof data === "object");
-    assert.ok("origin" in data || "ip" in data);
+    assert.equal(data.ok, true);
   });
 
-  it("GET /egress-blocked is denied when example.com is not whitelisted", async () => {
-    const data = await fetchJson(`${baseUrl}/egress-blocked`);
+  it("GET /egress?url= denies non-allowlisted host", async () => {
+    const url = encodeURIComponent("https://example.com/");
+    const data = await fetchJson(`${baseUrl}/egress?url=${url}`);
     assert.ok(data && typeof data === "object");
     assert.equal(data.ok, false);
     assert.ok(typeof data.error === "string" && data.error.length > 0);

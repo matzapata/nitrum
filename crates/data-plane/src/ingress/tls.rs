@@ -5,10 +5,10 @@
 //! provides a cert (see deployment docs). Cert PEM + key are stored in shared storage for ACME,
 //! wrapped with the data-plane DEK (AES-GCM).
 
+use super::acme::{AcmeEvent, AcmeState};
 use super::state::IngressState;
-use crate::crypto::CryptoClient;
-use crate::storage::Leader;
-use crate::storage::keys;
+use crate::crypto::Crypto;
+use crate::storage::{Leader, ObjectStore, keys};
 use anyhow::{Context, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use sha2::{Digest, Sha256};
@@ -17,8 +17,6 @@ use std::sync::Arc;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::info;
-
-use super::acme::{AcmeEvent, AcmeState};
 
 #[cfg(feature = "pebble")]
 use super::acme::pebble_client_tls_config;
@@ -31,17 +29,17 @@ pub use super::acme::challenge_handler;
 // ---------------------------------------------------------------------------
 
 /// TLS state machine: provides `RustlsConfig` for the server and `.next()` to drive ACME events.
-pub struct TlsState {
-    ingress: Arc<IngressState>,
+pub struct TlsState<S: ObjectStore + 'static, C: Crypto + 'static> {
     rustls_config: RustlsConfig,
-    acme_state: Option<AcmeState>,
+    ingress: Arc<IngressState<S>>,
+    acme_state: Option<AcmeState<S, C>>,
 }
 
-impl TlsState {
+impl<S: ObjectStore + 'static, C: Crypto + 'static> TlsState<S, C> {
     /// Build the TLS state. Use `.rustls_config()` for the server and spawn
     /// `.next()` in a loop to drive provisioning/renewal and log events.
     #[must_use]
-    pub fn new(ingress: Arc<IngressState>, crypto: Arc<CryptoClient>) -> Self {
+    pub fn new(ingress: Arc<IngressState<S>>, crypto: Arc<C>) -> Self {
         let domain = ingress.config.tls_termination.domain.to_string();
         let acme_enabled = ingress.config.tls_termination.acme;
         let (server_config, cert_hash) = ephemeral_server_config(std::slice::from_ref(&domain));

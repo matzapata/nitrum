@@ -8,6 +8,13 @@ on:
         type: string
         default: us-east-1
         required: true
+  workflow_call:
+    inputs:
+      aws_region:
+        description: AWS region for deploy and tests
+        type: string
+        default: us-east-1
+        required: false
 
 concurrency:
   group: e2e-cloud
@@ -21,6 +28,9 @@ jobs:
   e2e-cloud:
     name: AWS E2E Cloud
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -115,11 +125,11 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.aws_region }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Run E2E cloud tests
         env:
-          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_REGION: ${{ env.AWS_REGION }}
           NITRUM_RUNTIME_CONTROL_PLANE_IMAGE: ${{ env.GHCR_PREFIX }}/control-plane:${{ github.sha }}
           NITRUM_RUNTIME_DATA_PLANE_IMAGE: ${{ env.GHCR_PREFIX }}/data-plane:${{ github.sha }}
           NITRUM_RUNTIME_NITRO_CLI_IMAGE: ${{ env.GHCR_PREFIX }}/nitro-cli:${{ github.sha }}

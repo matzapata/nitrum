@@ -2,8 +2,8 @@
 
 use super::constants::CERTIFICATE_RENEWAL_FRACTION;
 use super::utils::acme_https_client;
-use crate::crypto::CryptoClient;
-use crate::storage::StorageClient;
+use crate::crypto::Crypto;
+use crate::storage::ObjectStore;
 use crate::storage::keys;
 use anyhow::{Context, Result, bail};
 use instant_acme::{
@@ -17,21 +17,21 @@ use std::time::Duration;
 use tracing::{debug, info};
 use x509_parser::parse_x509_certificate;
 
-pub struct AcmeClient {
+pub struct AcmeClient<S: ObjectStore, C: Crypto> {
     /// Persistent storage layer for ACME credentials.
-    storage: Arc<StorageClient>,
+    storage: Arc<S>,
     /// Encrypts ACME account JSON at rest (same DEK as TLS material).
-    crypto: Arc<CryptoClient>,
+    crypto: Arc<C>,
     /// URL to the ACME directory endpoint.
     directory_url: String,
     /// Optional client TLS configuration for ACME endpoint.
     client_tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
-impl AcmeClient {
+impl<S: ObjectStore, C: Crypto> AcmeClient<S, C> {
     pub(crate) const fn new(
-        storage: Arc<StorageClient>,
-        crypto: Arc<CryptoClient>,
+        storage: Arc<S>,
+        crypto: Arc<C>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Self {
@@ -106,7 +106,6 @@ impl AcmeClient {
         &self,
         account: Account,
         domain: &str,
-        storage: &StorageClient,
     ) -> Result<(String, String)> {
         let identifiers = [Identifier::Dns(domain.to_string())];
         debug!(domain, "ACME: creating new order");
@@ -127,7 +126,7 @@ impl AcmeClient {
                 let mut challenge = authz
                     .challenge(ChallengeType::Http01)
                     .ok_or_else(|| anyhow::anyhow!("no HTTP-01 challenge"))?;
-                storage
+                self.storage
                     .set_object(
                         &keys::acme_challenge_key(&challenge.token),
                         challenge.key_authorization().as_str().as_bytes(),

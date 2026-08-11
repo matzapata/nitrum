@@ -1,7 +1,7 @@
 //! Shared dependencies for the ingress HTTP/HTTPS server.
 
 use crate::DataPlaneConfig;
-use crate::storage::StorageClient;
+use crate::storage::ObjectStore;
 use axum::body::Body;
 use axum::http::uri::{Authority, PathAndQuery, Scheme, Uri};
 use hyper_util::client::legacy::Client;
@@ -21,11 +21,11 @@ pub type ProxyClient = Client<HttpConnector, Body>;
 
 /// Dependencies required by the ingress server and its handlers.
 #[derive(Clone)]
-pub struct IngressState {
+pub struct IngressState<S: ObjectStore> {
     /// Resolved data-plane configuration.
     pub config: DataPlaneConfig,
     /// Storage client for ACME HTTP-01 challenge payloads.
-    pub storage: Arc<StorageClient>,
+    pub storage: Arc<S>,
     /// Reused HTTP client for reverse-proxy requests to the user application.
     pub proxy_client: ProxyClient,
     /// Precomputed `127.0.0.1:{port}` authority for reverse-proxy URI assembly.
@@ -39,7 +39,7 @@ pub struct IngressState {
     pub app_ready: Arc<AtomicBool>,
 }
 
-impl IngressState {
+impl<S: ObjectStore> IngressState<S> {
     /// HTTP client for loopback reverse-proxy to the user app.
     ///
     /// Uses an explicit per-host idle pool so concurrent proxied requests reuse
@@ -57,11 +57,7 @@ impl IngressState {
     ///
     /// Precomputes the loopback proxy authority from `[project].port`.
     #[must_use]
-    pub fn new(
-        config: DataPlaneConfig,
-        storage: Arc<StorageClient>,
-        app_ready: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn new(config: DataPlaneConfig, storage: Arc<S>, app_ready: Arc<AtomicBool>) -> Self {
         let port = config.nitrum.project.port.get();
         let proxy_authority: Authority = format!("127.0.0.1:{port}")
             .parse()

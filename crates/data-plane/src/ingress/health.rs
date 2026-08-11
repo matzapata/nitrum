@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 /// Connect + request timeout for each probe attempt.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Consecutive probe failures required to clear [`IngressState::app_ready`].
+/// Consecutive probe failures required to clear [`crate::ingress::IngressState::app_ready`].
 const FAILURE_THRESHOLD: u32 = 3;
 
 /// Retry delay while the app is not yet ready (cold start / recovering).

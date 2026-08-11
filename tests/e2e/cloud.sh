@@ -189,7 +189,7 @@ step_tests() {
     base="$(resolve_base_url)" || exit 1
     export ENCLAVE_URL="${base}"
     export ENCLAVE_TLS_INSECURE="${ENCLAVE_TLS_INSECURE:-1}"
-    echo "=== npm test (ENCLAVE_URL=${ENCLAVE_URL}) ==="
+    echo "=== npm test (ENCLAVE_URL=${ENCLAVE_URL}, ENCLAVE_TLS_INSECURE=${ENCLAVE_TLS_INSECURE}) ==="
     (cd "${PROJECT}" && npm install && npm test)
 }
 
@@ -205,6 +205,25 @@ step_env_delete() {
     ENV_SET=0
 }
 
+# Fail the job if destroy left a CloudFormation stack behind.
+assert_stack_gone() {
+    if [[ -z "${AWS_REGION:-}" ]]; then
+        return 0
+    fi
+    command -v aws >/dev/null 2>&1 || return 0
+    local status
+    status="$(aws cloudformation describe-stacks \
+        --stack-name "${STACK_NAME}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].StackStatus' \
+        --output text 2>/dev/null || echo "NOT_FOUND")"
+    if [[ "${status}" != "NOT_FOUND" && "${status}" != "None" ]]; then
+        echo "error: stack ${STACK_NAME} still present after destroy (status=${status})" >&2
+        exit 1
+    fi
+    echo "=== stack ${STACK_NAME} confirmed absent ==="
+}
+
 trap cleanup EXIT
 
 step_init
@@ -216,4 +235,5 @@ step_wait_active
 step_cloud_logs
 step_tests
 step_destroy
+assert_stack_gone
 step_env_delete

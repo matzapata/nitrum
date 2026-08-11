@@ -29,7 +29,7 @@ function resolveBaseUrl() {
 
 function isLocalDevelopment(url) {
   return (
-    url.includes("nitrum.local") ||
+    url.includes("nitrum.localhost") ||
     url.includes("localhost") ||
     url.includes("127.0.0.1")
   );

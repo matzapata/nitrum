@@ -4,7 +4,7 @@
 //! Provide an attestation document for the user process to use for attestation.
 
 mod attest;
-mod client;
+mod dek;
 mod kms;
 mod kv;
 #[cfg(feature = "enclave")]
@@ -13,6 +13,6 @@ mod random;
 pub mod server;
 
 pub use attest::get_attestation_doc;
-pub use client::CryptoClient;
-pub use kms::Kms;
+pub use dek::{AesGcmCrypto, Crypto};
+pub use kms::{AwsKms, Kms};
 pub use server::init;

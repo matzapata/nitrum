@@ -126,7 +126,7 @@ impl Default for TlsTermination {
     fn default() -> Self {
         Self::try_new(
             false,
-            TlsDomain::try_new("nitrum.local").expect("default tls domain is valid"),
+            TlsDomain::try_new("nitrum.localhost").expect("default tls domain is valid"),
         )
         .expect("default tls termination is valid")
     }
@@ -156,6 +156,12 @@ mod tests {
     fn rejects_acme_with_local_domain() {
         let domain = TlsDomain::try_new("nitrum.local").expect("valid domain");
         assert!(TlsTermination::try_new(true, domain).is_err());
+    }
+
+    #[test]
+    fn accepts_acme_with_localhost_domain() {
+        let domain = TlsDomain::try_new("nitrum.localhost").expect("valid domain");
+        assert!(TlsTermination::try_new(true, domain).is_ok());
     }
 
     #[test]

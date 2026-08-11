@@ -29,7 +29,7 @@ In-repo demos under `examples/hello` and `examples/wallet` use the same project-
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
-The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Platform paths below are always handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
+The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.localhost` in the local Compose stack, or your deployed domain). Platform paths below are always handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
 
 #### Endpoints reachable from the Internet (or local TLS client)
 
@@ -125,7 +125,7 @@ Nitrum separates **platform** telemetry from **application** telemetry in OpenTe
 | Layer | `service.name` | `nitrum.component` | Metric prefix (examples) |
 |-------|----------------|--------------------|--------------------------|
 | Control-plane | `control-plane` | `core` | `nitrum.enclave.restarts` |
-| Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.kms.duration.ms` |
+| Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.acme.events` |
 | Your app | `project.name` from `nitrum.toml` | `user-app` | your choice (examples use `app.*`) |
 
 Platform binaries always set `service.namespace=nitrum`. When OTLP export is enabled, the data-plane also injects standard OpenTelemetry environment variables into your application process before it starts:

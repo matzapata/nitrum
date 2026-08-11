@@ -12,5 +12,5 @@ mod utils;
 pub mod networking;
 
 pub use bootstrap::{DataPlaneConfig, ListenAddrs};
-pub use crypto::{CryptoClient, Kms};
-pub use storage::StorageClient;
+pub use crypto::{AesGcmCrypto, AwsKms, Crypto, Kms};
+pub use storage::{DynamoObjectStore, InMemoryObjectStore, ObjectStore};

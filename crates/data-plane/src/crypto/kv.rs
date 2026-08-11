@@ -1,7 +1,8 @@
 //! DEK-wrapped key-value persistence in shared storage.
 
-use crate::crypto::CryptoClient;
-use crate::storage::{StorageClient, keys};
+use crate::crypto::Crypto;
+use crate::storage::ObjectStore;
+use crate::storage::keys;
 use crate::utils::ascii::{ASCII_ALNUM_OR_PATH_EXTRA, bytes_all_allowed};
 use anyhow::Context;
 use std::sync::Arc;
@@ -31,16 +32,16 @@ pub enum KvStoreError {
 }
 
 /// Persists string values under logical keys; values are encrypted with the data-plane DEK before DynamoDB.
-pub struct EnclaveKvStore {
-    /// Shared object storage (DynamoDB).
-    pub storage: Arc<StorageClient>,
+pub struct EnclaveKvStore<S: ObjectStore, C: Crypto> {
+    /// Shared object storage.
+    pub storage: Arc<S>,
     /// DEK-backed AES-GCM encrypt/decrypt.
-    pub crypto: Arc<CryptoClient>,
+    pub crypto: Arc<C>,
 }
 
-impl EnclaveKvStore {
+impl<S: ObjectStore, C: Crypto> EnclaveKvStore<S, C> {
     /// Builds a store from shared clients.
-    pub const fn new(storage: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
+    pub const fn new(storage: Arc<S>, crypto: Arc<C>) -> Self {
         Self { storage, crypto }
     }
 
@@ -114,29 +115,79 @@ impl EnclaveKvStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::AesGcmCrypto;
+    use crate::storage::memory::InMemoryObjectStore;
+
+    type TestKv = EnclaveKvStore<InMemoryObjectStore, AesGcmCrypto>;
+
+    const DEK: [u8; 32] = [0x42; 32];
+
+    /// Always fails encrypt/decrypt.
+    struct FailingCrypto;
+
+    impl Crypto for FailingCrypto {
+        fn encrypt(&self, _data: &[u8]) -> anyhow::Result<Vec<u8>> {
+            anyhow::bail!("encrypt failed")
+        }
+
+        fn decrypt(&self, _data: &[u8]) -> anyhow::Result<Vec<u8>> {
+            anyhow::bail!("decrypt failed")
+        }
+    }
 
     #[test]
     fn validate_logical_key_accepts_allowed() {
-        EnclaveKvStore::validate_logical_key("app_state_v1").unwrap();
-        EnclaveKvStore::validate_logical_key("ns/wallet:1").unwrap();
+        TestKv::validate_logical_key("app_state_v1").unwrap();
+        TestKv::validate_logical_key("ns/wallet:1").unwrap();
     }
 
     #[test]
     fn validate_logical_key_rejects_empty() {
         assert!(matches!(
-            EnclaveKvStore::validate_logical_key(""),
+            TestKv::validate_logical_key(""),
             Err(KvStoreError::BadRequest(_))
         ));
     }
 
     #[test]
     fn validate_logical_key_rejects_bad_chars() {
-        assert!(EnclaveKvStore::validate_logical_key("a b").is_err());
-        assert!(EnclaveKvStore::validate_logical_key("a\n").is_err());
+        assert!(TestKv::validate_logical_key("a b").is_err());
+        assert!(TestKv::validate_logical_key("a\n").is_err());
     }
 
     #[test]
     fn kv_object_key_format() {
         assert_eq!(crate::storage::keys::kv_object_key("mykey"), "kv:mykey");
+    }
+
+    #[tokio::test]
+    async fn set_get_round_trip() {
+        let store = Arc::new(InMemoryObjectStore::new());
+        let crypto = Arc::new(AesGcmCrypto::from_dek(&DEK).unwrap());
+        let kv = EnclaveKvStore::new(store, crypto);
+        kv.set("wallet:1", "secret").await.unwrap();
+
+        assert_eq!(kv.get("wallet:1").await.unwrap(), "secret");
+    }
+
+    #[tokio::test]
+    async fn set_maps_encrypt_failure_to_internal() {
+        let store = Arc::new(InMemoryObjectStore::new());
+        let kv = EnclaveKvStore::new(store, Arc::new(FailingCrypto));
+
+        let err = kv.set("k", "v").await.unwrap_err();
+        assert!(matches!(err, KvStoreError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn get_maps_decrypt_failure_to_unprocessable() {
+        let store = Arc::new(InMemoryObjectStore::new());
+        let good = Arc::new(AesGcmCrypto::from_dek(&DEK).unwrap());
+        let kv_good = EnclaveKvStore::new(store.clone(), good);
+        kv_good.set("k", "v").await.unwrap();
+        let kv_bad = EnclaveKvStore::new(store, Arc::new(FailingCrypto));
+
+        let err = kv_bad.get("k").await.unwrap_err();
+        assert!(matches!(err, KvStoreError::Unprocessable(_)));
     }
 }
