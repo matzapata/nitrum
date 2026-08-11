@@ -1,4 +1,4 @@
-//! In-memory [`ObjectStore`] for unit tests.
+//! In-memory [`ObjectStore`] for unit tests and offline benches.
 
 use super::ObjectStore;
 use super::dynamo::LOCK_TTL_SECS;
@@ -20,6 +20,7 @@ pub struct InMemoryObjectStore {
 }
 
 impl InMemoryObjectStore {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             objects: Mutex::new(HashMap::new()),
@@ -33,6 +34,12 @@ impl InMemoryObjectStore {
         if let Some(entry) = locks.get_mut(key) {
             entry.expiry = 0;
         }
+    }
+}
+
+impl Default for InMemoryObjectStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

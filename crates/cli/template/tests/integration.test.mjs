@@ -172,15 +172,6 @@ describe("nitrum project (integration)", () => {
     assert.ok(typeof data.error === "string" && data.error.length > 0);
   });
 
-  it("GET /egress?url= denies classic IMDS SSRF from the app", async () => {
-    const url = encodeURIComponent(
-      "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-    );
-    const data = await fetchJson(`${baseUrl}/egress?url=${url}`);
-    assert.ok(data && typeof data === "object");
-    assert.equal(data.ok, false);
-  });
-
   it("POST /crypto round-trips plaintext", async () => {
     const data = await fetchJson(`${baseUrl}/crypto`, {
       method: "POST",

@@ -13,4 +13,4 @@ pub mod networking;
 
 pub use bootstrap::{DataPlaneConfig, ListenAddrs};
 pub use crypto::{AesGcmCrypto, AwsKms, Crypto, Kms};
-pub use storage::{DynamoObjectStore, ObjectStore};
+pub use storage::{DynamoObjectStore, InMemoryObjectStore, ObjectStore};

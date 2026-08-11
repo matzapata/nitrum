@@ -125,7 +125,7 @@ Nitrum separates **platform** telemetry from **application** telemetry in OpenTe
 | Layer | `service.name` | `nitrum.component` | Metric prefix (examples) |
 |-------|----------------|--------------------|--------------------------|
 | Control-plane | `control-plane` | `core` | `nitrum.enclave.restarts` |
-| Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.kms.duration.ms` |
+| Data-plane | `data-plane` | `core` | `nitrum.requests`, `nitrum.acme.events` |
 | Your app | `project.name` from `nitrum.toml` | `user-app` | your choice (examples use `app.*`) |
 
 Platform binaries always set `service.namespace=nitrum`. When OTLP export is enabled, the data-plane also injects standard OpenTelemetry environment variables into your application process before it starts:

@@ -71,21 +71,24 @@ impl AesGcmCrypto {
                 .context("failed to retrieve DEK from storage")?
             {
                 tracing::info!("DEK found in storage, decrypting with KMS");
-                let dek = kms.decrypt_with_attestation(&encrypted_dek).await.context(
-                    "load DEK: decrypt ciphertext from storage failed (see KMS context above)",
-                )?;
+                let dek = kms
+                    .decrypt_with_attestation(&encrypted_dek)
+                    .await
+                    .context("load DEK: decrypt from storage")?;
                 return Self::from_dek(&dek);
             }
 
             if let Some(_guard) = leader.try_acquire_leader().await? {
                 tracing::info!("no DEK in storage, generating a new one (leader)");
 
-                let encrypted_dek = kms.generate_dek_envelope().await.context(
-                    "leader bootstrap: GenerateDataKeyWithoutPlaintext failed (see KMS context above)",
-                )?;
-                let dek = kms.decrypt_with_attestation(&encrypted_dek).await.context(
-                    "leader bootstrap: unwrap new DEK envelope for in-memory use failed (see KMS context above)",
-                )?;
+                let encrypted_dek = kms
+                    .generate_dek_envelope()
+                    .await
+                    .context("leader bootstrap: generate DEK envelope")?;
+                let dek = kms
+                    .decrypt_with_attestation(&encrypted_dek)
+                    .await
+                    .context("leader bootstrap: unwrap DEK envelope")?;
 
                 let crypto = Self::from_dek(&dek)?;
 

@@ -20,10 +20,6 @@ struct Instruments {
     requests: Counter<u64>,
     /// HTTP request handling duration in milliseconds.
     request_duration_ms: Histogram<f64>,
-    /// KMS call duration in milliseconds, by operation.
-    kms_duration_ms: Histogram<f64>,
-    /// Count of failed KMS calls, by operation.
-    kms_errors: Counter<u64>,
     /// Count of ACME certificate lifecycle events, by event type.
     acme_events: Counter<u64>,
     /// Seconds until the active TLS certificate expires, by domain.
@@ -41,8 +37,6 @@ pub fn init_instruments() {
     let instruments = Instruments {
         requests: meter.u64_counter("nitrum.requests").build(),
         request_duration_ms: meter.f64_histogram("nitrum.request.duration.ms").build(),
-        kms_duration_ms: meter.f64_histogram("nitrum.kms.duration.ms").build(),
-        kms_errors: meter.u64_counter("nitrum.kms.errors").build(),
         acme_events: meter.u64_counter("nitrum.acme.events").build(),
         cert_expiry_seconds: meter.f64_gauge("nitrum.acme.cert.expiry.seconds").build(),
         enclave_restarts: meter.u64_counter("nitrum.enclave.restarts").build(),
@@ -74,19 +68,6 @@ pub fn record_request(
     instruments
         .request_duration_ms
         .record(duration_ms, &attributes);
-}
-
-/// Record a KMS call's duration (and an error if it failed), tagged by
-/// `operation` (e.g. `decrypt`). No-op if uninitialized.
-pub fn record_kms(operation: &'static str, duration_ms: f64, ok: bool) {
-    let Some(instruments) = INSTRUMENTS.get() else {
-        return;
-    };
-    let attributes = [KeyValue::new("operation", operation)];
-    instruments.kms_duration_ms.record(duration_ms, &attributes);
-    if !ok {
-        instruments.kms_errors.add(1, &attributes);
-    }
 }
 
 /// Record an ACME certificate lifecycle event (e.g. `issued`, `renewed`).

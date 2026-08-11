@@ -2,11 +2,11 @@ mod dynamo;
 pub mod keys;
 mod leader;
 
-#[cfg(test)]
 pub mod memory;
 
 pub use dynamo::DynamoObjectStore;
 pub use leader::Leader;
+pub use memory::InMemoryObjectStore;
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -12,7 +12,7 @@ use config::{NitrumConfig, PlatformLayout, Project};
 use criterion::{
     BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
-use data_plane::DynamoObjectStore;
+use data_plane::InMemoryObjectStore;
 use data_plane::ingress::{IngressState, build_https_router};
 use data_plane::{DataPlaneConfig, ListenAddrs};
 use std::collections::HashMap;
@@ -109,7 +109,7 @@ async fn spawn_mock_backend() -> u16 {
 /// Build the HTTPS ingress router pointed at `backend_port`.
 fn ingress_router(backend_port: u16) -> Router {
     let data_plane_cfg = with_backend_port(data_plane_config(sample_nitrum_config()), backend_port);
-    let storage = Arc::new(DynamoObjectStore::from_config(&data_plane_cfg));
+    let storage = Arc::new(InMemoryObjectStore::new());
     let state = Arc::new(IngressState::new(
         data_plane_cfg,
         storage,
