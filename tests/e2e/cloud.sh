@@ -22,6 +22,8 @@
 # This script does not build or push images.
 #
 # Usage: from repo root, `./tests/e2e/cloud.sh`
+# The generated workspace under `${NITRUM_E2E_PARENT_DIR}/${NITRUM_E2E_INIT_NAME}` is recreated on each run.
+# On EXIT (success, failure, or cancel), destroys the stack and deletes the test env key if they were created.
 
 set -euo pipefail
 
@@ -48,6 +50,8 @@ STACK_NAME="${NITRUM_E2E_STACK_NAME:-nitrum-${NAME}}"
 LOGS_SINCE="${NITRUM_CLOUD_LOGS_SINCE_MINUTES:-15}"
 WAIT_ACTIVE_TIMEOUT_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_TIMEOUT_SECONDS:-300}"
 WAIT_ACTIVE_POLL_SECONDS="${NITRUM_CLOUD_WAIT_ACTIVE_POLL_SECONDS:-5}"
+STACK_DEPLOYED=0
+ENV_SET=0
 
 nitrum() {
     local -a cmd
@@ -63,16 +67,25 @@ nitrum() {
 
 step_init() {
     mkdir -p "${PARENT}"
-    if [[ -f "${PROJECT}/nitrum.toml" ]]; then
-        echo "=== init: skip (found nitrum.toml) ==="
-        return 0
-    fi
     if [[ -e "${PROJECT}" ]]; then
-        echo "error: ${PROJECT} exists but has no nitrum.toml" >&2
-        exit 1
+        echo "=== init: reset ${PROJECT} ==="
+        rm -rf "${PROJECT}"
     fi
     echo "=== init: ${NAME} in ${PARENT} ==="
     (cd "${PARENT}" && nitrum init "${NAME}")
+}
+
+cleanup() {
+    if [[ "${STACK_DEPLOYED}" == "1" && -f "${PROJECT}/nitrum.toml" ]]; then
+        echo "=== cleanup: cloud destroy ==="
+        nitrum cloud destroy --force --path "${PROJECT}" || true
+        STACK_DEPLOYED=0
+    fi
+    if [[ "${ENV_SET}" == "1" && -f "${PROJECT}/nitrum.toml" ]]; then
+        echo "=== cleanup: cloud env delete ${ENV_KEY} ==="
+        nitrum cloud env --path "${PROJECT}" delete "${ENV_KEY}" --force || true
+        ENV_SET=0
+    fi
 }
 
 step_build() {
@@ -83,11 +96,13 @@ step_build() {
 step_env_set() {
     echo "=== cloud env set ${ENV_KEY} ==="
     nitrum cloud env --path "${PROJECT}" set "${ENV_KEY}" "${ENV_VALUE}"
+    ENV_SET=1
 }
 
 step_deploy() {
     echo "=== cloud deploy ==="
     nitrum cloud deploy --force --path "${PROJECT}"
+    STACK_DEPLOYED=1
 }
 
 step_wait_active() {
@@ -181,12 +196,16 @@ step_tests() {
 step_destroy() {
     echo "=== cloud destroy ==="
     nitrum cloud destroy --force --path "${PROJECT}"
+    STACK_DEPLOYED=0
 }
 
 step_env_delete() {
     echo "=== cloud env delete ${ENV_KEY} ==="
     nitrum cloud env --path "${PROJECT}" delete "${ENV_KEY}" --force
+    ENV_SET=0
 }
+
+trap cleanup EXIT
 
 step_init
 pin_sdk_git

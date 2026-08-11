@@ -8,9 +8,8 @@
 #   NITRUM_E2E_PARENT_DIR    parent directory for `nitrum init <name>` (default: <repo>/target/nitrum-e2e-workspace)
 #   NITRUM_E2E_INIT_NAME     project folder / project.name (default: nitrum-e2e-demo)
 #
-# If ${PARENT}/${NAME}/nitrum.toml already exists, init is skipped.
-#
 # Usage: from repo root, `./tests/e2e/build.sh`
+# The generated workspace under `${NITRUM_E2E_PARENT_DIR}/${NITRUM_E2E_INIT_NAME}` is recreated on each run.
 
 set -euo pipefail
 
@@ -45,13 +44,9 @@ nitrum() {
 
 step_init() {
     mkdir -p "${PARENT}"
-    if [[ -f "${PROJECT}/nitrum.toml" ]]; then
-        echo "=== init: skip (found nitrum.toml) ==="
-        return 0
-    fi
     if [[ -e "${PROJECT}" ]]; then
-        echo "error: ${PROJECT} exists but has no nitrum.toml; remove it or change NITRUM_E2E_INIT_NAME" >&2
-        exit 1
+        echo "=== init: reset ${PROJECT} ==="
+        rm -rf "${PROJECT}"
     fi
     echo "=== init: ${NAME} in ${PARENT} ==="
     (cd "${PARENT}" && nitrum init "${NAME}")
