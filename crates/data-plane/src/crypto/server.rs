@@ -60,10 +60,7 @@ async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::
 }
 
 /// Build the crypto API router (attestation, encrypt, decrypt, KV).
-///
-/// Exposed for benchmarks and tests that drive handlers via `tower::ServiceExt::oneshot`.
-#[doc(hidden)]
-pub fn build_router(state: Arc<CryptoApiState>) -> Router {
+fn build_router(state: Arc<CryptoApiState>) -> Router {
     let router = Router::new()
         .route("/health", get(health))
         .route("/random", post(random))
@@ -74,13 +71,6 @@ pub fn build_router(state: Arc<CryptoApiState>) -> Router {
         .route("/kv/get", post(kv_get))
         .with_state(state);
     telemetry::http::instrument_router(router, "data-plane.crypto-api")
-}
-
-/// Build [`CryptoApiState`] for benches/tests (no live AWS required for encrypt/decrypt).
-#[doc(hidden)]
-#[must_use]
-pub fn api_state(crypto: Arc<CryptoClient>, storage: Arc<StorageClient>) -> Arc<CryptoApiState> {
-    Arc::new(CryptoApiState { crypto, storage })
 }
 
 // ── Health ────────────────────────────────────────────────────

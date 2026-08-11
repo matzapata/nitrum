@@ -278,11 +278,15 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
+/// Reverse-proxy catch-all: forward the client request to the configured
+/// backend, streaming both request and response bodies end-to-end.
 async fn ingress_proxy(
     State(state): State<Arc<IngressState>>,
     req: Request<Body>,
 ) -> Response<Body> {
     let (parts, body) = req.into_parts();
+
+    // Preserve path + query; rebuild against the backend base URI.
     let path_and_query = parts
         .uri
         .path_and_query()
@@ -290,6 +294,7 @@ async fn ingress_proxy(
         .unwrap_or_else(|| PathAndQuery::from_static("/"));
     let uri = state.proxy_uri(path_and_query);
 
+    // Drop hop-by-hop headers before forwarding (RFC 7230 §6.1).
     let mut fwd_headers = parts.headers;
     strip_hop_by_hop(&mut fwd_headers);
 
@@ -308,6 +313,7 @@ async fn ingress_proxy(
     };
     *backend_req.headers_mut() = fwd_headers;
 
+    // Transport / connect failures become 502; the backend's own status is passed through.
     let backend_resp = match state.proxy_client.request(backend_req).await {
         Ok(r) => r,
         Err(e) => {
@@ -317,9 +323,11 @@ async fn ingress_proxy(
     };
 
     let (parts, body) = backend_resp.into_parts();
+
     // Stream the backend body to the client without an intermediate buffer.
     let mut resp = Response::from_parts(parts, Body::new(body));
     strip_hop_by_hop(resp.headers_mut());
+
     resp
 }
 
@@ -349,9 +357,19 @@ mod proxy_header_tests {
     ];
 
     fn inert_config(backend_port: u16) -> DataPlaneConfig {
-        let nitrum: NitrumConfig =
-            toml::from_str(include_str!("../../../../examples/hello/nitrum.toml"))
-                .expect("parse sample nitrum.toml");
+        let nitrum = NitrumConfig {
+            project: config::Project {
+                name: "nitrum-test".parse().expect("valid test project name"),
+                port: NonZeroU16::new(backend_port).expect("non-zero port"),
+                start_command: vec![],
+            },
+            runtime: config::Runtime::default(),
+            health_check: config::HealthCheck::default(),
+            scaling: config::Scaling::default(),
+            tls_termination: config::TlsTermination::default(),
+            egress: config::Egress::default(),
+            cloud: config::Cloud::default(),
+        };
         let layout = PlatformLayout::from_project(&nitrum.project);
         let aws = Arc::new(
             aws_config::SdkConfig::builder()
@@ -359,7 +377,7 @@ mod proxy_header_tests {
                 .region(Region::new("us-east-1"))
                 .build(),
         );
-        let mut config = DataPlaneConfig {
+        DataPlaneConfig {
             nitrum,
             layout,
             aws,
@@ -374,9 +392,7 @@ mod proxy_header_tests {
                 crypto_api_listen_addr: "127.0.0.1:3000".parse().unwrap(),
             },
             user_env: HashMap::new(),
-        };
-        config.nitrum.project.port = NonZeroU16::new(backend_port).expect("non-zero port");
-        config
+        }
     }
 
     fn ingress_router(backend_port: u16) -> Router {
