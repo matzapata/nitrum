@@ -1,35 +1,39 @@
 //! Internal HTTP server for crypto operations.
 
 use super::attest::get_attestation_doc;
-use super::client::CryptoClient;
+use super::dek::Crypto;
 use super::kv::{EnclaveKvStore, KvStoreError};
 use crate::DataPlaneConfig;
-use crate::storage::StorageClient;
+use crate::storage::ObjectStore;
 use anyhow::Context;
 use axum::{
     Json, Router,
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Dependencies required by the crypto API server and its handlers.
 #[derive(Clone)]
-pub struct CryptoApiState {
+pub(crate) struct CryptoApiState<S: ObjectStore, C: Crypto> {
     /// Crypto client for encrypting/decrypting data.
-    crypto: Arc<CryptoClient>,
+    crypto: Arc<C>,
     /// Storage client for encrypted KV persistence.
-    storage: Arc<StorageClient>,
+    storage: Arc<S>,
 }
 
 /// Spawn the crypto API server in the background.
-pub fn init(config: &DataPlaneConfig, crypto: &Arc<CryptoClient>, storage: &Arc<StorageClient>) {
+pub fn init<S: ObjectStore + 'static, C: Crypto + 'static>(
+    config: &DataPlaneConfig,
+    crypto: &Arc<C>,
+    storage: &Arc<S>,
+) {
     let state = Arc::new(CryptoApiState {
         crypto: crypto.clone(),
         storage: storage.clone(),
@@ -45,7 +49,10 @@ pub fn init(config: &DataPlaneConfig, crypto: &Arc<CryptoClient>, storage: &Arc<
 }
 
 /// Run the crypto API server (attestation, encrypt, decrypt, KV) until the process exits.
-async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+async fn run<S: ObjectStore + 'static, C: Crypto + 'static>(
+    state: Arc<CryptoApiState<S, C>>,
+    addr: std::net::SocketAddr,
+) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind API server on {addr}"))?;
@@ -60,27 +67,88 @@ async fn run(state: Arc<CryptoApiState>, addr: std::net::SocketAddr) -> anyhow::
 }
 
 /// Build the crypto API router (attestation, encrypt, decrypt, KV).
-fn build_router(state: Arc<CryptoApiState>) -> Router {
+pub(crate) fn build_router<S: ObjectStore + 'static, C: Crypto + 'static>(
+    state: Arc<CryptoApiState<S, C>>,
+) -> Router {
     let router = Router::new()
-        .route("/health", get(health))
-        .route("/random", post(random))
-        .route("/attestation", post(attestation))
-        .route("/encrypt", post(encrypt))
-        .route("/decrypt", post(decrypt))
-        .route("/kv/set", post(kv_set))
-        .route("/kv/get", post(kv_get))
+        .route("/health", get(health_handler))
+        .route("/random", post(random_handler))
+        .route("/attestation", post(attestation_handler))
+        .route("/encrypt", post(encrypt_handler::<S, C>))
+        .route("/decrypt", post(decrypt_handler::<S, C>))
+        .route("/kv/set", post(kv_set_handler::<S, C>))
+        .route("/kv/get", post(kv_get_handler::<S, C>))
         .with_state(state);
     telemetry::http::instrument_router(router, "data-plane.crypto-api")
 }
 
-// ── Health ────────────────────────────────────────────────────
+/// API-layer error for crypto handlers (HTTP status + JSON envelope).
+enum CryptoApiError {
+    BadRequest(String),
+    NotFound(String),
+    Unprocessable(String),
+    Internal { msg: &'static str, detail: String },
+}
 
-async fn health() -> impl IntoResponse {
+impl CryptoApiError {
+    fn internal(msg: &'static str, err: impl std::fmt::Display) -> Self {
+        Self::Internal {
+            msg,
+            detail: err.to_string(),
+        }
+    }
+}
+
+impl From<KvStoreError> for CryptoApiError {
+    fn from(err: KvStoreError) -> Self {
+        match err {
+            KvStoreError::BadRequest(m) => Self::BadRequest(m),
+            KvStoreError::NotFound => Self::NotFound("key not found".into()),
+            KvStoreError::Unprocessable(m) => Self::Unprocessable(m),
+            KvStoreError::Internal(e) => Self::Internal {
+                msg: "internal error",
+                detail: format!("{e:#}"),
+            },
+        }
+    }
+}
+
+impl IntoResponse for CryptoApiError {
+    fn into_response(self) -> Response {
+        let (status, client_msg) = match &self {
+            Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
+            Self::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
+            Self::Unprocessable(m) => {
+                warn!(error = %m, "crypto api error");
+                (StatusCode::UNPROCESSABLE_ENTITY, m.clone())
+            }
+            Self::Internal { msg, detail } => {
+                warn!(error = %detail, "crypto api error");
+                (StatusCode::INTERNAL_SERVER_ERROR, (*msg).to_string())
+            }
+        };
+
+        (
+            status,
+            [("content-type", "application/json")],
+            json!({ "data": null, "error": client_msg }).to_string(),
+        )
+            .into_response()
+    }
+}
+
+fn json_ok(data: impl Serialize) -> impl IntoResponse {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        json!({ "status": "ok" }).to_string(),
+        json!({ "data": data, "error": null }).to_string(),
     )
+}
+
+// ── Health ────────────────────────────────────────────────────
+
+async fn health_handler() -> impl IntoResponse {
+    json_ok("ok")
 }
 
 // ── Random ────────────────────────────────────────────────────
@@ -91,28 +159,12 @@ pub struct RandomRequest {
     pub length: Option<usize>,
 }
 
-async fn random(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
+async fn random_handler(req: Option<Json<RandomRequest>>) -> impl IntoResponse {
     let len = req.and_then(|r| r.length).unwrap_or(32).min(1024);
-
-    let bytes = match super::random::rand_bytes(len) {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("failed to generate random bytes: {e}") })
-                    .to_string(),
-            )
-                .into_response();
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": B64.encode(&bytes), "error": null }).to_string(),
-    )
-        .into_response()
+    match super::random::rand_bytes(len) {
+        Ok(bytes) => json_ok(B64.encode(&bytes)).into_response(),
+        Err(e) => CryptoApiError::internal("failed to generate random bytes", e).into_response(),
+    }
 }
 
 // ── Attestation ────────────────────────────────────────────────────
@@ -125,30 +177,15 @@ pub struct AttestationRequest {
     pub user_data: Option<String>,
 }
 
-async fn attestation(Json(req): Json<AttestationRequest>) -> impl IntoResponse {
+async fn attestation_handler(Json(req): Json<AttestationRequest>) -> impl IntoResponse {
     let nonce = req.nonce.as_deref().and_then(|s| B64.decode(s).ok());
     let public_key = req.public_key.as_deref().and_then(|s| B64.decode(s).ok());
     let user_data = req.user_data.as_deref().and_then(|s| B64.decode(s).ok());
 
-    let raw = match get_attestation_doc(nonce, public_key, user_data) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(error = %e, "attestation failed");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("attestation failed: {e}") }).to_string(),
-            )
-                .into_response();
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": B64.encode(&raw), "error": null }).to_string(),
-    )
-        .into_response()
+    match get_attestation_doc(nonce, public_key, user_data) {
+        Ok(raw) => json_ok(B64.encode(&raw)).into_response(),
+        Err(e) => CryptoApiError::internal("attestation failed", e).into_response(),
+    }
 }
 
 // ── Encrypt ────────────────────────────────────────────────────
@@ -158,29 +195,14 @@ pub struct EncryptRequest {
     pub plaintext: String,
 }
 
-async fn encrypt(
-    State(state): State<Arc<CryptoApiState>>,
+async fn encrypt_handler<S: ObjectStore, C: Crypto>(
+    State(state): State<Arc<CryptoApiState<S, C>>>,
     Json(req): Json<EncryptRequest>,
 ) -> impl IntoResponse {
-    let plaintext = req.plaintext.as_bytes();
-    let ciphertext = match state.crypto.encrypt(plaintext) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("encrypt error: {e}") }).to_string(),
-            )
-                .into_response();
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": B64.encode(&ciphertext), "error": null }).to_string(),
-    )
-        .into_response()
+    match state.crypto.encrypt(req.plaintext.as_bytes()) {
+        Ok(ciphertext) => json_ok(B64.encode(&ciphertext)).into_response(),
+        Err(e) => CryptoApiError::internal("encrypt error", e).into_response(),
+    }
 }
 
 // ── Decrypt ────────────────────────────────────────────────────
@@ -190,52 +212,28 @@ pub struct DecryptRequest {
     pub ciphertext: String,
 }
 
-async fn decrypt(
-    State(state): State<Arc<CryptoApiState>>,
+async fn decrypt_handler<S: ObjectStore, C: Crypto>(
+    State(state): State<Arc<CryptoApiState<S, C>>>,
     Json(req): Json<DecryptRequest>,
 ) -> impl IntoResponse {
     let ciphertext = match B64.decode(&req.ciphertext) {
         Ok(c) => c,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("invalid base64 ciphertext: {e}") })
-                    .to_string(),
-            )
+            return CryptoApiError::BadRequest(format!("invalid base64 ciphertext: {e}"))
                 .into_response();
         }
     };
     let plaintext_bytes = match state.crypto.decrypt(&ciphertext) {
         Ok(p) => p,
         Err(e) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("decrypt error: {e}") }).to_string(),
-            )
-                .into_response();
+            return CryptoApiError::Unprocessable(format!("decrypt error: {e}")).into_response();
         }
     };
-    let plaintext = match String::from_utf8(plaintext_bytes) {
-        Ok(p) => p,
-        Err(e) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                [("content-type", "application/json")],
-                json!({ "data": null, "error": format!("decrypted bytes not valid UTF-8: {e}") })
-                    .to_string(),
-            )
-                .into_response();
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": plaintext, "error": null }).to_string(),
-    )
-        .into_response()
+    match String::from_utf8(plaintext_bytes) {
+        Ok(plaintext) => json_ok(plaintext).into_response(),
+        Err(e) => CryptoApiError::Unprocessable(format!("decrypted bytes not valid UTF-8: {e}"))
+            .into_response(),
+    }
 }
 
 // ── KV storage (DEK-wrapped values in DynamoDB) ────────────────────────────
@@ -254,58 +252,249 @@ struct KvGetRequest {
     key: String,
 }
 
-async fn kv_set(
-    State(state): State<Arc<CryptoApiState>>,
+async fn kv_set_handler<S: ObjectStore, C: Crypto>(
+    State(state): State<Arc<CryptoApiState<S, C>>>,
     Json(req): Json<KvSetRequest>,
 ) -> impl IntoResponse {
     let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
-    if let Err(e) = store.set(&req.key, &req.value).await {
-        return kv_error_response(e);
+    match store.set(&req.key, &req.value).await {
+        Ok(()) => json_ok("ok").into_response(),
+        Err(e) => CryptoApiError::from(e).into_response(),
     }
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": "ok", "error": null }).to_string(),
-    )
-        .into_response()
 }
 
-async fn kv_get(
-    State(state): State<Arc<CryptoApiState>>,
+async fn kv_get_handler<S: ObjectStore, C: Crypto>(
+    State(state): State<Arc<CryptoApiState<S, C>>>,
     Json(req): Json<KvGetRequest>,
 ) -> impl IntoResponse {
     let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
-    let value = match store.get(&req.key).await {
-        Ok(v) => v,
-        Err(e) => return kv_error_response(e),
-    };
-
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        json!({ "data": value, "error": null }).to_string(),
-    )
-        .into_response()
+    match store.get(&req.key).await {
+        Ok(value) => json_ok(value).into_response(),
+        Err(e) => CryptoApiError::from(e).into_response(),
+    }
 }
 
-fn kv_error_response(err: KvStoreError) -> axum::response::Response {
-    let (status, msg) = match &err {
-        KvStoreError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
-        KvStoreError::NotFound => (StatusCode::NOT_FOUND, err.to_string()),
-        KvStoreError::Unprocessable(m) => {
-            warn!(error = %m, "kv request failed (unprocessable)");
-            (StatusCode::UNPROCESSABLE_ENTITY, m.clone())
-        }
-        KvStoreError::Internal(e) => {
-            warn!(error = %format!("{e:#}"), "kv request failed (internal)");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))
-        }
-    };
-    (
-        status,
-        [("content-type", "application/json")],
-        json!({ "data": null, "error": msg }).to_string(),
-    )
-        .into_response()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::AesGcmCrypto;
+    use crate::storage::memory::InMemoryObjectStore;
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request;
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    const DEK: [u8; 32] = [0x42; 32];
+
+    fn router() -> Router {
+        build_router(Arc::new(CryptoApiState {
+            crypto: Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK")),
+            storage: Arc::new(InMemoryObjectStore::new()),
+        }))
+    }
+
+    async fn json_body(response: axum::response::Response) -> Value {
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        serde_json::from_slice(&body).expect("json body")
+    }
+
+    #[tokio::test]
+    async fn health_ok() {
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = json_body(response).await;
+        assert_eq!(body["data"], "ok");
+        assert!(body["error"].is_null());
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "enclave"))]
+    async fn random_default_length() {
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/random")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = json_body(response).await;
+        assert!(body["error"].is_null());
+
+        let raw = B64.decode(body["data"].as_str().unwrap()).unwrap();
+        assert_eq!(raw.len(), 32);
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "enclave"))]
+    async fn random_clamps_to_1024() {
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/random")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"length":4096}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = json_body(response).await;
+        let raw = B64.decode(body["data"].as_str().unwrap()).unwrap();
+        assert_eq!(raw.len(), 1024);
+    }
+
+    #[tokio::test]
+    async fn encrypt_decrypt_round_trip() {
+        let crypto = Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK"));
+        let storage = Arc::new(InMemoryObjectStore::new());
+
+        let encrypt_resp = build_router(Arc::new(CryptoApiState {
+            crypto: crypto.clone(),
+            storage: storage.clone(),
+        }))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/encrypt")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"plaintext":"hello-enclave"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(encrypt_resp.status(), StatusCode::OK);
+        let enc_body = json_body(encrypt_resp).await;
+        let ciphertext = enc_body["data"].as_str().unwrap().to_string();
+
+        let decrypt_resp = build_router(Arc::new(CryptoApiState { crypto, storage }))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/decrypt")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"ciphertext":"{ciphertext}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(decrypt_resp.status(), StatusCode::OK);
+
+        let dec_body = json_body(decrypt_resp).await;
+        assert_eq!(dec_body["data"], "hello-enclave");
+        assert!(dec_body["error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn decrypt_rejects_invalid_base64() {
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/decrypt")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"ciphertext":"@@@not-base64@@@"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = json_body(response).await;
+        assert!(body["error"].as_str().unwrap().contains("invalid base64"));
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "enclave"))]
+    async fn attestation_returns_placeholder_with_nonce() {
+        let nonce = B64.encode(b"test-nonce");
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/attestation")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"nonce":"{nonce}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = json_body(response).await;
+        let doc = B64.decode(body["data"].as_str().unwrap()).unwrap();
+        let doc_str = String::from_utf8(doc).unwrap();
+
+        assert!(doc_str.starts_with("placeholder-attestation-document,"));
+        assert!(doc_str.contains(&hex::encode(b"test-nonce")));
+    }
+
+    #[tokio::test]
+    async fn kv_set_get_round_trip() {
+        let crypto = Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK"));
+        let storage = Arc::new(InMemoryObjectStore::new());
+
+        let set_resp = build_router(Arc::new(CryptoApiState {
+            crypto: crypto.clone(),
+            storage: storage.clone(),
+        }))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/kv/set")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"key":"wallet:1","value":"secret-value"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(set_resp.status(), StatusCode::OK);
+
+        let get_resp = build_router(Arc::new(CryptoApiState { crypto, storage }))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/kv/get")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"key":"wallet:1"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(get_resp.status(), StatusCode::OK);
+        let body = json_body(get_resp).await;
+        assert_eq!(body["data"], "secret-value");
+    }
+
+    #[tokio::test]
+    async fn kv_get_missing_returns_404() {
+        let response = router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/kv/get")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"key":"missing"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }

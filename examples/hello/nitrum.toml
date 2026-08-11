@@ -31,7 +31,7 @@ safe_rolling = true
 
 [tls_termination]
 acme = false
-domain = "nitrum.local"
+domain = "nitrum.localhost"
 
 [egress]
 enabled = true

@@ -9,22 +9,22 @@
 #   docker compose up            # start (requires ENCLAVE_IMAGE already built)
 #   docker compose down          # stop
 #
-# For domain nitrum.local (e.g. ACME cert), add to your host /etc/hosts:
-#   127.0.0.1 nitrum.local
-# Then you can use: curl -sk https://nitrum.local/...
+# For domain nitrum.localhost (e.g. ACME / Pebble), add to your host /etc/hosts if needed:
+#   127.0.0.1 nitrum.localhost
+# Then you can use: curl -sk https://nitrum.localhost/...
 #
 # Test the enclave well-known endpoints:
-#   curl -sk https://nitrum.local/.well-known/enclave/status
-#   curl -sk https://nitrum.local/.well-known/enclave/attestation
+#   curl -sk https://nitrum.localhost/.well-known/enclave/status
+#   curl -sk https://nitrum.localhost/.well-known/enclave/attestation
 #
 # Test the user app through TLS ingress:
-#   curl -sk https://nitrum.local/health
+#   curl -sk https://nitrum.localhost/health
 #
 # Access the internal data-plane API directly (no TLS):
-#   curl http://nitrum.local/attestation -d '{}'
+#   curl http://nitrum.localhost/attestation -d '{}'
 #
 # Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
-#   curl -sk https://nitrum.local/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
+#   curl -sk https://nitrum.localhost/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
 #
 # Observability: the data-plane exports OTLP to the `observability` service (Grafana LGTM stack).
 # Open Grafana at http://localhost:3000 to explore metrics, traces, and logs.
@@ -245,14 +245,14 @@ services:
     mem_limit: ${ENCLAVE_MEMORY}
     cap_add:
       - NET_ADMIN
-    hostname: nitrum.local
+    hostname: nitrum.localhost
     ports:
       - "443:443"
       - "5002:5002"
     networks:
       default:
         aliases:
-          - nitrum.local
+          - nitrum.localhost
     depends_on:
       aws-init:
         condition: service_completed_successfully

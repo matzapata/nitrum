@@ -1,20 +1,20 @@
 //! PEM certificate chain + private key in shared storage (DEK-wrapped ciphertext only).
 
-use crate::crypto::CryptoClient;
-use crate::storage::StorageClient;
+use crate::crypto::Crypto;
+use crate::storage::ObjectStore;
 use crate::storage::keys;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
-pub struct AcmeStorage {
+pub struct AcmeStorage<S: ObjectStore, C: Crypto> {
     /// Backing object store.
-    client: Arc<StorageClient>,
+    client: Arc<S>,
     /// Data-plane DEK; used to encrypt PEM before `set_object` and decrypt after `get_object`.
-    crypto: Arc<CryptoClient>,
+    crypto: Arc<C>,
 }
 
-impl AcmeStorage {
-    pub(crate) const fn new(client: Arc<StorageClient>, crypto: Arc<CryptoClient>) -> Self {
+impl<S: ObjectStore, C: Crypto> AcmeStorage<S, C> {
+    pub(crate) const fn new(client: Arc<S>, crypto: Arc<C>) -> Self {
         Self { client, crypto }
     }
 
@@ -66,11 +66,5 @@ impl AcmeStorage {
             .await
             .context("write key to storage")?;
         Ok(())
-    }
-}
-
-impl AsRef<StorageClient> for AcmeStorage {
-    fn as_ref(&self) -> &StorageClient {
-        &self.client
     }
 }

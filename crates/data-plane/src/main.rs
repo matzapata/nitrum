@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use config::NitrumConfig;
-use data_plane::{CryptoClient, DataPlaneConfig, Kms, StorageClient};
+use data_plane::{AesGcmCrypto, AwsKms, DataPlaneConfig, DynamoObjectStore};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::error;
@@ -57,10 +57,10 @@ async fn run() -> anyhow::Result<i32> {
     );
 
     // Initialize storage and crypto clients
-    let storage_client = Arc::new(StorageClient::from_config(&data_plane_config));
-    let kms = Kms::from_config(&data_plane_config);
+    let storage_client = Arc::new(DynamoObjectStore::from_config(&data_plane_config));
+    let kms = AwsKms::from_config(&data_plane_config);
     let crypto_client = Arc::new(
-        CryptoClient::new(&storage_client, &kms, &data_plane_config.instance_id)
+        AesGcmCrypto::from_kms(storage_client.clone(), &kms, &data_plane_config.instance_id)
             .await
             .context("crypto setup failed")?,
     );

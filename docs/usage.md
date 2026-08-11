@@ -29,7 +29,7 @@ In-repo demos under `examples/hello` and `examples/wallet` use the same project-
 
 ### Ingress HTTPS API (external, `/.well-known/...`)
 
-The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.local` in the local Compose stack, or your deployed domain). Platform paths below are always handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
+The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR` (default `**0.0.0.0:443`**). Clients reach these URLs over **HTTPS** (for example `https://nitrum.localhost` in the local Compose stack, or your deployed domain). Platform paths below are always handled **inside the ingress**; everything else is **reverse-proxied** over HTTP to your app at the port from `[project].port` in `nitrum.toml`.
 
 #### Endpoints reachable from the Internet (or local TLS client)
 

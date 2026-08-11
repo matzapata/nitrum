@@ -2486,6 +2486,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
+ "async-trait",
  "aws-config",
  "aws-credential-types",
  "aws-nitro-enclaves-nsm-api",

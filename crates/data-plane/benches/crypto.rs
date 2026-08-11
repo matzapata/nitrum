@@ -1,7 +1,7 @@
 //! AES-GCM encrypt/decrypt throughput across payload sizes.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use data_plane::CryptoClient;
+use data_plane::{AesGcmCrypto, Crypto};
 
 const DEK: [u8; 32] = [0x42; 32];
 
@@ -13,7 +13,7 @@ const SIZES: &[(u64, &str)] = &[
 ];
 
 fn crypto_benches(c: &mut Criterion) {
-    let client = CryptoClient::from_dek(&DEK).expect("valid DEK");
+    let client = AesGcmCrypto::from_dek(&DEK).expect("valid DEK");
 
     {
         let mut group = c.benchmark_group("encrypt");

@@ -4,8 +4,8 @@ use super::health;
 use super::state::IngressState;
 use super::tls::{TlsState, challenge_handler};
 use crate::DataPlaneConfig;
-use crate::crypto::{CryptoClient, get_attestation_doc};
-use crate::storage::StorageClient;
+use crate::crypto::{Crypto, get_attestation_doc};
+use crate::storage::ObjectStore;
 use anyhow::Context;
 use axum::{
     Router,
@@ -24,7 +24,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
 /// Spawn the ingress server in the background.
-pub fn init(config: &DataPlaneConfig, storage: &Arc<StorageClient>, crypto: &Arc<CryptoClient>) {
+pub fn init<S: ObjectStore + 'static, C: Crypto + 'static>(
+    config: &DataPlaneConfig,
+    storage: &Arc<S>,
+    crypto: &Arc<C>,
+) {
     let has_user_process = !config.project.start_command.is_empty();
     let app_ready = Arc::new(AtomicBool::new(!has_user_process));
     health::spawn(config, app_ready.clone());
@@ -46,13 +50,16 @@ pub fn init(config: &DataPlaneConfig, storage: &Arc<StorageClient>, crypto: &Arc
 
 /// Runs the ingress server (HTTP for ACME, HTTPS for app traffic). Returns when
 /// either server stops (e.g. bind/serve error) or an error occurs.
-async fn run(state: Arc<IngressState>, crypto: Arc<CryptoClient>) -> anyhow::Result<()> {
+async fn run<S: ObjectStore + 'static, C: Crypto + 'static>(
+    state: Arc<IngressState<S>>,
+    crypto: Arc<C>,
+) -> anyhow::Result<()> {
     let (tls_config, challenge_server) = if state.config.tls_termination.acme {
         // ACME HTTP-01 challenge handler
         let acme_router = Router::new()
             .route(
                 "/.well-known/acme-challenge/{token}",
-                get(challenge_handler),
+                get(challenge_handler::<S>),
             )
             .fallback(|_: Request<Body>| async { (StatusCode::NOT_FOUND, "Not found") })
             .with_state(state.clone());
@@ -106,15 +113,20 @@ async fn run(state: Arc<IngressState>, crypto: Arc<CryptoClient>) -> anyhow::Res
 
 /// Build the HTTPS ingress router (well-known routes + proxy fallback).
 #[doc(hidden)]
-pub fn build_https_router(state: Arc<IngressState>) -> Router {
+pub fn build_https_router<S: ObjectStore + 'static>(state: Arc<IngressState<S>>) -> Router {
     Router::new()
-        .route("/.well-known/enclave/status", get(ingress_status))
-        .route("/.well-known/enclave/attestation", get(ingress_attestation))
-        .fallback(ingress_proxy)
+        .route("/.well-known/enclave/status", get(ingress_status::<S>))
+        .route(
+            "/.well-known/enclave/attestation",
+            get(ingress_attestation::<S>),
+        )
+        .fallback(ingress_proxy::<S>)
         .with_state(state)
 }
 
-async fn ingress_status(State(state): State<Arc<IngressState>>) -> impl IntoResponse {
+async fn ingress_status<S: ObjectStore>(
+    State(state): State<Arc<IngressState<S>>>,
+) -> impl IntoResponse {
     if state.app_ready.load(Ordering::Relaxed) {
         (
             StatusCode::OK,
@@ -174,7 +186,7 @@ mod status_tests {
 
     fn router_with_ready(ready: bool) -> Router {
         let config = inert_config();
-        let storage = Arc::new(StorageClient::from_config(&config));
+        let storage = Arc::new(crate::storage::DynamoObjectStore::from_config(&config));
         let state = Arc::new(IngressState::new(
             config,
             storage,
@@ -223,8 +235,8 @@ struct IngressAttestationQuery {
     nonce: Option<String>,
 }
 
-async fn ingress_attestation(
-    State(state): State<Arc<IngressState>>,
+async fn ingress_attestation<S: ObjectStore>(
+    State(state): State<Arc<IngressState<S>>>,
     Query(q): Query<IngressAttestationQuery>,
 ) -> impl IntoResponse {
     let cert_hash = state.tls_cert_hash.read().unwrap().clone();
@@ -280,8 +292,8 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
 
 /// Reverse-proxy catch-all: forward the client request to the configured
 /// backend, streaming both request and response bodies end-to-end.
-async fn ingress_proxy(
-    State(state): State<Arc<IngressState>>,
+async fn ingress_proxy<S: ObjectStore>(
+    State(state): State<Arc<IngressState<S>>>,
     req: Request<Body>,
 ) -> Response<Body> {
     let (parts, body) = req.into_parts();
@@ -329,6 +341,134 @@ async fn ingress_proxy(
     strip_hop_by_hop(resp.headers_mut());
 
     resp
+}
+
+#[cfg(test)]
+mod attestation_tests {
+    use super::*;
+    use crate::{DataPlaneConfig, ListenAddrs};
+    use aws_config::{BehaviorVersion, Region};
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request;
+    use config::{NitrumConfig, PlatformLayout};
+    use serde_json::Value;
+    use std::collections::HashMap;
+    use tower::ServiceExt;
+
+    fn inert_config() -> DataPlaneConfig {
+        let nitrum: NitrumConfig =
+            toml::from_str(include_str!("../../../../examples/hello/nitrum.toml"))
+                .expect("parse sample nitrum.toml");
+        let layout = PlatformLayout::from_project(&nitrum.project);
+        let aws = Arc::new(
+            aws_config::SdkConfig::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .region(Region::new("us-east-1"))
+                .build(),
+        );
+        DataPlaneConfig {
+            nitrum,
+            layout,
+            aws,
+            imds_base_url: "http://127.0.0.1/latest".to_string(),
+            instance_id: "i-test".to_string(),
+            kms_key_id: "test-key".to_string(),
+            dynamodb_table: "test-table".to_string(),
+            otlp_endpoint: None,
+            listen_addrs: ListenAddrs {
+                ingress_listen_addr: "127.0.0.1:443".parse().unwrap(),
+                acme_http01_listen_addr: "127.0.0.1:80".parse().unwrap(),
+                crypto_api_listen_addr: "127.0.0.1:3000".parse().unwrap(),
+            },
+            user_env: HashMap::new(),
+        }
+    }
+
+    fn state_with_cert_hash(
+        hash: Option<Vec<u8>>,
+    ) -> Arc<IngressState<crate::storage::DynamoObjectStore>> {
+        let config = inert_config();
+        let storage = Arc::new(crate::storage::DynamoObjectStore::from_config(&config));
+        let state = Arc::new(IngressState::new(
+            config,
+            storage,
+            Arc::new(AtomicBool::new(true)),
+        ));
+        *state.tls_cert_hash.write().unwrap() = hash;
+        state
+    }
+
+    async fn json_body(response: axum::response::Response) -> Value {
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        serde_json::from_slice(&body).expect("json body")
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "enclave"))]
+    async fn attestation_binds_tls_cert_hash_and_nonce() {
+        let cert_hash = vec![0xAAu8, 0xBB, 0xCC, 0xDD];
+        let nonce = B64.encode(b"nonce-1");
+        let app = build_https_router(state_with_cert_hash(Some(cert_hash.clone())));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/.well-known/enclave/attestation?nonce={nonce}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        let doc = B64.decode(body["data"].as_str().unwrap()).unwrap();
+        let doc_str = String::from_utf8(doc).unwrap();
+        assert!(doc_str.starts_with("placeholder-attestation-document,"));
+        assert!(doc_str.contains(&hex::encode(b"nonce-1")));
+        assert!(doc_str.contains(&hex::encode(&cert_hash)));
+    }
+
+    #[tokio::test]
+    async fn attestation_unavailable_without_tls_cert() {
+        let app = build_https_router(state_with_cert_hash(None));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/enclave/attestation")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert!(
+            body.windows(r"TLS certificate not yet available".len())
+                .any(|w| w == br"TLS certificate not yet available")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "enclave"))]
+    async fn attestation_ignores_invalid_nonce_base64() {
+        let cert_hash = vec![0x01u8, 0x02];
+        let app = build_https_router(state_with_cert_hash(Some(cert_hash.clone())));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/enclave/attestation?nonce=@@@")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        let doc = B64.decode(body["data"].as_str().unwrap()).unwrap();
+        let doc_str = String::from_utf8(doc).unwrap();
+        // Invalid nonce is dropped; public_key (cert hash) still bound.
+        assert!(doc_str.starts_with("placeholder-attestation-document,,"));
+        assert!(doc_str.contains(&hex::encode(&cert_hash)));
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +537,7 @@ mod proxy_header_tests {
 
     fn ingress_router(backend_port: u16) -> Router {
         let config = inert_config(backend_port);
-        let storage = Arc::new(StorageClient::from_config(&config));
+        let storage = Arc::new(crate::storage::DynamoObjectStore::from_config(&config));
         let state = Arc::new(IngressState::new(
             config,
             storage,

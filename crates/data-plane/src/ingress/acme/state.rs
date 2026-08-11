@@ -3,9 +3,9 @@
 use super::client::AcmeClient;
 use super::constants::{ACME_LOCK_RETRY_INTERVAL, CERTIFICATE_RENEWAL_FRACTION};
 use super::storage::AcmeStorage;
-use crate::crypto::CryptoClient;
+use crate::crypto::Crypto;
 use crate::storage::Leader;
-use crate::storage::StorageClient;
+use crate::storage::ObjectStore;
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,22 +21,22 @@ pub enum AcmeEvent {
     CertRenewed,
 }
 
-pub struct AcmeState {
+pub struct AcmeState<S: ObjectStore + 'static, C: Crypto + 'static> {
     pub(crate) domain: String,
-    cert_storage: AcmeStorage,
-    leader: Arc<Leader>,
+    cert_storage: AcmeStorage<S, C>,
+    leader: Arc<Leader<S>>,
     pub(crate) cert_store: CertStore,
-    inner: AcmeClient,
+    inner: AcmeClient<S, C>,
     pub(crate) current_chain: Option<String>,
 }
 
-impl AcmeState {
+impl<S: ObjectStore + 'static, C: Crypto + 'static> AcmeState<S, C> {
     #[must_use]
     pub fn new(
         domain: String,
-        storage: Arc<StorageClient>,
-        crypto: Arc<CryptoClient>,
-        leader: Arc<Leader>,
+        storage: Arc<S>,
+        crypto: Arc<C>,
+        leader: Arc<Leader<S>>,
         directory_url: String,
         client_tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Self {
@@ -88,10 +88,7 @@ impl AcmeState {
                     self.inner.save_account(&creds).await?;
                 }
                 info!(domain = %self.domain, "provisioning ACME certificate");
-                let (chain, key) = self
-                    .inner
-                    .provision_cert(account, &self.domain, self.cert_storage.as_ref())
-                    .await?;
+                let (chain, key) = self.inner.provision_cert(account, &self.domain).await?;
                 self.cert_storage.write_cert_pair(&chain, &key).await?;
                 self.record_cert_metrics("issued", &chain);
                 return Ok((chain, key));
@@ -102,7 +99,7 @@ impl AcmeState {
     }
 
     /// Whether the leaf in `chain_pem` has reached the configured renewal point (or parsing failed).
-    fn renewal_due(inner: &AcmeClient, chain_pem: &str) -> bool {
+    fn renewal_due(inner: &AcmeClient<S, C>, chain_pem: &str) -> bool {
         inner
             .duration_until_renewal(chain_pem)
             .map_or(true, |d| d.as_secs() == 0)

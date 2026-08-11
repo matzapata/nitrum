@@ -75,7 +75,6 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/egress", get(egress_handler))
-        .route("/egress-blocked", get(egress_blocked_handler))
         .route("/attestation", get(attestation_handler))
         .route("/crypto", post(crypto_handler))
         .route("/random", post(random_handler))
@@ -109,46 +108,24 @@ async fn health_handler() -> &'static str {
 // Egress handler.
 // ############################################################################
 
-async fn egress_handler(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let res = state
-        .http
-        .get("https://api.ipify.org?format=json")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| {
-            error!(error = %e, "egress error");
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": "egress request failed" })),
-            )
-        })?;
-    let body = res.json::<Value>().await.map_err(|e| {
-        error!(error = %e, "egress decode");
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": "egress decode failed" })),
-        )
-    })?;
-    Ok(Json(body))
+#[derive(Debug, Deserialize)]
+struct EgressQuery {
+    url: String,
 }
 
-// ############################################################################
-// Egress blocked handler.
-// ############################################################################
-
-// Expected denial path: always 200 so clients can assert allowlist behavior.
-async fn egress_blocked_handler(State(state): State<Arc<AppState>>) -> Json<Value> {
+/// `GET /egress?url=…` — fetch a URL; returns `{ ok, status?, error? }`.
+async fn egress_handler(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<EgressQuery>,
+) -> Json<Value> {
     match state
         .http
-        .get("https://example.com")
+        .get(&q.url)
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
     {
-        Ok(_) => Json(json!({ "ok": true })),
+        Ok(res) => Json(json!({ "ok": true, "status": res.status().as_u16() })),
         Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
     }
 }

@@ -28,14 +28,16 @@ pub async fn run(args: UpArgs) -> Result<()> {
     println!();
     println!("Stack is running.");
     println!();
-    println!("  https://nitrum.local/     — main ingress (HTTPS on host port 443)");
+    println!("  https://nitrum.localhost/     — main ingress (HTTPS on host port 443)");
     println!(
         "  https://127.0.0.1:443/    — same endpoint; use curl -k if the cert name mismatches"
     );
     println!();
     println!("  Enclave limits: {cpus} CPUs, {memory} (from nitrum.toml [scaling])");
     println!();
-    println!("  If nitrum.local does not resolve, add to /etc/hosts: 127.0.0.1 nitrum.local");
+    println!(
+        "  If nitrum.localhost does not resolve, add to /etc/hosts: 127.0.0.1 nitrum.localhost"
+    );
     println!();
 
     Ok(())
