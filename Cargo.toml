@@ -48,5 +48,6 @@ criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 [patch."https://github.com/matzapata/nitrum.git"]
 nitrum-sdk = { path = "crates/sdk" }
 
-[profile.bench]
-debug = 1
+[profile.samply]
+inherits = "release"
+debug = true
