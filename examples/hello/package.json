@@ -6,6 +6,6 @@
     "test": "node --test tests/integration.test.mjs"
   },
   "dependencies": {
-    "nitrum-node": "0.0.1"
+    "nitrum-node": "0.2.0"
   }
 }
