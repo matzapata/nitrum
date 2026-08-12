@@ -168,10 +168,6 @@ async fn create_wallet_inner(state: &AppState, secret: &str) -> Result<String, S
         "secret": secret,
     });
     let ciphertext = state.nitrum.encrypt(&payload.to_string()).await?;
-    state
-        .nitrum
-        .kv_set("wallet:demo_last_ciphertext", &ciphertext)
-        .await?;
     Ok(ciphertext)
 }
 

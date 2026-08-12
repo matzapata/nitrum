@@ -2,9 +2,7 @@
 
 use super::attest::get_attestation_doc;
 use super::dek::Crypto;
-use super::kv::{EnclaveKvStore, KvStoreError};
 use crate::DataPlaneConfig;
-use crate::storage::ObjectStore;
 use anyhow::Context;
 use axum::{
     Json, Router,
@@ -21,22 +19,15 @@ use tracing::{info, warn};
 
 /// Dependencies required by the crypto API server and its handlers.
 #[derive(Clone)]
-pub(crate) struct CryptoApiState<S: ObjectStore, C: Crypto> {
+pub(crate) struct CryptoApiState<C: Crypto> {
     /// Crypto client for encrypting/decrypting data.
     crypto: Arc<C>,
-    /// Storage client for encrypted KV persistence.
-    storage: Arc<S>,
 }
 
 /// Spawn the crypto API server in the background.
-pub fn init<S: ObjectStore + 'static, C: Crypto + 'static>(
-    config: &DataPlaneConfig,
-    crypto: &Arc<C>,
-    storage: &Arc<S>,
-) {
+pub fn init<C: Crypto + 'static>(config: &DataPlaneConfig, crypto: &Arc<C>) {
     let state = Arc::new(CryptoApiState {
         crypto: crypto.clone(),
-        storage: storage.clone(),
     });
     let listen_addr = config.listen_addrs.crypto_api_listen_addr;
     tokio::spawn(async move {
@@ -48,9 +39,9 @@ pub fn init<S: ObjectStore + 'static, C: Crypto + 'static>(
     });
 }
 
-/// Run the crypto API server (attestation, encrypt, decrypt, KV) until the process exits.
-async fn run<S: ObjectStore + 'static, C: Crypto + 'static>(
-    state: Arc<CryptoApiState<S, C>>,
+/// Run the crypto API server (attestation, encrypt, decrypt) until the process exits.
+async fn run<C: Crypto + 'static>(
+    state: Arc<CryptoApiState<C>>,
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
@@ -66,18 +57,14 @@ async fn run<S: ObjectStore + 'static, C: Crypto + 'static>(
     Ok(())
 }
 
-/// Build the crypto API router (attestation, encrypt, decrypt, KV).
-pub(crate) fn build_router<S: ObjectStore + 'static, C: Crypto + 'static>(
-    state: Arc<CryptoApiState<S, C>>,
-) -> Router {
+/// Build the crypto API router (attestation, encrypt, decrypt, random, health).
+pub(crate) fn build_router<C: Crypto + 'static>(state: Arc<CryptoApiState<C>>) -> Router {
     let router = Router::new()
         .route("/health", get(health_handler))
         .route("/random", post(random_handler))
         .route("/attestation", post(attestation_handler))
-        .route("/encrypt", post(encrypt_handler::<S, C>))
-        .route("/decrypt", post(decrypt_handler::<S, C>))
-        .route("/kv/set", post(kv_set_handler::<S, C>))
-        .route("/kv/get", post(kv_get_handler::<S, C>))
+        .route("/encrypt", post(encrypt_handler::<C>))
+        .route("/decrypt", post(decrypt_handler::<C>))
         .with_state(state);
     telemetry::http::instrument_router(router, "data-plane.crypto-api")
 }
@@ -85,7 +72,6 @@ pub(crate) fn build_router<S: ObjectStore + 'static, C: Crypto + 'static>(
 /// API-layer error for crypto handlers (HTTP status + JSON envelope).
 enum CryptoApiError {
     BadRequest(String),
-    NotFound(String),
     Unprocessable(String),
     Internal { msg: &'static str, detail: String },
 }
@@ -99,25 +85,10 @@ impl CryptoApiError {
     }
 }
 
-impl From<KvStoreError> for CryptoApiError {
-    fn from(err: KvStoreError) -> Self {
-        match err {
-            KvStoreError::BadRequest(m) => Self::BadRequest(m),
-            KvStoreError::NotFound => Self::NotFound("key not found".into()),
-            KvStoreError::Unprocessable(m) => Self::Unprocessable(m),
-            KvStoreError::Internal(e) => Self::Internal {
-                msg: "internal error",
-                detail: format!("{e:#}"),
-            },
-        }
-    }
-}
-
 impl IntoResponse for CryptoApiError {
     fn into_response(self) -> Response {
         let (status, client_msg) = match &self {
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
-            Self::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
             Self::Unprocessable(m) => {
                 warn!(error = %m, "crypto api error");
                 (StatusCode::UNPROCESSABLE_ENTITY, m.clone())
@@ -195,8 +166,8 @@ pub struct EncryptRequest {
     pub plaintext: String,
 }
 
-async fn encrypt_handler<S: ObjectStore, C: Crypto>(
-    State(state): State<Arc<CryptoApiState<S, C>>>,
+async fn encrypt_handler<C: Crypto>(
+    State(state): State<Arc<CryptoApiState<C>>>,
     Json(req): Json<EncryptRequest>,
 ) -> impl IntoResponse {
     match state.crypto.encrypt(req.plaintext.as_bytes()) {
@@ -212,8 +183,8 @@ pub struct DecryptRequest {
     pub ciphertext: String,
 }
 
-async fn decrypt_handler<S: ObjectStore, C: Crypto>(
-    State(state): State<Arc<CryptoApiState<S, C>>>,
+async fn decrypt_handler<C: Crypto>(
+    State(state): State<Arc<CryptoApiState<C>>>,
     Json(req): Json<DecryptRequest>,
 ) -> impl IntoResponse {
     let ciphertext = match B64.decode(&req.ciphertext) {
@@ -236,49 +207,10 @@ async fn decrypt_handler<S: ObjectStore, C: Crypto>(
     }
 }
 
-// ── KV storage (DEK-wrapped values in DynamoDB) ────────────────────────────
-
-#[derive(Deserialize)]
-struct KvSetRequest {
-    /// Logical key (namespaced to `kv:` in storage; validated).
-    key: String,
-    /// UTF-8 plaintext stored encrypted at rest.
-    value: String,
-}
-
-#[derive(Deserialize)]
-struct KvGetRequest {
-    /// Logical key previously passed to `/kv/set`.
-    key: String,
-}
-
-async fn kv_set_handler<S: ObjectStore, C: Crypto>(
-    State(state): State<Arc<CryptoApiState<S, C>>>,
-    Json(req): Json<KvSetRequest>,
-) -> impl IntoResponse {
-    let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
-    match store.set(&req.key, &req.value).await {
-        Ok(()) => json_ok("ok").into_response(),
-        Err(e) => CryptoApiError::from(e).into_response(),
-    }
-}
-
-async fn kv_get_handler<S: ObjectStore, C: Crypto>(
-    State(state): State<Arc<CryptoApiState<S, C>>>,
-    Json(req): Json<KvGetRequest>,
-) -> impl IntoResponse {
-    let store = EnclaveKvStore::new(state.storage.clone(), state.crypto.clone());
-    match store.get(&req.key).await {
-        Ok(value) => json_ok(value).into_response(),
-        Err(e) => CryptoApiError::from(e).into_response(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::crypto::AesGcmCrypto;
-    use crate::storage::memory::InMemoryObjectStore;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use serde_json::Value;
@@ -289,7 +221,6 @@ mod tests {
     fn router() -> Router {
         build_router(Arc::new(CryptoApiState {
             crypto: Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK")),
-            storage: Arc::new(InMemoryObjectStore::new()),
         }))
     }
 
@@ -363,11 +294,9 @@ mod tests {
     #[tokio::test]
     async fn encrypt_decrypt_round_trip() {
         let crypto = Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK"));
-        let storage = Arc::new(InMemoryObjectStore::new());
 
         let encrypt_resp = build_router(Arc::new(CryptoApiState {
             crypto: crypto.clone(),
-            storage: storage.clone(),
         }))
         .oneshot(
             Request::builder()
@@ -383,7 +312,7 @@ mod tests {
         let enc_body = json_body(encrypt_resp).await;
         let ciphertext = enc_body["data"].as_str().unwrap().to_string();
 
-        let decrypt_resp = build_router(Arc::new(CryptoApiState { crypto, storage }))
+        let decrypt_resp = build_router(Arc::new(CryptoApiState { crypto }))
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -443,58 +372,5 @@ mod tests {
 
         assert!(doc_str.starts_with("placeholder-attestation-document,"));
         assert!(doc_str.contains(&hex::encode(b"test-nonce")));
-    }
-
-    #[tokio::test]
-    async fn kv_set_get_round_trip() {
-        let crypto = Arc::new(AesGcmCrypto::from_dek(&DEK).expect("valid DEK"));
-        let storage = Arc::new(InMemoryObjectStore::new());
-
-        let set_resp = build_router(Arc::new(CryptoApiState {
-            crypto: crypto.clone(),
-            storage: storage.clone(),
-        }))
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/kv/set")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"key":"wallet:1","value":"secret-value"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(set_resp.status(), StatusCode::OK);
-
-        let get_resp = build_router(Arc::new(CryptoApiState { crypto, storage }))
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/kv/get")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"key":"wallet:1"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(get_resp.status(), StatusCode::OK);
-        let body = json_body(get_resp).await;
-        assert_eq!(body["data"], "secret-value");
-    }
-
-    #[tokio::test]
-    async fn kv_get_missing_returns_404() {
-        let response = router()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/kv/get")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"key":"missing"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

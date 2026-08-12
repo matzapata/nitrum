@@ -66,7 +66,7 @@ async fn run() -> anyhow::Result<i32> {
     );
 
     // Initialize crypto and ingress servers
-    data_plane::crypto::init(&data_plane_config, &crypto_client, &storage_client);
+    data_plane::crypto::init(&data_plane_config, &crypto_client);
     data_plane::ingress::init(&data_plane_config, &storage_client, &crypto_client);
 
     // Run user process

@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safe ASG rolling updates (`MinInstancesInService` / `PauseTime`), optional X-Ray export, configurable log retention, SNS alarms, HTTPS NLB health checks to `/.well-known/enclave/status`, and DynamoDB PITR + deletion protection when `--retain`.
 - Deploy preflight warning when the caller identity does not match `cloud.kms_administrator_role_arn`.
 - `crates/verify` — pure Rust AWS Nitro attestation verification (COSE, chain, PCR/nonce/age, TLS leaf hash bind).
-- `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `kv` / `attestation`).
+- `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `attestation`).
 - `packages/node` (npm `nitrum-node`) — thin napi-rs bindings over `verify` (document verify + TLS leaf hash bind).
 - Rust rewrites of `examples/hello` and `examples/wallet` using `nitrum-sdk`; `nitrum init` scaffolds the Rust hello example.
 - CI: `cargo test --all-features`, multi-platform `nitrum-node` prebuilds (macOS/Linux/Windows), `cargo-deny`, Dependabot.

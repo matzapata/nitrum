@@ -11,6 +11,6 @@ cd examples/hello
 nitrum local up   # or nitrum build / cloud deploy
 ```
 
-`start_command` runs `/app/hello`. Metrics (`app.crypto.ops`, `app.kv.duration.ms`) export when `OTEL_EXPORTER_OTLP_ENDPOINT` is injected by the data-plane runner.
+`start_command` runs `/app/hello`. Metrics (`app.crypto.ops`) export when `OTEL_EXPORTER_OTLP_ENDPOINT` is injected by the data-plane runner.
 
 Integration tests (JS + `nitrum-node`) live under `tests/`.
