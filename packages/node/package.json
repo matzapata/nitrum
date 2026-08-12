@@ -38,7 +38,7 @@
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
     "create-npm-dirs": "napi create-npm-dirs",
-    "prepublishOnly": "napi prepublish -t npm --skip-gh-release",
+    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
     "test": "node --test tests/smoke.test.mjs"
   },
   "publishConfig": {
