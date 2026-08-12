@@ -16,13 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deploy preflight warning when the caller identity does not match `cloud.kms_administrator_role_arn`.
 - `[egress]` in-enclave DNS/TCP allowlist (iptables + DNS proxy); documented limits for UDP/IPv6 and best-effort filter tables on Nitro kernels.
 - OpenTelemetry export from control-plane and data-plane via host ADOT collector (CloudWatch metrics/logs, optional X-Ray); injects `OTEL_*` into the user process when OTLP is enabled.
-- DEK-backed crypto API KV: `POST /kv/set` and `POST /kv/get` (DynamoDB object store, values encrypted with the enclave DEK).
 - `crates/verify` — pure Rust AWS Nitro attestation verification (COSE, chain, PCR/nonce/age, TLS leaf hash bind).
 - `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `attestation`).
 - `packages/node` (npm `nitrum-node`) — thin napi-rs bindings over `verify` (document verify + TLS leaf hash bind).
 - Rust rewrites of `examples/hello` and `examples/wallet` using `nitrum-sdk`; `nitrum init` scaffolds the Rust hello example.
 - Criterion micro-benches for data-plane crypto and ingress; k6 macro load harness for deployed Nitro enclaves (`tests/perf`).
-- Manual AWS cloud e2e workflow; local Compose e2e script improvements (cleanup on exit).
+- Manual AWS cloud e2e workflow; local Compose e2e GitHub Actions workflow (`e2e-local.yml`) with ACME/pebble gating and cleanup-on-exit script improvements.
 - CI: `cargo test --all-features`, multi-platform `nitrum-node` prebuilds (macOS/Linux/Windows), `cargo-deny`, Dependabot.
 - Release gates: tag releases require green CI before GHCR push, `nitrum-node` npm publish (with platform optional packages), and GitHub Release CLI assets.
 - OCI image labels: `org.opencontainers.image.revision`, `io.nitrum.git.sha`, and version metadata on runtime images.
