@@ -43,7 +43,7 @@ When `[tls_termination].acme` is enabled:
 
 ### Data-plane crypto HTTP API (internal)
 
-When you run `nitrum local up` or deploy with `nitrum cloud deploy`, the in-enclave data-plane serves a small JSON HTTP API for encryption, key-value storage, and randomness on `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `**0.0.0.0:3000`**). Application code inside the enclave typically calls `http://localhost:3000/...`.
+When you run `nitrum local up` or deploy with `nitrum cloud deploy`, the in-enclave data-plane serves a small JSON HTTP API for encryption, decryption, attestation, and randomness on `NITRUM_CRYPTO_API_LISTEN_ADDR` (default `**0.0.0.0:3000`**). Application code inside the enclave typically calls `http://localhost:3000/...`.
 
 #### Endpoints reachable from application code
 
@@ -77,26 +77,6 @@ The request must use `Content-Type: application/json` with a body of the form:
   }
   ```
   Invalid Base64 may yield `400 Bad Request`; decryption failures or decrypted bytes that are not valid UTF-8 may yield `422 Unprocessable Entity`, with `data` set to `null` and an `error` message.
-- `POST /kv/set` Stores a UTF-8 string under a logical key in shared DynamoDB storage. The value is encrypted with the same KMS-backed DEK as `/encrypt` before persistence (`set_object` overwrites any existing value for that key).  
-  Request body:
-  ```
-  {
-    "key": "<logical key>",
-    "value": "<UTF-8 string>"
-  }
-  ```
-  The logical `key` must be non-empty, at most 512 bytes, and may contain only ASCII letters, digits, and `_ : @ . / -`. The `value` must not exceed 384 KiB (UTF-8 byte length).  
-  Success: `200 OK` with `{ "data": "ok", "error": null }`.  
-  Validation errors: `400 Bad Request`. Encryption or storage failures: `500 Internal Server Error`.
-- `POST /kv/get` Loads and decrypts a value previously stored with `/kv/set`.  
-  Request body:
-  ```
-  {
-    "key": "<logical key, same rules as /kv/set>"
-  }
-  ```
-  Success: `200 OK` with `{ "data": "<original plaintext string>", "error": null }`.  
-  Missing key: `404 Not Found`. Invalid key: `400 Bad Request`. Decryption failure or non-UTF-8 plaintext after decrypt: `422 Unprocessable Entity`. Storage errors: `500 Internal Server Error`.
 - `POST /random` Returns cryptographically secure random bytes.  
 The request may be empty or use `Content-Type: application/json` with an optional body:
   ```
@@ -112,7 +92,7 @@ The request may be empty or use `Content-Type: application/json` with an optiona
   }
   ```
 
-The `examples/hello` Rust app demonstrates an encrypt/decrypt round-trip, `/random`, and `POST /kv` (which calls `/kv/set` and `/kv/get` on the data-plane). The `examples/wallet` example uses the same crypto and KV endpoints and persists each new wallet ciphertext under `wallet:demo_last_ciphertext`; see `examples/wallet/tests/integration.test.mjs` for the create-and-sign flow.
+The `examples/hello` Rust app demonstrates an encrypt/decrypt round-trip and `/random`. The `examples/wallet` example uses the same crypto endpoints and returns sealed wallet ciphertext to the caller; see `examples/wallet/tests/integration.test.mjs` for the create-and-sign flow.
 
 ## Observability
 
@@ -139,7 +119,7 @@ Platform binaries always set `service.namespace=nitrum`. When OTLP export is ena
 
 Your app uses the OpenTelemetry SDK for your language and reads those variables — no Nitrum-specific client is required. In `nitrum local`, open Grafana at `http://localhost:3000` and filter by `service.name` or `nitrum.component` to compare platform and app series. In the cloud, CloudWatch EMF uses `ServiceName` (from `service.name`) as the log stream name under `/nitrum/{project}/metrics`.
 
-See `examples/hello/src/main.rs` for a minimal Rust example (`app.crypto.ops`, `app.kv.duration.ms`).
+See `examples/hello/src/main.rs` for a minimal Rust example (`app.crypto.ops`).
 
 ### `NITRUM_OTLP_ENDPOINT`
 

@@ -13,7 +13,7 @@ const DEFAULT_BASE_URL: &str = "http://127.0.0.1:3000";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// HTTP client for encrypt / decrypt / random / KV / attestation.
+/// HTTP client for encrypt / decrypt / random / attestation.
 #[derive(Debug, Clone)]
 pub struct NitrumClient {
     /// Base URL of the crypto API (no trailing slash).
@@ -78,36 +78,6 @@ impl NitrumClient {
         base64::engine::general_purpose::STANDARD
             .decode(b64)
             .map_err(|e| SdkError::Decode(e.to_string()))
-    }
-
-    /// `POST /kv/set`.
-    pub async fn kv_set(&self, key: &str, value: &str) -> Result<(), SdkError> {
-        let _: String = self
-            .post_data("/kv/set", json!({ "key": key, "value": value }))
-            .await?;
-        Ok(())
-    }
-
-    /// `POST /kv/get` — `None` when the key is missing (HTTP 404).
-    pub async fn kv_get(&self, key: &str) -> Result<Option<String>, SdkError> {
-        let res = self
-            .http
-            .post(format!("{}/kv/get", self.base_url))
-            .json(&json!({ "key": key }))
-            .send()
-            .await?;
-        let status = res.status();
-        if status.as_u16() == 404 {
-            return Ok(None);
-        }
-        let body: ApiEnvelope<String> = res.json().await?;
-        if let Some(err) = body.error {
-            return Err(SdkError::Api(err));
-        }
-        if !status.is_success() {
-            return Err(SdkError::HttpStatus(status.as_u16()));
-        }
-        Ok(body.data)
     }
 
     /// `POST /attestation` — optional base64 fields; returns base64 attestation document.

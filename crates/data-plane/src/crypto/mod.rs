@@ -6,7 +6,6 @@
 mod attest;
 mod dek;
 mod kms;
-mod kv;
 #[cfg(feature = "enclave")]
 mod nsm;
 mod random;

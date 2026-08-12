@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenTelemetry export from control-plane and data-plane via host ADOT collector (CloudWatch metrics/logs, optional X-Ray); injects `OTEL_*` into the user process when OTLP is enabled.
 - DEK-backed crypto API KV: `POST /kv/set` and `POST /kv/get` (DynamoDB object store, values encrypted with the enclave DEK).
 - `crates/verify` — pure Rust AWS Nitro attestation verification (COSE, chain, PCR/nonce/age, TLS leaf hash bind).
-- `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `kv` / `attestation`).
+- `crates/sdk` (`nitrum-sdk`) — in-enclave HTTP client for the data-plane crypto API (`encrypt` / `decrypt` / `random` / `attestation`).
 - `packages/node` (npm `nitrum-node`) — thin napi-rs bindings over `verify` (document verify + TLS leaf hash bind).
 - Rust rewrites of `examples/hello` and `examples/wallet` using `nitrum-sdk`; `nitrum init` scaffolds the Rust hello example.
 - Criterion micro-benches for data-plane crypto and ingress; k6 macro load harness for deployed Nitro enclaves (`tests/perf`).
