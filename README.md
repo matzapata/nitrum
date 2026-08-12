@@ -23,7 +23,7 @@ From a checkout:
 ./scripts/install-nitrum.sh
 ```
 
-Or fetch and run the script from GitHub (pick a branch or tag you trust, for example `develop` or `v0.1.0`):
+Or fetch and run the script from GitHub (pick a branch or tag you trust, for example `develop` or `v0.2.0`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/matzapata/nitrum/develop/scripts/install-nitrum.sh | bash
@@ -31,14 +31,14 @@ curl -fsSL https://raw.githubusercontent.com/matzapata/nitrum/develop/scripts/in
 
 Optional environment variables:
 
-- **`NITRUM_VERSION`** — `latest` (default) or a tag such as `v0.1.0-beta.1`
+- **`NITRUM_VERSION`** — `latest` (default) or a tag such as `v0.2.0`
 - **`NITRUM_INSTALL_DIR`** — install directory (default: `~/.local/bin`)
 - **`NITRUM_REPO`** — `owner/name` if you use a fork (default: `matzapata/nitrum`)
 
 Example: install a specific release into `/usr/local/bin` (may require write permission):
 
 ```bash
-export NITRUM_VERSION=v0.1.0-beta.1
+export NITRUM_VERSION=v0.2.0
 export NITRUM_INSTALL_DIR=/usr/local/bin
 curl -fsSL https://raw.githubusercontent.com/matzapata/nitrum/develop/scripts/install-nitrum.sh | sudo -E bash
 ```
