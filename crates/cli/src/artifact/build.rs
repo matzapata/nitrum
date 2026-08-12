@@ -30,11 +30,10 @@ pub async fn build_enclave_image(
         );
     }
 
+    // BuildKit is required for `--platform linux/amd64` cross-builds (e.g. Apple Silicon).
+    // Local-only `FROM` tags (such as `…:dev-local`) resolve from the daemon.
     let output = Command::new("docker")
         .current_dir(&root)
-        // BuildKit / buildx may try to pull local-only tags from a registry.
-        // Disable it so tags such as `…:latest-local` work as `FROM` inputs.
-        .env("DOCKER_BUILDKIT", "0")
         .arg("build")
         .arg("-q")
         .arg("--platform")

@@ -68,15 +68,13 @@ impl<'a> EnclaveLocalStack<'a> {
         self.apply_stack_env(&mut cmd)
             .env("DOCKER_DEFAULT_PLATFORM", "linux/amd64")
             .arg("compose")
-            // Inherit stdio (not `--progress quiet` + pipes): OrbStack's compose plugin can
-            // spin forever when stdout is a pipe.
             .arg("--progress")
-            .arg("plain")
+            .arg("quiet")
             .arg("-f")
             .arg(compose_file)
             .args(["up", "-d"])
             .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit());
 
         let status = cmd
@@ -106,7 +104,7 @@ impl<'a> EnclaveLocalStack<'a> {
             .arg(compose_file)
             .args(["down"])
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped());
 
         let output = cmd
