@@ -1,0 +1,19 @@
+{
+  "private": true,
+  "name": "nitrum-monorepo",
+  "workspaces": [
+    "packages/*",
+    "examples/hello",
+    "examples/wallet"
+  ],
+  "optionalDependencies": {
+    "@biomejs/cli-linux-x64": "2.5.8",
+    "@rollup/rollup-linux-x64-gnu": "4.62.4"
+  },
+  "devDependencies": {
+    "husky": "9.1.7"
+  },
+  "scripts": {
+    "prepare": "husky"
+  }
+}

@@ -1,0 +1,297 @@
+# Local development compose for the enclaves.
+#
+# The enclave image is built by `nitrum local up` (CLI), not by Compose.
+# Compose only runs the pre-tagged `ENCLAVE_IMAGE`.
+# `nitrum local` also sets ENCLAVE_CPUS / ENCLAVE_MEMORY from `[scaling]` in nitrum.toml
+# so the enclave container matches cloud enclave CPU/RAM budget.
+#
+# Usage:
+#   docker compose up            # start (requires ENCLAVE_IMAGE already built)
+#   docker compose down          # stop
+#
+# For domain nitrum.localhost (e.g. ACME / Pebble), add to your host /etc/hosts if needed:
+#   127.0.0.1 nitrum.localhost
+# Then you can use: curl -sk https://nitrum.localhost/...
+#
+# Test the enclave well-known endpoints:
+#   curl -sk https://nitrum.localhost/.well-known/enclave/status
+#   curl -sk https://nitrum.localhost/.well-known/enclave/attestation
+#
+# Test the user app through TLS ingress:
+#   curl -sk https://nitrum.localhost/health
+#
+# Access the internal data-plane API directly (no TLS):
+#   curl http://nitrum.localhost/attestation -d '{}'
+#
+# Test crypto (encrypt/decrypt via app; plaintext is UTF-8 string):
+#   curl -sk https://nitrum.localhost/crypto -H "Content-Type: application/json" -d '{"plaintext":"hello"}'
+#
+# Observability: the data-plane exports OTLP to the `observability` service (Grafana LGTM stack).
+# Open Grafana at http://localhost:3000 to explore metrics, traces, and logs.
+#
+# Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
+# Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production).
+# `nitrum local` rewrites `.nitrum/local-stack.yml` from the CLI template on each up/down/logs.
+
+configs:
+  pebble-config:
+    content: |
+      {
+        "pebble": {
+          "listenAddress": "0.0.0.0:14000",
+          "managementListenAddress": "0.0.0.0:15000",
+          "certificate": "test/certs/localhost/cert.pem",
+          "privateKey": "test/certs/localhost/key.pem",
+          "httpPort": 5002,
+          "tlsPort": 5001,
+          "ocspResponderURL": "",
+          "externalAccountBindingRequired": false,
+          "retryAfter": { "authz": 1, "order": 1 },
+          "profiles": {
+            "default": {
+              "description": "Short-lived certs for testing renewal",
+              "validityPeriod": 10
+            }
+          }
+        }
+      }
+
+  aemm-config:
+    content: |
+      {
+        "imdsv2": true,
+        "server": {
+          "hostname": "0.0.0.0",
+          "port": "1338"
+        },
+        "metadata": {
+          "paths": {
+            "iam-security-credentials": "/latest/meta-data/iam/security-credentials/nitrum-local-role"
+          },
+          "values": {
+            "iam-info": {
+              "Code": "Success",
+              "LastUpdated": "2024-01-01T00:00:00Z",
+              "InstanceProfileArn": "arn:aws:iam::000000000000:instance-profile/nitrum-local-role",
+              "InstanceProfileId": "AIPANITRUMLOCAL00"
+            },
+            "iam-security-credentials-role": "nitrum-local-role",
+            "iam-security-credentials": {
+              "Code": "Success",
+              "LastUpdated": "2024-01-01T00:00:00Z",
+              "Type": "AWS-HMAC",
+              "AccessKeyId": "test",
+              "SecretAccessKey": "test",
+              "Token": "",
+              "Expiration": "2099-01-01T00:00:00Z"
+            }
+          }
+        }
+      }
+
+services:
+  # Amazon EC2 Metadata Mock (IMDSv2 + fake instance profile credentials).
+  imds:
+    image: public.ecr.aws/aws-ec2/amazon-ec2-metadata-mock:v1.13.0
+    platform: linux/amd64
+    configs:
+      - source: aemm-config
+        target: /config/aemm-config.json
+    command: ["-c", "/config/aemm-config.json"]
+    ports:
+      - "1338:1338"
+
+  # Floci: AWS-compatible SSM + DynamoDB + KMS on 4566 (SSM params, table, symmetric DEK CMK).
+  aws:
+    image: floci/floci:1.5.5
+    platform: linux/amd64
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - FLOCI_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+    healthcheck:
+      # Match upstream Floci image (Alpine: wget, not curl). JVM warm-up on emulated amd64 can exceed a short window.
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4566/_floci/health"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 120s
+
+  # One-shot: create DynamoDB table + SSM params expected by the data-plane (see crates/data-plane/src/bootstrap/ssm.rs).
+  aws-init:
+    image: amazon/aws-cli:latest
+    platform: linux/amd64
+    depends_on:
+      aws:
+        # Do not wait for Docker "healthy" — Floci/JVM startup can exceed healthcheck limits on slow or emulated CPUs.
+        # The script below polls the DynamoDB API until the emulator responds.
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      # Project root (parent of `.nitrum/`); `.env.local` is read from here.
+      - ..:/nitrum-project:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for Floci (service aws) to accept AWS API calls..."
+        ok=0
+        for i in $$(seq 1 180); do
+          if aws --endpoint-url=http://aws:4566 dynamodb list-tables >/dev/null 2>&1; then
+            ok=1
+            break
+          fi
+          sleep 1
+        done
+        if [ "$$ok" != 1 ]; then
+          echo "Timed out after 180s — check: docker compose logs aws"
+          exit 1
+        fi
+        
+        PROJECT_NAME=dev
+        if [ -f /nitrum-project/nitrum.toml ]; then
+          parsed=$$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' /nitrum-project/nitrum.toml | head -1)
+          if [ -n "$$parsed" ]; then
+            PROJECT_NAME=$$parsed
+          fi
+        fi
+        echo "nitrum.toml name: $$PROJECT_NAME (SSM paths match data-plane defaults)"
+        DP_PREFIX="/nitrum/$$PROJECT_NAME/data-plane"
+        ENV_PREFIX="/nitrum/$$PROJECT_NAME/env"
+        
+        aws --endpoint-url=http://aws:4566 dynamodb create-table \
+          --table-name "$$PROJECT_NAME" \
+          --attribute-definitions AttributeName=pk,AttributeType=S \
+          --key-schema AttributeName=pk,KeyType=HASH \
+          --billing-mode PAY_PER_REQUEST 2>/dev/null || true
+        
+        KMS_KEY_ID=$$(aws --endpoint-url=http://aws:4566 kms create-key \
+          --description nitrum-local-symmetric-data-key \
+          --query KeyMetadata.KeyId --output text)
+        
+        aws --endpoint-url=http://aws:4566 ssm put-parameter \
+          --name "$${DP_PREFIX}/kms_key_id" --value "$$KMS_KEY_ID" --type String --overwrite
+        
+        aws --endpoint-url=http://aws:4566 ssm put-parameter \
+          --name "$${DP_PREFIX}/dynamodb_table" --value "$$PROJECT_NAME" --type String --overwrite
+        
+        if [ -f /nitrum-project/.env.local ]; then
+          echo "Syncing .env.local to SSM (Floci) under $$ENV_PREFIX ..."
+          HASH=$$(printf '\043')
+          while IFS= read -r line || [ -n "$$line" ]; do
+            line=$$(printf '%s' "$$line" | tr -d '\r')
+            line=$$(printf '%s' "$$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//')
+            case "$$line" in '') continue ;; esac
+            first=$$(printf '%.1s' "$$line")
+            [ "$$first" = "$$HASH" ] && continue
+            key=$${line%%=*}
+            val=$${line#*=}
+            key=$$(printf '%s' "$$key" | sed 's/^export[[:space:]]\{1,\}//;s/^[[:space:]]*//;s/[[:space:]]*$$//')
+            val=$$(printf '%s' "$$val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//')
+            if ! echo "$$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$$'; then
+              echo "  skip invalid key: $$key"
+              continue
+            fi
+            if aws --endpoint-url=http://aws:4566 ssm put-parameter \
+              --name "$${ENV_PREFIX}/$$key" --value "$$val" --type SecureString --overwrite; then
+              echo "  $$key"
+            else
+              echo "  warning: put-parameter failed for $$key"
+            fi
+          done < /nitrum-project/.env.local
+        else
+          echo "No .env.local (optional); skipping app env SSM seed."
+        fi
+        
+        echo "aws-init (Floci seed) done."
+
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    platform: linux/amd64
+    command: ["-config", "/config/pebble-config.json"]
+    ports:
+      - "14000:14000"
+      - "15000:15000"
+    configs:
+      - source: pebble-config
+        target: /config/pebble-config.json
+    environment:
+      PEBBLE_VA_NOSLEEP: "1"
+
+  # All-in-one Grafana observability backend (OpenTelemetry Collector + Prometheus +
+  # Tempo + Loki + Grafana) for local dev. Mirrors the role the ADOT collector plays in
+  # production (crates/cli/template/cloud-stack.yml): receives OTLP from the data-plane and renders it as
+  # metrics, traces, and logs. Open the Grafana UI at http://localhost:3000 (anonymous,
+  # admin) to explore dashboards.
+  observability:
+    image: grafana/otel-lgtm:latest
+    platform: linux/amd64
+    ports:
+      - "3000:3000" # Grafana UI
+      - "4317:4317" # OTLP/gRPC (data-plane export target)
+      - "4318:4318" # OTLP/HTTP
+
+  enclave:
+    # Image is built by `nitrum local up` via `build_enclave_image` (not Compose).
+    # CPU/RAM limits mirror `[scaling].num_cpus` / `ram_size_mib` (set by the CLI).
+    image: ${ENCLAVE_IMAGE}
+    platform: linux/amd64
+    pull_policy: never
+    cpus: ${ENCLAVE_CPUS}
+    mem_limit: ${ENCLAVE_MEMORY}
+    cap_add:
+      - NET_ADMIN
+    hostname: nitrum.localhost
+    ports:
+      - "443:443"
+      - "5002:5002"
+    networks:
+      default:
+        aliases:
+          - nitrum.localhost
+    depends_on:
+      aws-init:
+        condition: service_completed_successfully
+      imds:
+        condition: service_started
+      pebble:
+        condition: service_started
+      observability:
+        condition: service_started
+    environment:
+      RUST_LOG: info
+
+      # Only for local dev
+      NITRUM_IMDS_BASE_URL: http://imds:1338/latest
+      # Export traces/metrics/logs over OTLP to the local Grafana stack (service `observability`).
+      NITRUM_OTLP_ENDPOINT: http://observability:4317
+      NITRUM_SSM_ENDPOINT_URL: http://aws:4566
+      NITRUM_DYNAMODB_ENDPOINT_URL: http://aws:4566
+      NITRUM_ACME_HTTP01_LISTEN_ADDR: "0.0.0.0:5002"
+      NITRUM_ACME_DIRECTORY_URL: https://pebble:14000/dir
+      NITRUM_KMS_ENDPOINT_URL: http://aws:4566
+      PEBBLE_MINICA_CERT: |
+        -----BEGIN CERTIFICATE-----
+        MIIDPzCCAiegAwIBAgIIU0Xm9UFdQxUwDQYJKoZIhvcNAQELBQAwIDEeMBwGA1UE
+        AxMVbWluaWNhIHJvb3QgY2EgNTM0NWU2MCAXDTI1MDkwMzIzNDAwNVoYDzIxMjUw
+        OTAzMjM0MDA1WjAgMR4wHAYDVQQDExVtaW5pY2Egcm9vdCBjYSA1MzQ1ZTYwggEi
+        MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC5WgZNoVJandj43kkLyU50vzCZ
+        alozvdRo3OFiKoDtmqKPNWRNO2hC9AUNxTDJco51Yc42u/WV3fPbbhSznTiOOVtn
+        Ajm6iq4I5nZYltGGZetGDOQWr78y2gWY+SG078MuOO2hyDIiKtVc3xiXYA+8Hluu
+        9F8KbqSS1h55yxZ9b87eKR+B0zu2ahzBCIHKmKWgc6N13l7aDxxY3D6uq8gtJRU0
+        toumyLbdzGcupVvjbjDP11nl07RESDWBLG1/g3ktJvqIa4BWgU2HMh4rND6y8OD3
+        Hy3H8MY6CElL+MOCbFJjWqhtOxeFyZZV9q3kYnk9CAuQJKMEGuN4GU6tzhW1AgMB
+        AAGjezB5MA4GA1UdDwEB/wQEAwIChDATBgNVHSUEDDAKBggrBgEFBQcDATASBgNV
+        HRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBSu8RGpErgYUoYnQuwCq+/ggTiEjDAf
+        BgNVHSMEGDAWgBSu8RGpErgYUoYnQuwCq+/ggTiEjDANBgkqhkiG9w0BAQsFAAOC
+        AQEAXDVYov1+f6EL7S41LhYQkEX/GyNNzsEvqxE9U0+3Iri5JfkcNOiA9O9L6Z+Y
+        bqcsXV93s3vi4r4WSWuc//wHyJYrVe5+tK4nlFpbJOvfBUtnoBDyKNxXzZCxFJVh
+        f9uc8UejRfQMFbDbhWY/x83y9BDufJHHq32OjCIN7gp2UR8rnfYvlz7Zg4qkJBsn
+        DG4dwd+pRTCFWJOVIG0JoNhK3ZmE7oJ1N4H38XkZ31NPcMksKxpsLLIS9+mosZtg
+        4olL7tMPJklx5ZaeMFaKRDq4Gdxkbw4+O4vRgNm3Z8AXWKknOdfgdpqLUPPhRcP4
+        v1lhy71EhBuXXwRQJry0lTdF+w==
+        -----END CERTIFICATE-----

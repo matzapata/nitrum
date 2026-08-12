@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+echo "=== Running pre-commit checks ==="
+
+echo "1. Checking Rust formatting..."
+cargo fmt --all -- --check
+
+echo "2. Running Clippy (Rust linter)..."
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo "3. Running Rust tests..."
+cargo test --all-features
+
+echo "4. Building Node.js native bindings..."
+npm run build -w nitrum-node
+
+echo "5. Running Node.js tests..."
+npm test -w nitrum-node
+
+echo "=== All checks passed successfully! ==="

@@ -1,0 +1,12 @@
+/target/
+.cargo-home
+*.eif
+.env
+.DS_Store
+.nitrum
+node_modules/
+dist
+.venv/
+.venv-diagrams/
+__pycache__/
+tests/perf/results/

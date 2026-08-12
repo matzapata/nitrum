@@ -1,0 +1,22 @@
+# Blockchain wallet example
+
+Rust enclave app that generates an encrypted wallet key via the Nitrum crypto API
+and signs EIP-1559 transactions after HMAC proof verification.
+
+Uses workspace [`crates/sdk`](../../crates/sdk) for `encrypt`, `decrypt`, and
+`random` (git `nitrum-sdk` dep + workspace `[patch]` to the local crate; Docker build
+context is the project directory). Create returns ciphertext to the caller for
+client-held sealed storage. Metrics: `app.wallet.created`, `app.wallet.sign.duration.ms`.
+
+`nitrum init` does not scaffold this project — see [`crates/cli/template`](../../crates/cli/template) for the customer hello template.
+
+```bash
+cd examples/wallet
+nitrum local up   # or nitrum build / cloud deploy
+
+# Against a running enclave:
+ENCLAVE_URL=https://nitrum.localhost ENCLAVE_TLS_INSECURE=1 npm test
+```
+
+Integration tests live under `tests/` (attestation when not local-dev TLS, `/health`,
+create wallet + sign flow).

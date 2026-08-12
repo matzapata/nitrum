@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "nitrum-diagrams"
+version = "0.1.0"
+description = "Documentation diagram tooling for Nitrum."
+authors = ["Nitrum Contributors"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+
+[tool.poetry.group.diagrams.dependencies]
+diagrams = "^0.25.1"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,11 @@
+{
+  "name": "blockchain-wallet-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/integration.test.mjs"
+  },
+  "dependencies": {
+    "nitrum-node": "0.2.0"
+  }
+}

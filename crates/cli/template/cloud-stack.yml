@@ -1,0 +1,1140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 80 and 443), KMS, DynamoDB,
+  SSM parameters under /nitrum/{ProjectName}/data-plane/ (KMS key id + DynamoDB table) and /nitrum/{ProjectName}/env/ (app secrets), plus VPC endpoints.
+  ProjectName: stack name, DynamoDB table, KMS alias, log groups, tags, launch template, and SSM layout.
+  Retain defaults false.
+  Upload the EIF to S3; set EifVersionLabel when you publish a new EIF to refresh instances.
+  The control-plane container downloads the EIF from S3 at startup (not EC2 user-data).
+  Two AZs, single NAT, NLB security group and cross-zone load balancing enabled.
+
+Metadata:
+  License:
+    Description: >
+      SPDX-License-Identifier: MIT-0
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy of this
+      software and associated documentation files (the "Software"), to deal in the Software
+      without restriction, including without limitation the rights to use, copy, modify,
+      merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+      permit persons to whom the Software is furnished to do so.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+      INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+      PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+      HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+      OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+      SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ─────────────────────────────────────────────────────────────────────────────
+Parameters:
+  ProjectName:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{2,127}$'
+    Description: >
+      Project name used to determine CloudFormation stack name, DynamoDB table name, KMS alias,
+      CloudWatch log group, tags, launch template, and SSM paths
+      /nitrum/{ProjectName}/data-plane/… and /nitrum/{ProjectName}/env/….
+
+  Retain:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      When true, retain KMS key, DynamoDB table, CloudWatch log groups, and SSM parameters on stack
+      delete (typical production). When false (default), delete them with the stack (typical dev).
+
+  EifS3Bucket:
+    Type: String
+    Description: >
+      S3 bucket where the enclave EIF object was uploaded.
+
+  EifS3Key:
+    Type: String
+    Default: enclave.eif
+    Description: >
+      S3 object key of the EIF file 
+
+  EifVersionLabel:
+    Type: String
+    Default: "000000000000"
+    Description: >
+      Short label for this EIF build (e.g. first 12 hex chars of sha256). Change on every new
+      upload so the launch template name changes and the Auto Scaling group can roll instances.
+
+  AsgMinSize:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: Auto Scaling group minimum size.
+
+  AsgMaxSize:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: Auto Scaling group maximum size (raise to scale out; need desired+1 for safe rolling).
+
+  AsgDesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: Auto Scaling group desired capacity (must be between min and max).
+
+  EnclaveCpuCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 8
+    Description: >
+      vCPUs per Nitro Enclave (nitro-cli --cpu-count). Must fit the EC2 instance type and match
+
+  EnclaveMemoryMib:
+    Type: Number
+    Default: 4320
+    MinValue: 64
+    MaxValue: 61440
+    Description: >
+      Enclave memory in MiB (nitro-cli --memory). Must fit the instance and match allocator memory_mib.
+
+  InstanceType:
+    Type: String
+    Default: m6i.xlarge
+    Description: >
+      EC2 instance type for Nitro Enclave hosts. Must be Nitro Enclave–capable and large enough
+      for EnclaveCpuCount / EnclaveMemoryMib (parent reserves 2 vCPUs and 2048 MiB).
+
+  RollingMinInstancesInService:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    Description: >
+      AutoScalingRollingUpdate MinInstancesInService. Use 1 (or more) for zero-downtime rolling;
+      0 for faster/cheaper replace-in-place (brief downtime).
+
+  RollingPauseTime:
+    Type: String
+    Default: PT5M
+    Description: >
+      AutoScalingRollingUpdate PauseTime (ISO-8601 duration). PT5M gives enclaves time to become
+      healthy; PT0S for fastest updates when RollingMinInstancesInService is 0.
+
+  EnableXRayTracing:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      When true, ADOT exports OTLP traces to X-Ray. When false (default), metrics and CloudWatch
+      Logs still export; no X-Ray ingestion (cheaper for development).
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 7
+    Description: CloudWatch Logs retention for data-plane, control-plane, and metrics log groups.
+
+  SnsAlarmTopicArn:
+    Type: String
+    Default: ''
+    Description: >
+      Optional SNS topic ARN for CloudWatch alarms (unhealthy NLB targets, ASG capacity).
+      Empty string disables alarm resources.
+
+  LatestAmazonLinux2023Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: >
+      Amazon Linux 2023 AMI id (resolved from SSM at deploy time).
+
+  ControlPlaneImage:
+    Type: String
+    Default: ghcr.io/matzapata/nitrum/control-plane:latest
+    Description: >
+      Full Docker image reference for the Nitrum control-plane on EC2 (registry/repo:tag), e.g. from nitrum.toml control_plane.
+
+  ControlPlaneDebugArg:
+    Type: String
+    Default: ""
+    Description: Optional control-plane debug CLI arg (`--debug-mode` or empty).
+
+  OtelCollectorImage:
+    Type: String
+    Default: public.ecr.aws/aws-observability/aws-otel-collector:latest
+    Description: >
+      ADOT (AWS Distro for OpenTelemetry) Collector image run on the EC2 host. Receives OTLP from
+      the control-plane and the enclave data-plane and exports to CloudWatch (EMF), CloudWatch Logs,
+      and X-Ray.
+
+  EifImageSha384:
+    Type: String
+    Description: >
+      PCR0 / enclave image SHA-384 (hex, from `nitro-cli describe-eif`) used in the KMS key policy
+      with kms:RecipientAttestation:ImageSha384 so attested Decrypt only succeeds for this EIF build.
+      The deploy CLI sets this from the EIF unless overridden.
+
+  KmsAdministratorRoleArn:
+    Type: String
+    Default: AWS_ACCOUNT_ROOT
+    Description: >
+      Principal allowed to administer this KMS key (Create*, Describe*, etc.). Use the default
+      AWS_ACCOUNT_ROOT to allow the owning AWS account root ARN (typical). Otherwise pass a full IAM ARN.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conditions
+# ─────────────────────────────────────────────────────────────────────────────
+Conditions:
+  RetainData: !Equals [!Ref Retain, 'true']
+  KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
+  EnableXRay: !Equals [!Ref EnableXRayTracing, 'true']
+  HasSnsAlarmTopic: !Not [!Equals [!Ref SnsAlarmTopicArn, '']]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resources
+# ─────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  # ── VPC ─────────────────────────────────────────────────────────────────────
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} VPC"
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Public Subnet (AZ1)"
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Public Subnet (AZ2)"
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Private Subnet (AZ1)"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Private Subnet (AZ2)"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Internet Gateway"
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} NAT EIP"
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} NAT Gateway"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Public Routes"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Private Routes"
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ── VPC Endpoints ────────────────────────────────────────────────────────────
+  VpcEndpointSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName} VPC Endpoints"
+      GroupDescription: !Sub "HTTPS from VPC CIDR to interface endpoints (${ProjectName})"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} VPC Endpoint SG"
+
+  KMSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.kms"
+      VpcEndpointType: Interface
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref VpcEndpointSG]
+      PrivateDnsEnabled: true
+
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
+      VpcEndpointType: Interface
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref VpcEndpointSG]
+      PrivateDnsEnabled: true
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcEndpointType: Interface
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref VpcEndpointSG]
+      PrivateDnsEnabled: true
+
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable]
+
+  DynamoDBEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable]
+
+  # ── Security Groups ──────────────────────────────────────────────────────────
+  NitroNLBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName} NLB"
+      GroupDescription: !Sub "Network Load Balancer - HTTP/HTTPS from internet, egress to targets (${ProjectName})"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from internet (IPv4, ACME HTTP-01)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: "::/0"
+          Description: HTTP from internet (IPv6, ACME HTTP-01)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet (IPv4)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: "::/0"
+          Description: HTTPS from internet (IPv6)
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} NLB Security Group"
+
+  NitroInstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName} Nitro Instance"
+      GroupDescription: !Sub "Nitro Enclave EC2 instances - HTTP/HTTPS, NLB, and VPC access (${ProjectName})"
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName} Instance Security Group"
+
+  NitroSGIngressVpc:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 10.0.0.0/16
+      Description: Allow HTTPS from within VPC
+
+  NitroSGIngressNlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref NitroNLBSG
+      Description: HTTPS from NLB (health checks + traffic)
+
+  NitroSGIngressSelfHttps:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref NitroInstanceSG
+      Description: Intra-SG HTTPS
+
+  NitroSGIngressSelfPing:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: icmp
+      FromPort: 8
+      ToPort: "-1"
+      SourceSecurityGroupId: !Ref NitroInstanceSG
+      Description: Intra-SG ping
+
+  NitroSGIngressDirect:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: HTTPS (optional direct / debugging)
+
+  NitroSGIngressVpc80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 10.0.0.0/16
+      Description: HTTP from within VPC (ACME HTTP-01)
+
+  NitroSGIngressNlb80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref NitroNLBSG
+      Description: HTTP from NLB (ACME HTTP-01)
+
+  NitroSGIngressSelfHttp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref NitroInstanceSG
+      Description: Intra-SG HTTP
+
+  NitroSGIngressDirect80:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NitroInstanceSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+      Description: HTTP (optional direct / debugging, ACME)
+
+  # ── KMS Key ──────────────────────────────────────────────────────────────────
+  EnclaveKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      Description: !Sub "${ProjectName} | enclave CMK (GenerateDataKey + attested Decrypt)"
+      EnableKeyRotation: !If [RetainData, true, false]
+      # Enclave crypto: Principal is the account root so IAM (InstanceRole inline policy) controls
+      # which identities may call KMS, without a CloudFormation cycle (role policy references this key ARN).
+      # Decrypt is further restricted to attested calls matching this EIF's PCR0 (ImageSha384).
+      # GenerateDataKey* is issued without Recipient today; see crates/data-plane crypto/kms.rs.
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableDecryptFromEnclave
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:Decrypt"
+            Resource: "*"
+            Condition:
+              StringEqualsIgnoreCase:
+                kms:RecipientAttestation:ImageSha384: !Ref EifImageSha384
+
+          - Sid: EnclaveGenerateDataKey
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: "*"
+
+          - Sid: KmsAdministrator
+            Effect: Allow
+            Principal:
+              AWS: !If
+                - KmsAdminIsAccountRoot
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                - !Ref KmsAdministratorRoleArn
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:GenerateDataKey
+              - kms:TagResource
+              - kms:UntagResource
+            Resource: "*"
+
+  # Friendly alias for console, CLI, and docs (SSM still stores raw key id for the data-plane)
+  EnclaveKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-enclave"
+      TargetKeyId: !Ref EnclaveKey
+
+  # ── DynamoDB Table ───────────────────────────────────────────────────────────
+  EnclaveTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      TableName: !Ref ProjectName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [RetainData, true, false]
+      DeletionProtectionEnabled: !If [RetainData, true, false]
+
+  # ── SSM Parameters ───────────────────────────────────────────────────────────
+  NitrumKmsKeyParam:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      Name: !Sub "/nitrum/${ProjectName}/data-plane/kms_key_id"
+      Type: String
+      Value: !Ref EnclaveKey
+      Description: !Sub "KMS key ID for Nitrum data-plane (${ProjectName})"
+
+  NitrumDynamoTableParam:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      Name: !Sub "/nitrum/${ProjectName}/data-plane/dynamodb_table"
+      Type: String
+      Value: !Ref EnclaveTable
+      Description: !Sub "DynamoDB table name for Nitrum data-plane (${ProjectName})"
+
+  # ── CloudWatch Log Groups ────────────────────────────────────────────────────
+  DataPlaneLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      LogGroupName: !Sub "/nitrum/${ProjectName}/data-plane"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  ControlPlaneLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      LogGroupName: !Sub "/nitrum/${ProjectName}/control-plane"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  # Target log group for the ADOT collector's awsemf exporter (CloudWatch extracts metrics from
+  # the EMF documents written here into the "Nitrum" namespace).
+  MetricsLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: !If [RetainData, Retain, Delete]
+    UpdateReplacePolicy: !If [RetainData, Retain, Delete]
+    Properties:
+      LogGroupName: !Sub "/nitrum/${ProjectName}/metrics"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  # ── IAM (CloudFormation-generated physical names) ────────────────────────────
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: NitrumInstancePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadEifFromS3
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${EifS3Bucket}/${EifS3Key}"
+
+              - Sid: EnclaveKms
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                  - kms:Decrypt
+                Resource: !GetAtt EnclaveKey.Arn
+
+              - Sid: DynamoReadWrite
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt EnclaveTable.Arn
+
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
+                Resource:
+                  - !GetAtt DataPlaneLogGroup.Arn
+                  - !Sub "${DataPlaneLogGroup.Arn}:*"
+                  - !GetAtt ControlPlaneLogGroup.Arn
+                  - !Sub "${ControlPlaneLogGroup.Arn}:*"
+                  - !GetAtt MetricsLogGroup.Arn
+                  - !Sub "${MetricsLogGroup.Arn}:*"
+
+              # X-Ray ingestion for the ADOT collector's awsxray exporter (trace segments).
+              - !If
+                - EnableXRay
+                - Sid: XRayTraceIngestion
+                  Effect: Allow
+                  Action:
+                    - xray:PutTraceSegments
+                    - xray:PutTelemetryRecords
+                    - xray:GetSamplingRules
+                    - xray:GetSamplingTargets
+                  Resource: "*"
+                - !Ref AWS::NoValue
+
+              - Sid: SsmParams
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nitrum/${ProjectName}/*"
+
+              - Sid: SsmSecureStringKms
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ── Launch Template ───────────────────────────────────────────────────────────
+  NitroLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ProjectName}-${EifVersionLabel}"
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmazonLinux2023Ami
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        SecurityGroupIds: [!Ref NitroInstanceSG]
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+          InstanceMetadataTags: enabled
+        EnclaveOptions:
+          Enabled: true
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 32
+              VolumeType: gp3
+              Encrypted: true
+              DeleteOnTermination: !If [RetainData, false, true]
+        UserData:
+          Fn::Base64:
+            !Sub |
+              Content-Type: multipart/mixed; boundary="//"
+              MIME-Version: 1.0
+
+              --//
+              Content-Type: text/cloud-config; charset="us-ascii"
+              MIME-Version: 1.0
+              Content-Transfer-Encoding: 7bit
+              Content-Disposition: attachment; filename="cloud-config.txt"
+
+              #cloud-config
+              bootcmd:
+                - [ dnf, install, aws-nitro-enclaves-cli, aws-nitro-enclaves-cli-devel, htop, git, jq, -y ]
+
+              --//
+              Content-Type: text/x-shellscript; charset="us-ascii"
+              MIME-Version: 1.0
+              Content-Transfer-Encoding: 7bit
+              Content-Disposition: attachment; filename="userdata.txt"
+
+              #!/bin/bash
+
+              exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+              set -x
+              set +e
+
+              usermod -aG docker ec2-user
+              usermod -aG ne ec2-user
+
+              # Nitro enclaves allocator (must align with EnclaveCpuCount / EnclaveMemoryMib)
+              ALLOCATOR_YAML=/etc/nitro_enclaves/allocator.yaml
+              sed -r "s/^(\s*memory_mib\s*:\s*).*/\1 ${EnclaveMemoryMib}/" -i "$ALLOCATOR_YAML"
+              sed -r "s/^(\s*cpu_count\s*:\s*).*/\1 ${EnclaveCpuCount}/" -i "$ALLOCATOR_YAML"
+
+              # Enable services
+              systemctl enable --now docker
+              systemctl enable --now nitro-enclaves-allocator.service
+              systemctl enable --now nitro-enclaves-vsock-proxy.service
+
+              sleep 5
+
+              docker pull "${ControlPlaneImage}"
+
+              cat > /etc/systemd/system/control-plane.service <<'UNIT_EOF'
+              [Unit]
+              Description=Nitrum control-plane (gvproxy + enclave)
+              After=docker.service nitro-enclaves-allocator.service
+              Requires=docker.service
+              [Service]
+              Type=simple
+              Restart=always
+              RestartSec=10
+              ExecStartPre=-/usr/bin/docker rm -f control-plane
+              ExecStart=/usr/bin/docker run --rm --name control-plane --privileged --security-opt seccomp=unconfined -e NITRUM_PROJECT_NAME=${ProjectName} -e AWS_DEFAULT_REGION=${AWS::Region} -e NITRUM_OTLP_ENDPOINT=http://127.0.0.1:4317 -p 80:80 -p 443:443 -p 4317:4317 ${ControlPlaneImage} /app/control-plane --eif-bucket ${EifS3Bucket} --eif-hash ${EifVersionLabel} --cpu-count ${EnclaveCpuCount} --memory-mib ${EnclaveMemoryMib} ${ControlPlaneDebugArg}
+              ExecStop=/usr/bin/docker stop -t 10 control-plane
+              TimeoutStopSec=30
+              [Install]
+              WantedBy=multi-user.target
+              UNIT_EOF
+
+              systemctl daemon-reload
+              systemctl enable --now control-plane.service
+
+              # ── OpenTelemetry Collector (ADOT) ─────────────────────────────────────────────
+              # Receives OTLP/gRPC on :4317 and exports to CloudWatch (EMF metrics in the
+              # "Nitrum" namespace), CloudWatch Logs (per-service log groups), and optionally X-Ray
+              # when EnableXRayTracing=true. Runs in the control-plane container's network namespace.
+              mkdir -p /opt/nitrum
+              ENABLE_XRAY="${EnableXRayTracing}"
+              if [ "$ENABLE_XRAY" = "true" ]; then
+              cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
+              receivers:
+                otlp:
+                  protocols:
+                    grpc:
+                      endpoint: 0.0.0.0:4317
+              processors:
+                batch:
+              exporters:
+                awsemf:
+                  namespace: Nitrum
+                  log_group_name: "/nitrum/${ProjectName}/metrics"
+                  log_stream_name: "{ServiceName}"
+                awscloudwatchlogs:
+                  log_group_name: "/nitrum/${ProjectName}/{ServiceName}"
+                  log_stream_name: "otel"
+                awsxray: {}
+              service:
+                pipelines:
+                  traces:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsxray]
+                  metrics:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsemf]
+                  logs:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awscloudwatchlogs]
+              OTEL_EOF
+              else
+              cat > /opt/nitrum/otelcol-config.yaml <<'OTEL_EOF'
+              receivers:
+                otlp:
+                  protocols:
+                    grpc:
+                      endpoint: 0.0.0.0:4317
+              processors:
+                batch:
+              exporters:
+                awsemf:
+                  namespace: Nitrum
+                  log_group_name: "/nitrum/${ProjectName}/metrics"
+                  log_stream_name: "{ServiceName}"
+                awscloudwatchlogs:
+                  log_group_name: "/nitrum/${ProjectName}/{ServiceName}"
+                  log_stream_name: "otel"
+              service:
+                pipelines:
+                  metrics:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awsemf]
+                  logs:
+                    receivers: [otlp]
+                    processors: [batch]
+                    exporters: [awscloudwatchlogs]
+              OTEL_EOF
+              fi
+
+              docker pull "${OtelCollectorImage}"
+
+              cat > /etc/systemd/system/otel-collector.service <<'UNIT_EOF'
+              [Unit]
+              Description=Nitrum OpenTelemetry Collector (ADOT)
+              After=control-plane.service
+              BindsTo=control-plane.service
+              [Service]
+              Type=simple
+              Restart=always
+              RestartSec=10
+              ExecStartPre=-/usr/bin/docker rm -f otel-collector
+              ExecStart=/usr/bin/docker run --rm --name otel-collector --network container:control-plane -e AWS_REGION=${AWS::Region} -v /opt/nitrum/otelcol-config.yaml:/etc/otelcol/config.yaml ${OtelCollectorImage} --config /etc/otelcol/config.yaml
+              ExecStop=/usr/bin/docker stop -t 10 otel-collector
+              TimeoutStopSec=30
+              [Install]
+              WantedBy=multi-user.target
+              UNIT_EOF
+
+              systemctl daemon-reload
+              systemctl enable --now otel-collector.service
+
+              --//--
+
+  # ── Auto Scaling Group ───────────────────────────────────────────────────────
+  NitroASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: NatGateway
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: !Ref RollingMinInstancesInService
+        PauseTime: !Ref RollingPauseTime
+    Properties:
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgDesiredCapacity
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NitroLaunchTemplate
+        Version: !GetAtt NitroLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      TargetGroupARNs: [!Ref NitroTargetGroup, !Ref NitroTargetGroupHttp]
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+          PropagateAtLaunch: true
+
+  # ── Network Load Balancer ────────────────────────────────────────────────────
+  NitroNLB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Type: network
+      Scheme: internet-facing
+      Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+      SecurityGroups: [!Ref NitroNLBSG]
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: "true"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-nlb"
+
+  NitroTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: !Ref VPC
+      Protocol: TCP
+      Port: 443
+      TargetType: instance
+      # HTTPS path check to in-enclave ingress (NLB does not verify target certs).
+      # Status reflects data-plane [health_check] probes of the user app.
+      HealthCheckProtocol: HTTPS
+      HealthCheckPort: "443"
+      HealthCheckPath: /.well-known/enclave/status
+      Matcher:
+        HttpCode: "200"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-tg"
+
+  # TCP 80 to instances for ACME HTTP-01. Health check uses HTTPS :443 status so targets stay
+  # healthy when ACME is disabled (nothing may listen on enclave :80 in that case).
+  NitroTargetGroupHttp:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      VpcId: !Ref VPC
+      Protocol: TCP
+      Port: 80
+      TargetType: instance
+      HealthCheckProtocol: HTTPS
+      HealthCheckPort: "443"
+      HealthCheckPath: /.well-known/enclave/status
+      Matcher:
+        HttpCode: "200"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-tg-http"
+
+  NitroHTTPSListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref NitroNLB
+      Protocol: TCP
+      Port: 443
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref NitroTargetGroup
+
+  NitroHTTPListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      LoadBalancerArn: !Ref NitroNLB
+      Protocol: TCP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref NitroTargetGroupHttp
+
+  # ── CloudWatch Alarms (optional SNS) ─────────────────────────────────────────
+  UnhealthyHostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSnsAlarmTopic
+    Properties:
+      AlarmName: !Sub "${ProjectName}-nlb-unhealthy-hosts"
+      AlarmDescription: !Sub "NLB HTTPS target group has unhealthy hosts (${ProjectName})"
+      Namespace: AWS/NetworkELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt NitroTargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt NitroNLB.LoadBalancerFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SnsAlarmTopicArn
+      OKActions:
+        - !Ref SnsAlarmTopicArn
+
+  AsgInServiceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasSnsAlarmTopic
+    Properties:
+      AlarmName: !Sub "${ProjectName}-asg-low-capacity"
+      AlarmDescription: !Sub "ASG in-service instances below minimum (${ProjectName})"
+      Namespace: AWS/AutoScaling
+      MetricName: GroupInServiceInstances
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref NitroASG
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: !Ref AsgMinSize
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref SnsAlarmTopicArn
+      OKActions:
+        - !Ref SnsAlarmTopicArn
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outputs
+# ─────────────────────────────────────────────────────────────────────────────
+Outputs:
+  ProjectName:
+    Description: Environment slug (DynamoDB table name, log group path segment, tags)
+    Value: !Ref ProjectName
+
+  NitrumSsmPrefix:
+    Description: >
+      Data-plane infra SSM path prefix (/nitrum/{ProjectName}/data-plane/).
+    Value: !Sub "/nitrum/${ProjectName}/data-plane"
+
+  NLBDnsName:
+    Description: >
+      Network Load Balancer DNS name (TCP 80 and 443 passthrough to the enclave via gvproxy).
+    Value: !GetAtt NitroNLB.DNSName
+
+  KmsKeyId:
+    Description: KMS key ID
+    Value: !Ref EnclaveKey
+
+  KmsKeyAliasName:
+    Description: KMS alias for operators (e.g. aws kms describe-key --key-id alias/...)
+    Value: !Ref EnclaveKeyAlias
+
+  DynamoTableName:
+    Description: DynamoDB table name
+    Value: !Ref EnclaveTable
+
+  EC2InstanceRoleARN:
+    Description: EC2 Instance Role ARN
+    Value: !GetAtt InstanceRole.Arn
+
+  ASGGroupName:
+    Description: Auto Scaling Group name
+    Value: !Ref NitroASG
+
+  EifS3Uri:
+    Description: S3 URI the control-plane uses to download the EIF at container startup
+    Value: !Sub "s3://${EifS3Bucket}/${EifS3Key}"

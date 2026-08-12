@@ -1,10 +1,83 @@
 [package]
 name = "data-plane"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+autobenches = false
+
+[lib]
+name = "data_plane"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+bench = []
+pebble = []
+enclave = [
+    "dep:aws-nitro-enclaves-nsm-api",
+    "dep:serde_bytes",
+    "dep:openssl",
+]
 
 [dependencies]
+config = { path = "../config" }
+telemetry = { path = "../telemetry", features = ["http"] }
+axum = "0.8"
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+base64 = "0.22"
+bytes = "1"
+humantime = "2"
+hyper-rustls = "0.27"
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+instant-acme = "0.8"
+rcgen = "0.14"
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+tokio-rustls = { version = "0.26", features = ["ring"] }
+x509-parser = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+async-trait = "0.1"
+thiserror = "2"
+rand = "0.8"
+aes-gcm = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-credential-types = "1"
+aws-sdk-kms = "1"
+aws-sdk-dynamodb = "1"
+aws-sdk-ssm = "1"
+aws-nitro-enclaves-nsm-api = { version = "0.5", optional = true }
+serde_bytes = { version = "0.11", optional = true }
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+sha2 = "0.11"
+hex = "0.4"
+regex = "1"
+
+[dev-dependencies]
+criterion = { workspace = true }
+futures = "0.3"
+tower = "0.5"
+toml = "1"
+
+[[bench]]
+name = "crypto"
+path = "benches/crypto.rs"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "ingress"
+path = "benches/ingress.rs"
+harness = false
+required-features = ["bench"]

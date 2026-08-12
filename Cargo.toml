@@ -1,3 +1,53 @@
 [workspace]
-members = ["crates/control-plane", "crates/data-plane", "crates/shared"]
+members = [
+    "crates/cli",
+    "crates/control-plane",
+    "crates/data-plane",
+    "crates/config",
+    "crates/telemetry",
+    "crates/verify",
+    "crates/sdk",
+    "packages/node",
+    "examples/hello",
+    "examples/wallet",
+]
 resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+
+[workspace.lints.rust]
+# Public API helpers and feature-gated code trip this under `-D warnings`.
+dead_code = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow noisy or low-signal lints that `-D warnings` would fail CI on.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+doc_markdown = "allow"
+large_futures = "allow"
+match_same_arms = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+needless_pass_by_value = "allow"
+struct_field_names = "allow"
+unnecessary_wraps = "allow"
+unused_self = "allow"
+
+[workspace.dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
+# Examples declare nitrum-sdk via git (same as `nitrum init` / Docker builds). In-repo
+# `cargo build -p hello` still uses the local crate.
+[patch."https://github.com/matzapata/nitrum.git"]
+nitrum-sdk = { path = "crates/sdk" }
+
+[profile.samply]
+inherits = "release"
+debug = true

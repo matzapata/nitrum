@@ -1,151 +1,62 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use clap::Parser;
+use control_plane::ControlPlaneConfig;
+use std::path::PathBuf;
+use tracing::error;
 
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tracing::{error, info, warn};
-
-const TCP_PROXY_PORT: u16 = 8181;
-const DNS_PROXY_PORT: u16 = 5354;
-
-// ── TCP egress proxy ──────────────────────────────────────────────────────────
-
-async fn handle_tcp_connection(mut client: TcpStream, client_addr: SocketAddr) {
-    // Read 6-byte header: [4 bytes IPv4 big-endian][2 bytes port big-endian]
-    let mut header = [0u8; 6];
-    if let Err(e) = client.read_exact(&mut header).await {
-        warn!(client = %client_addr, error = %e, "tcp: failed to read destination header");
-        return;
-    }
-
-    let ip = Ipv4Addr::new(header[0], header[1], header[2], header[3]);
-    let port = u16::from_be_bytes([header[4], header[5]]);
-    let target = SocketAddrV4::new(ip, port);
-
-    info!(client = %client_addr, target = %target, "tcp: received connection, connecting to target");
-
-    let mut upstream = match TcpStream::connect(target).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(target = %target, error = %e, "tcp: failed to connect to target");
-            return;
-        }
-    };
-
-    match io::copy_bidirectional(&mut client, &mut upstream).await {
-        Ok((from_client, from_upstream)) => {
-            info!(
-                client = %client_addr,
-                target = %target,
-                bytes_from_client = from_client,
-                bytes_from_upstream = from_upstream,
-                "tcp: connection closed"
-            );
-        }
-        Err(e) => {
-            warn!(client = %client_addr, target = %target, error = %e, "tcp: connection error");
-        }
-    }
+#[derive(clap::Parser)]
+#[command(name = "control-plane")]
+struct Args {
+    /// Path to the EIF file (`nitro-cli --eif-path`). Conflicts with `--eif-bucket` / `--eif-hash`.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["eif_bucket", "eif_hash"])]
+    eif: Option<PathBuf>,
+    /// S3 bucket containing the EIF (object key is `{eif-hash}.eif`, same as `nitrum cloud deploy`).
+    #[arg(
+        long,
+        value_name = "NAME",
+        requires = "eif_hash",
+        conflicts_with = "eif"
+    )]
+    eif_bucket: Option<String>,
+    /// Version label / hash prefix for the EIF (first 12 hex chars of EIF sha256 from deploy; S3 key `{hash}.eif`).
+    #[arg(
+        long,
+        value_name = "HASH",
+        requires = "eif_bucket",
+        conflicts_with = "eif"
+    )]
+    eif_hash: Option<String>,
+    /// Enable debug mode.
+    #[arg(long, default_value_t = false)]
+    debug_mode: bool,
+    /// vCPUs passed to `nitro-cli run-enclave --cpu-count` (must match nitro allocator).
+    #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u32).range(1..))]
+    cpu_count: u32,
+    /// Memory (MiB) passed to `nitro-cli run-enclave --memory` (must match nitro allocator).
+    #[arg(long, default_value_t = 4320, value_parser = clap::value_parser!(u32).range(1..))]
+    memory_mib: u32,
 }
-
-async fn run_tcp_proxy() {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", TCP_PROXY_PORT))
-        .await
-        .expect("failed to bind TCP proxy");
-
-    info!(port = TCP_PROXY_PORT, "tcp proxy listening");
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                tokio::spawn(async move {
-                    handle_tcp_connection(stream, addr).await;
-                });
-            }
-            Err(e) => error!(error = %e, "tcp: accept error"),
-        }
-    }
-}
-
-// ── DNS proxy (TCP tunnel → upstream UDP resolver) ───────────────────────────
-
-async fn handle_dns_connection(mut client: TcpStream, client_addr: SocketAddr, upstream_dns: String) {
-    // Read raw DNS query bytes (one per connection — the enclave shuts down its
-    // write side when done, so read_to_end captures exactly the query).
-    let mut query = Vec::new();
-    if let Err(e) = client.read_to_end(&mut query).await {
-        warn!(client = %client_addr, error = %e, "dns: failed to read query");
-        return;
-    }
-
-    info!(client = %client_addr, bytes = query.len(), upstream = %upstream_dns, "dns: received query, forwarding upstream");
-
-    // Forward raw DNS bytes to upstream resolver via UDP
-    let udp = match UdpSocket::bind("0.0.0.0:0").await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(error = %e, "dns: failed to bind UDP socket");
-            return;
-        }
-    };
-
-    if let Err(e) = udp.send_to(&query, &upstream_dns).await {
-        error!(upstream = %upstream_dns, error = %e, "dns: failed to send query to upstream");
-        return;
-    }
-
-    let mut resp_buf = [0u8; 512];
-    let resp_len = match udp.recv(&mut resp_buf).await {
-        Ok(n) => n,
-        Err(e) => {
-            error!(error = %e, "dns: failed to receive response from upstream");
-            return;
-        }
-    };
-
-    info!(client = %client_addr, bytes = resp_len, "dns: received response, sending back");
-
-    if let Err(e) = client.write_all(&resp_buf[..resp_len]).await {
-        error!(error = %e, "dns: failed to write response");
-    }
-}
-
-async fn run_dns_proxy(upstream_dns: String) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", DNS_PROXY_PORT))
-        .await
-        .expect("failed to bind DNS proxy");
-
-    info!(port = DNS_PROXY_PORT, upstream = %upstream_dns, "dns proxy listening");
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let dns_upstream = upstream_dns.clone();
-                tokio::spawn(async move {
-                    handle_dns_connection(stream, addr, dns_upstream).await;
-                });
-            }
-            Err(e) => error!(error = %e, "dns: accept error"),
-        }
-    }
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let args = Args::parse();
 
-    let upstream_dns = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8:53".to_string());
+    let config = match ControlPlaneConfig::from_cli(
+        args.eif,
+        args.eif_bucket,
+        args.eif_hash,
+        args.debug_mode,
+        args.cpu_count,
+        args.memory_mib,
+    ) {
+        Ok(config) => config,
+        Err(e) => {
+            error!(error = %e);
+            std::process::exit(1);
+        }
+    };
 
-    info!("control-plane starting");
-
-    tokio::join!(
-        run_tcp_proxy(),
-        run_dns_proxy(upstream_dns),
-    );
+    if let Err(e) = control_plane::run(config).await {
+        error!(error = %e);
+        std::process::exit(1);
+    }
 }
