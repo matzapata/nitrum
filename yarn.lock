@@ -2,10 +2,25 @@
 # yarn lockfile v1
 
 
-"@emnapi/runtime@2.0.0-alpha.3":
+"@emnapi/core@^1.7.1 || ^2.0.0-alpha.3":
+  version "1.11.3"
+  resolved "https://registry.npmjs.org/@emnapi/core/-/core-1.11.3.tgz"
+  integrity sha512-zLpS5asjEb7lq8jYLq37N6XKaE41DIexlY1rF/z4/tIl3wo13Sqm28fRyfIsKZD+NZ8mM5RoKkpW/rBcuoSZSg==
+  dependencies:
+    "@emnapi/wasi-threads" "1.2.3"
+    tslib "^2.4.0"
+
+"@emnapi/runtime@^1.7.1 || ^2.0.0-alpha.3", "@emnapi/runtime@2.0.0-alpha.3":
   version "2.0.0-alpha.3"
   resolved "https://registry.npmjs.org/@emnapi/runtime/-/runtime-2.0.0-alpha.3.tgz"
   integrity sha512-hFPAhMUjJD9BSyCANEISPOogeXC9Zo9ZQl7L6vKnaVsMkCtzznaW/naYypeyl0Gv5rYfWYsZbpixTMpjDJzQeA==
+  dependencies:
+    tslib "^2.4.0"
+
+"@emnapi/wasi-threads@1.2.3":
+  version "1.2.3"
+  resolved "https://registry.npmjs.org/@emnapi/wasi-threads/-/wasi-threads-1.2.3.tgz"
+  integrity sha512-ELEBe8PsLvvJ6QMr0zLt8ffvOHW/dc1m3CEzNMg7aJUv3bMaoDtw2TXyDAwkYBuroxxuHEwhRTLJSe5sya547g==
   dependencies:
     tslib "^2.4.0"
 
@@ -350,6 +365,13 @@
   dependencies:
     "@octokit/openapi-types" "^27.0.0"
 
+"@tybys/wasm-util@^0.10.3":
+  version "0.10.3"
+  resolved "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.3.tgz"
+  integrity sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==
+  dependencies:
+    tslib "^2.4.0"
+
 argparse@^2.0.1:
   version "2.0.1"
   resolved "https://registry.npmjs.org/argparse/-/argparse-2.0.1.tgz"
@@ -359,6 +381,11 @@ before-after-hook@^4.0.0:
   version "4.0.0"
   resolved "https://registry.npmjs.org/before-after-hook/-/before-after-hook-4.0.0.tgz"
   integrity sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==
+
+"blockchain-wallet-tests@file:/Users/matzapata/git/nitrum/nitrum/examples/wallet":
+  resolved "file:examples/wallet"
+  dependencies:
+    nitrum-node "0.2.0"
 
 chardet@^2.1.1:
   version "2.2.0"
@@ -457,8 +484,13 @@ mute-stream@^3.0.0:
   resolved "https://registry.npmjs.org/mute-stream/-/mute-stream-3.0.0.tgz"
   integrity sha512-dkEJPVvun4FryqBmZ5KhDo0K9iDXAwn08tMLDinNdRBNPcYEDiWYysLcc6k3mjTMlbP9KyylvRpd4wFtwrT9rw==
 
-"nitrum-node@file:/Users/matzapata/git/nitrum/nitrum/packages/node":
-  version "0.0.1"
+"nitrum-hello-tests@file:/Users/matzapata/git/nitrum/nitrum/examples/hello":
+  resolved "file:examples/hello"
+  dependencies:
+    nitrum-node "0.2.0"
+
+nitrum-node@0.2.0, "nitrum-node@file:/Users/matzapata/git/nitrum/nitrum/packages/node":
+  version "0.2.0"
   resolved "file:packages/node"
 
 obug@^2.1.2:

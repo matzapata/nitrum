@@ -1,6 +1,6 @@
 {
   "name": "nitrum-node",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "Verify AWS Nitro Enclave attestation documents in Node.js (Rust-backed).",
   "main": "index.js",
   "types": "index.d.ts",
