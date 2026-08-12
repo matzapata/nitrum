@@ -1,11 +1,11 @@
-//! Nitrum hello sample — exercises crypto API, egress, and KV via `sdk`.
+//! Nitrum hello sample — exercises crypto API and egress via `sdk`.
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::metrics::Counter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -14,7 +14,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
 use tracing::{error, info};
 
 struct AppState {
@@ -24,8 +23,6 @@ struct AppState {
     http: reqwest::Client,
     /// Encrypt/decrypt round-trip counter.
     crypto_ops: Counter<u64>,
-    /// KV latency histogram (ms).
-    kv_latency: Histogram<f64>,
 }
 
 #[tokio::main]
@@ -64,11 +61,6 @@ async fn main() {
             .u64_counter("app.crypto.ops")
             .with_description("Encrypt/decrypt round-trips handled by the sample app")
             .build(),
-        kv_latency: meter
-            .f64_histogram("app.kv.duration.ms")
-            .with_description("KV set/get latency in the sample app")
-            .with_unit("ms")
-            .build(),
     });
 
     // Create a router for the application.
@@ -78,8 +70,6 @@ async fn main() {
         .route("/attestation", get(attestation_handler))
         .route("/crypto", post(crypto_handler))
         .route("/random", post(random_handler))
-        .route("/kv/set", post(kv_set_handler))
-        .route("/kv/get", post(kv_get_handler))
         .route("/env", get(env_handler))
         .with_state(state);
 
@@ -228,61 +218,6 @@ async fn random_handler(
     Ok(Json(
         json!({ "data": base64_encode(&bytes), "error": null }),
     ))
-}
-
-// ############################################################################
-// KV handlers.
-// ############################################################################
-
-#[derive(Debug, Deserialize)]
-struct KvSetBody {
-    key: String,
-    value: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct KvGetBody {
-    key: String,
-}
-
-async fn kv_set_handler(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<KvSetBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let start = Instant::now();
-    let KvSetBody { key, value } = body;
-
-    state.nitrum.kv_set(&key, &value).await.map_err(|e| {
-        error!(error = %e, "sdk error");
-        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
-    })?;
-
-    state.kv_latency.record(
-        start.elapsed().as_secs_f64() * 1000.0,
-        &[KeyValue::new("route", "/kv/set")],
-    );
-
-    Ok(Json(json!({ "key": key, "value": value })))
-}
-
-async fn kv_get_handler(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<KvGetBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let start = Instant::now();
-    let key = body.key;
-
-    let result = state.nitrum.kv_get(&key).await.map_err(|e| {
-        error!(error = %e, "sdk error");
-        (StatusCode::BAD_GATEWAY, Json(json!({ "error": "upstream request failed" })))
-    })?;
-
-    state.kv_latency.record(
-        start.elapsed().as_secs_f64() * 1000.0,
-        &[KeyValue::new("route", "/kv/get")],
-    );
-
-    Ok(Json(json!({ "key": key, "value": result })))
 }
 
 // ############################################################################
