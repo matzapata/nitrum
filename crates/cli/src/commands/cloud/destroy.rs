@@ -20,7 +20,7 @@ pub struct DestroyArgs {
 
 pub async fn run(args: DestroyArgs) -> Result<()> {
     let project = CliProject::load(args.path, args.as_name)?;
-    let cloud_stack = EnclaveCloudStack::new(&project.config).await?;
+    let cloud_stack = EnclaveCloudStack::new(&project.root, &project.config).await?;
 
     let stack_name = cloud_stack.stack_name();
     let bucket = cloud_stack.bucket_name();

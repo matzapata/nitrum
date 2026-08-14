@@ -1,10 +1,13 @@
-//! Deploy with AWS `CloudFormation` (bundled template) and S3 EIF upload.
+//! Deploy with AWS `CloudFormation` (bundled or ejected template) and S3 EIF upload.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::{artifact::EnclaveArtifact, cloud::EnclaveCloudStack, project::CliProject, utils};
+use crate::{
+    artifact::EnclaveArtifact, cloud::EnclaveCloudStack,
+    constants::ENCLAVE_CLOUD_STACK_TEMPLATE_FILE, project::CliProject, utils,
+};
 
 #[derive(Args)]
 pub struct DeployArgs {
@@ -35,6 +38,8 @@ pub async fn run(args: DeployArgs) -> Result<()> {
         .validate_cloud()
         .context("invalid [cloud] / [scaling] combination for deploy")?;
 
+    reject_unejected_default_template(&project)?;
+
     let artifact = if let Some(p) = &args.eif {
         let eif_path = if p.is_absolute() {
             p.clone()
@@ -58,7 +63,7 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     };
 
     let stack_name = project.config.project.name.clone();
-    let cloud_stack = EnclaveCloudStack::new(&project.config).await?;
+    let cloud_stack = EnclaveCloudStack::new(&project.root, &project.config).await?;
 
     warn_if_kms_admin_mismatch(&project.config.cloud).await?;
 
@@ -108,6 +113,24 @@ pub async fn run(args: DeployArgs) -> Result<()> {
     utils::write_json_value_pretty(&out_path, &serde_json::Value::Object(envelope))?;
     println!("Wrote {}.", out_path.display());
 
+    Ok(())
+}
+
+/// Fail if the default eject path exists but `[cloud].template` is unset.
+fn reject_unejected_default_template(project: &CliProject) -> Result<()> {
+    if project.config.cloud.template.is_some() {
+        return Ok(());
+    }
+    let ejected = project.root.join(ENCLAVE_CLOUD_STACK_TEMPLATE_FILE);
+    if ejected.is_file() {
+        bail!(
+            "found `{ENCLAVE_CLOUD_STACK_TEMPLATE_FILE}` but `[cloud].template` is unset; \
+             add this to nitrum.toml so deploy uses your ejected template (the bundled \
+             template would otherwise overwrite custom CloudFormation resources):\n\n\
+             [cloud]\n\
+             template = \"{ENCLAVE_CLOUD_STACK_TEMPLATE_FILE}\"\n"
+        );
+    }
     Ok(())
 }
 
@@ -175,7 +198,7 @@ fn caller_matches_kms_admin(caller_arn: &str, admin_arn: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::caller_matches_kms_admin;
+    use super::{caller_matches_kms_admin, reject_unejected_default_template};
 
     #[test]
     fn matches_exact_arn() {
@@ -197,5 +220,55 @@ mod tests {
             "arn:aws:sts::123456789012:assumed-role/ci/session",
             "arn:aws:iam::123456789012:role/nitrum-kms-admin",
         ));
+    }
+
+    #[test]
+    fn reject_unejected_when_default_file_exists() {
+        use crate::project::CliProject;
+        use config::NitrumConfig;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("nitrum-uneject-{stamp}"));
+        std::fs::create_dir_all(root.join("infra")).expect("mkdir");
+        std::fs::write(root.join("infra/cloud-stack.yml"), "Resources: {}\n").expect("write");
+        let config: NitrumConfig =
+            toml::from_str(include_str!("../../../../../examples/hello/nitrum.toml"))
+                .expect("hello config");
+        let project = CliProject {
+            root: root.clone(),
+            config,
+        };
+        let err = reject_unejected_default_template(&project).expect_err("must fail");
+        assert!(err.to_string().contains("cloud].template"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn allow_deploy_when_template_key_set() {
+        use crate::project::CliProject;
+        use config::NitrumConfig;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("nitrum-eject-ok-{stamp}"));
+        std::fs::create_dir_all(root.join("infra")).expect("mkdir");
+        std::fs::write(root.join("infra/cloud-stack.yml"), "Resources: {}\n").expect("write");
+        let mut config: NitrumConfig =
+            toml::from_str(include_str!("../../../../../examples/hello/nitrum.toml"))
+                .expect("hello config");
+        config.cloud.template = Some(std::path::PathBuf::from("infra/cloud-stack.yml"));
+        let project = CliProject {
+            root: root.clone(),
+            config,
+        };
+        reject_unejected_default_template(&project).expect("template key set");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

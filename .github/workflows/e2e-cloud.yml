@@ -25,12 +25,32 @@ permissions:
   packages: write
 
 jobs:
-  e2e-cloud:
-    name: AWS E2E Cloud
+  build-images:
+    name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: control-plane
+            file: crates/control-plane/Dockerfile
+            cache_scope: control-plane
+            build_args: |
+              GIT_SHA=${{ github.sha }}
+              VERSION=${{ github.sha }}
+          - name: data-plane
+            file: crates/data-plane/Dockerfile
+            cache_scope: data-plane
+            build_args: |
+              FEATURES=enclave
+              GIT_SHA=${{ github.sha }}
+              VERSION=${{ github.sha }}
+          - name: nitro-cli
+            file: crates/cli/nitro-cli.dockerfile
+            cache_scope: nitro-cli
+            build_args: |
+              GIT_SHA=${{ github.sha }}
+              VERSION=${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
 
@@ -53,63 +73,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push control-plane
+      - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: crates/control-plane/Dockerfile
+          file: ${{ matrix.file }}
           platforms: linux/amd64
           push: true
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-            VERSION=${{ github.sha }}
+          build-args: ${{ matrix.build_args }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.sha }}
-          cache-from: type=gha,scope=control-plane
-          cache-to: type=gha,mode=max,scope=control-plane
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
           tags: |
-            ${{ env.GHCR_PREFIX }}/control-plane:${{ github.sha }}
+            ${{ env.GHCR_PREFIX }}/${{ matrix.name }}:${{ github.sha }}
 
-      - name: Build and push data-plane
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: crates/data-plane/Dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            FEATURES=enclave
-            GIT_SHA=${{ github.sha }}
-            VERSION=${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.sha }}
-          cache-from: type=gha,scope=data-plane
-          cache-to: type=gha,mode=max,scope=data-plane
-          tags: |
-            ${{ env.GHCR_PREFIX }}/data-plane:${{ github.sha }}
+  e2e-cloud:
+    name: AWS E2E Cloud
+    needs: [build-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Build and push nitro-cli
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: crates/cli/nitro-cli.dockerfile
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-            VERSION=${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.sha }}
-          cache-from: type=gha,scope=nitro-cli
-          cache-to: type=gha,mode=max,scope=nitro-cli
-          tags: |
-            ${{ env.GHCR_PREFIX }}/nitro-cli:${{ github.sha }}
+      - name: GHCR image prefix
+        run: echo "GHCR_PREFIX=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@1.95
 

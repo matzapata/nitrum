@@ -2,9 +2,11 @@
 
 mod cloudformation;
 mod ssm;
+pub mod template;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use crate::artifact::EnclaveArtifact;
 use crate::storage::Bucket;
@@ -14,10 +16,19 @@ use config::{NitrumConfig, PlatformLayout, Scaling};
 
 pub use cloudformation::CloudFormation;
 pub use ssm::Ssm;
+pub use template::{
+    BUNDLED_CLOUD_TEMPLATE_VERSION, CFN_TEMPLATE_BODY_MAX_BYTES, CFN_TEMPLATE_S3_KEY,
+    StackTemplate, StackTemplateKind, bundled_cloud_stack_template, eject_cloud_template,
+    load_cloud_template, parse_template_version, s3_template_url, stack_template_kind,
+    warn_template_skew,
+};
 
 pub struct EnclaveCloudStack {
+    project_root: PathBuf,
     bucket: Bucket,
     cloudformation: CloudFormation,
+    region: String,
+    sts: aws_sdk_sts::Client,
 }
 
 impl EnclaveCloudStack {
@@ -26,23 +37,25 @@ impl EnclaveCloudStack {
     /// # Errors
     ///
     /// Returns an error when the AWS configuration cannot be loaded.
-    pub async fn new(config: &NitrumConfig) -> Result<Self> {
+    pub async fn new(project_root: &Path, config: &NitrumConfig) -> Result<Self> {
         let layout = PlatformLayout::from_project(&config.project);
         let aws_sdk_config = aws_config::load_from_env().await;
+        let region = aws_sdk_config
+            .region()
+            .map_or_else(aws::region_display, |r| r.as_ref().to_string());
         Ok(Self {
+            project_root: project_root.to_path_buf(),
             bucket: Bucket::new(&aws_sdk_config, layout.s3_bucket()),
-            cloudformation: CloudFormation::new(
-                &aws_sdk_config,
-                layout.stack_name(),
-                Self::cloud_stack_template(),
-            ),
+            cloudformation: CloudFormation::new(&aws_sdk_config, layout.stack_name()),
+            region,
+            sts: aws_sdk_sts::Client::new(&aws_sdk_config),
         })
     }
 
     /// Region string for prompts (`AWS_REGION` / `AWS_DEFAULT_REGION` / `us-east-1`).
     #[must_use]
     pub fn region_display(&self) -> String {
-        aws::region_display()
+        self.region.clone()
     }
 
     #[must_use]
@@ -63,7 +76,7 @@ impl EnclaveCloudStack {
     /// # Errors
     ///
     /// Returns an error when S3 bucket creation/upload or CloudFormation
-    /// operations fail.
+    /// operations fail, or when a configured custom template cannot be read.
     pub async fn deploy(
         &self,
         artifact: &EnclaveArtifact,
@@ -94,6 +107,9 @@ impl EnclaveCloudStack {
         } else {
             ("0", "PT0S")
         };
+
+        let (yaml, is_custom) = load_cloud_template(&self.project_root, cloud.template.as_deref())?;
+        warn_template_skew(&yaml, is_custom);
 
         let params = vec![
             ("ProjectName".to_string(), config.project.name.to_string()),
@@ -147,12 +163,20 @@ impl EnclaveCloudStack {
                 "KmsAdministratorRoleArn".to_string(),
                 cloud.kms_administrator_cfn_value().to_string(),
             ),
+            (
+                "InstanceManagedPolicyArns".to_string(),
+                cloud.instance_managed_policy_arns_cfn_value(),
+            ),
         ];
 
         self.bucket.create_if_non_existent().await?;
         self.bucket.upload(&eif_s3_key, &artifact.eif_path).await?;
 
-        let need_wait = self.cloudformation.update_if_needed(&params).await?;
+        let template = self.materialize_template(yaml).await?;
+        let need_wait = self
+            .cloudformation
+            .update_if_needed(&params, &template)
+            .await?;
         if need_wait {
             self.cloudformation.wait_until_stable().await?;
         }
@@ -171,10 +195,37 @@ impl EnclaveCloudStack {
         self.bucket.destroy().await
     }
 
-    const fn cloud_stack_template() -> &'static str {
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/template/cloud-stack.yml"
-        ))
+    async fn materialize_template(&self, yaml: String) -> Result<StackTemplate> {
+        match stack_template_kind(yaml.len()) {
+            StackTemplateKind::Body => Ok(StackTemplate::Body(yaml)),
+            StackTemplateKind::Url => {
+                let account_id = self.caller_account_id().await?;
+                self.bucket
+                    .ensure_cloudformation_template_read_policy(
+                        &account_id,
+                        self.cloudformation.stack_name(),
+                    )
+                    .await?;
+                self.bucket
+                    .put_bytes(CFN_TEMPLATE_S3_KEY, yaml.into_bytes())
+                    .await?;
+                Ok(StackTemplate::Url(s3_template_url(
+                    &self.region,
+                    self.bucket.name(),
+                    CFN_TEMPLATE_S3_KEY,
+                )))
+            }
+        }
+    }
+
+    async fn caller_account_id(&self) -> Result<String> {
+        let identity =
+            self.sts.get_caller_identity().send().await.context(
+                "sts:GetCallerIdentity (needed for CloudFormation template bucket policy)",
+            )?;
+        identity
+            .account()
+            .map(ToOwned::to_owned)
+            .context("sts:GetCallerIdentity returned no account id")
     }
 }

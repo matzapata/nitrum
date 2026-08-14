@@ -183,7 +183,7 @@ Use this while iterating on your application code before pushing a new EIF to AW
 
 ### `nitrum cloud deploy`
 
-Uploads the EIF (built from source if omitted) and creates or updates the CloudFormation stack using the bundled template and your `nitrum.toml`. Useful flags (see `nitrum cloud deploy --help`):
+Uploads the EIF (built from source if omitted) and creates or updates the CloudFormation stack from the **bundled** template, or from `[cloud].template` when set. Useful flags (see `nitrum cloud deploy --help`):
 
 - `--eif` — path to an existing EIF file.
 - `--retain` — retain resources on stack delete (set this for production). Also enables DynamoDB point-in-time recovery and deletion protection.
@@ -212,6 +212,40 @@ Only the KMS **administrator** principal (`cloud.kms_administrator_role_arn`, or
 - Set `cloud.sns_alarm_topic_arn` to an existing SNS topic for NLB unhealthy-host and ASG capacity alarms.
 - Enable `cloud.xray_tracing = true` only if you want X-Ray (CloudWatch logs/metrics still work when it is false).
 - Point DNS for `[tls_termination].domain` at the NLB.
+
+If the CloudFormation YAML is larger than the 51,200-byte `TemplateBody` limit, the CLI uploads it to the project EIF bucket (`cloudformation/stack.yml`) and deploys via `TemplateURL`. A bucket policy allows CloudFormation in **this AWS account** (and this stack) to `GetObject` that prefix.
+
+### `nitrum cloud eject`
+
+Writes the bundled CloudFormation template to `infra/cloud-stack.yml` (or `--output`, project-relative; `..` segments are rejected). Refuses to overwrite unless `--force`. Does **not** edit `nitrum.toml` — add:
+
+```toml
+[cloud]
+template = "infra/cloud-stack.yml"
+```
+
+Deploy uses the file only when `cloud.template` is set. If `infra/cloud-stack.yml` exists and the key is missing, deploy **fails** so the bundled template cannot silently replace your custom resources.
+
+The template starts with `# nitrum-template-version: 0.3.0`. On custom-template deploys, a mismatch or missing marker prints a warning; `nitrum cloud eject --force` refreshes from the CLI (overwrites local edits).
+
+### Bring-your-own storage and IAM
+
+Nitrum’s DynamoDB table (`EnclaveTable`, name = `project.name`) is **platform state only** (KMS-wrapped DEK, ACME account/certs, leader locks). Do not store application data there.
+
+For app storage, pick one:
+
+1. **Attach a policy (no template fork).** Create your own DynamoDB table (or S3 bucket) in the same account. Put its IAM on a customer-managed policy and set:
+
+   ```toml
+   [cloud]
+   instance_managed_policy_arns = ["arn:aws:iam::123456789012:policy/MyAppData"]
+   ```
+
+   After deploy, `out.json` includes `EC2InstanceRoleARN` if you need to attach further policies by hand.
+
+2. **Eject and edit.** `nitrum cloud eject`, set `cloud.template`, then add resources (tables, IAM, alarms) to `infra/cloud-stack.yml`. Commit that file; Nitrum will not rewrite it on later deploys.
+
+The wallet example keeps ciphertext **client-held** (`POST /wallet` returns sealed material; the caller stores it). That pattern needs no extra AWS storage.
 
 ### `nitrum cloud destroy`
 
@@ -255,6 +289,8 @@ Options are defined in the `config` crate; the sample project comments point to 
   - `sns_alarm_topic_arn` — optional SNS topic for unhealthy NLB / low ASG capacity alarms.
   - `safe_rolling` — ASG `MinInstancesInService ≥ 1` and `PauseTime=PT5M` when true (default).
   - `kms_administrator_role_arn` — durable KMS key admin principal (empty → account root). Always re-passed on deploy.
+  - `template` — optional project-relative CloudFormation YAML (`nitrum cloud eject` writes `infra/cloud-stack.yml`). Omitted → CLI-bundled template.
+  - `instance_managed_policy_arns` — extra IAM managed policy ARNs on the EC2 instance role (in addition to `AmazonSSMManagedInstanceCore`). Empty → SSM-only.
 - `[tls_termination]` — `acme` and `domain` for certificates.
 - `[egress]` — outbound whitelist enforced inside the data-plane when `enabled = true`:
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.

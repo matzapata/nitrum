@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
+# nitrum-template-version: 0.3.0
 Description: >
   Nitrum sample: Nitro Enclave on EC2 behind a Network Load Balancer (TCP 80 and 443), KMS, DynamoDB,
   SSM parameters under /nitrum/{ProjectName}/data-plane/ (KMS key id + DynamoDB table) and /nitrum/{ProjectName}/env/ (app secrets), plus VPC endpoints.
@@ -179,6 +180,14 @@ Parameters:
       Principal allowed to administer this KMS key (Create*, Describe*, etc.). Use the default
       AWS_ACCOUNT_ROOT to allow the owning AWS account root ARN (typical). Otherwise pass a full IAM ARN.
 
+  InstanceManagedPolicyArns:
+    Type: String
+    Default: ""
+    Description: >
+      Optional comma-separated IAM managed policy ARNs attached to the EC2 instance role in addition
+      to AmazonSSMManagedInstanceCore (for example a customer policy that grants DynamoDB access to
+      an app table). Empty string keeps the SSM-only baseline.
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Conditions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,6 +196,7 @@ Conditions:
   KmsAdminIsAccountRoot: !Equals [!Ref KmsAdministratorRoleArn, AWS_ACCOUNT_ROOT]
   EnableXRay: !Equals [!Ref EnableXRayTracing, 'true']
   HasSnsAlarmTopic: !Not [!Equals [!Ref SnsAlarmTopicArn, '']]
+  HasExtraInstanceManagedPolicies: !Not [!Equals [!Ref InstanceManagedPolicyArns, '']]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -682,8 +692,14 @@ Resources:
                 - ec2.amazonaws.com
             Action:
               - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      ManagedPolicyArns: !If
+        - HasExtraInstanceManagedPolicies
+        - !Split
+          - ","
+          - !Sub
+            - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore,${Extra}"
+            - Extra: !Ref InstanceManagedPolicyArns
+        - - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
         - PolicyName: NitrumInstancePolicy
           PolicyDocument:

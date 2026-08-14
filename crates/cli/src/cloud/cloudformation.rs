@@ -10,24 +10,20 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-/// `CloudFormation` stack scoped to a client, stack name, and template body.
+use super::template::StackTemplate;
+
+/// `CloudFormation` stack scoped to a client and stack name.
 pub struct CloudFormation {
     client: aws_sdk_cloudformation::Client,
     stack_name: String,
-    template_body: &'static str,
 }
 
 impl CloudFormation {
     #[must_use]
-    pub fn new(
-        aws_sdk_config: &aws_config::SdkConfig,
-        stack_name: impl Into<String>,
-        template_body: &'static str,
-    ) -> Self {
+    pub fn new(aws_sdk_config: &aws_config::SdkConfig, stack_name: impl Into<String>) -> Self {
         Self {
             client: aws_sdk_cloudformation::Client::new(aws_sdk_config),
             stack_name: stack_name.into(),
-            template_body,
         }
     }
 
@@ -83,39 +79,47 @@ impl CloudFormation {
     ///
     /// Returns an error when `CreateStack`/`UpdateStack` or `DescribeStacks`
     /// fail in a way that cannot be recovered automatically.
-    pub async fn update_if_needed(&self, params: &[(String, String)]) -> Result<bool> {
+    pub async fn update_if_needed(
+        &self,
+        params: &[(String, String)],
+        template: &StackTemplate,
+    ) -> Result<bool> {
         let stack_name = self.stack_name.as_str();
         let parameters = stack_parameters(params);
-        let template_body = self.template_body;
 
         info!(%stack_name, param_count = params.len(), "DescribeStacks (create vs update)");
         let exists = self.exists().await?;
 
         if !exists {
             info!(%stack_name, "CreateStack");
-            self.client
-                .create_stack()
-                .stack_name(stack_name)
-                .template_body(template_body)
-                .set_parameters(Some(parameters))
-                .capabilities(Capability::CapabilityIam)
-                .send()
-                .await
-                .context("CreateStack failed")?;
+            apply_create_template(
+                self.client
+                    .create_stack()
+                    .stack_name(stack_name)
+                    .set_parameters(Some(parameters))
+                    .capabilities(Capability::CapabilityIam)
+                    .capabilities(Capability::CapabilityNamedIam),
+                template,
+            )
+            .send()
+            .await
+            .context("CreateStack failed")?;
             info!(%stack_name, "CreateStack accepted; waiting for completion");
             return Ok(true);
         }
 
         info!(%stack_name, "UpdateStack");
-        let upd = self
-            .client
-            .update_stack()
-            .stack_name(stack_name)
-            .template_body(template_body)
-            .set_parameters(Some(parameters))
-            .capabilities(Capability::CapabilityIam)
-            .send()
-            .await;
+        let upd = apply_update_template(
+            self.client
+                .update_stack()
+                .stack_name(stack_name)
+                .set_parameters(Some(parameters))
+                .capabilities(Capability::CapabilityIam)
+                .capabilities(Capability::CapabilityNamedIam),
+            template,
+        )
+        .send()
+        .await;
 
         match upd {
             Ok(_) => {
@@ -315,6 +319,26 @@ fn stack_parameters(params: &[(String, String)]) -> Vec<Parameter> {
                 .build()
         })
         .collect()
+}
+
+fn apply_create_template(
+    builder: aws_sdk_cloudformation::operation::create_stack::builders::CreateStackFluentBuilder,
+    template: &StackTemplate,
+) -> aws_sdk_cloudformation::operation::create_stack::builders::CreateStackFluentBuilder {
+    match template {
+        StackTemplate::Body(body) => builder.template_body(body),
+        StackTemplate::Url(url) => builder.template_url(url),
+    }
+}
+
+fn apply_update_template(
+    builder: aws_sdk_cloudformation::operation::update_stack::builders::UpdateStackFluentBuilder,
+    template: &StackTemplate,
+) -> aws_sdk_cloudformation::operation::update_stack::builders::UpdateStackFluentBuilder {
+    match template {
+        StackTemplate::Body(body) => builder.template_body(body),
+        StackTemplate::Url(url) => builder.template_url(url),
+    }
 }
 
 const fn stack_in_progress(status: Option<&StackStatus>) -> bool {

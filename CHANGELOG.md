@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `nitrum cloud eject` writes the bundled CloudFormation template to `infra/cloud-stack.yml` (optional `--output`; `--force` to overwrite).
+- `[cloud].template` — project-relative CloudFormation YAML; deploy uses the bundled template when omitted. Deploy fails if `infra/cloud-stack.yml` exists without this key.
+- `[cloud].instance_managed_policy_arns` — extra IAM managed policy ARNs on the EC2 instance role (in addition to SSM core).
+- CloudFormation templates larger than 51,200 bytes are uploaded to the EIF bucket and deployed via `TemplateURL` (bucket policy allows CloudFormation `GetObject` on `cloudformation/*`, scoped with `aws:SourceAccount` and `aws:SourceArn`).
+- `# nitrum-template-version:` marker and a skew warning when an ejected template does not match the CLI bundle.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

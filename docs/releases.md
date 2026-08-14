@@ -28,7 +28,7 @@ Before tagging, add a section to [CHANGELOG.md](../CHANGELOG.md) for the version
 | Change type | SemVer bump | Examples |
 |-------------|-------------|----------|
 | Documentation-only or looser validation | Patch | Clarify error messages, accept additional optional formats |
-| New optional keys with serde defaults | Minor | New `[cloud]` keys with defaults |
+| New optional keys with serde defaults | Minor | New `[cloud]` keys with defaults (`template`, `instance_managed_policy_arns`) |
 | Rename/remove keys, new required fields, stricter validation | Major | Rename `runtime.data_plane`, require a new mandatory section |
 
 While the project is **0.x**, breaking `nitrum.toml` changes may still appear in **minor** releases until **1.0**. After 1.0, follow the table strictly.

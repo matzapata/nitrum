@@ -1,6 +1,7 @@
 //! `[cloud]` in `nitrum.toml` — CloudFormation-only knobs (ignored by `nitrum local`).
 
 use super::Scaling;
+use std::path::{Component, PathBuf};
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{0}")]
@@ -32,6 +33,14 @@ pub struct Cloud {
     /// Must be re-passed on every deploy (durable in TOML) so CFN does not reset to root.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kms_administrator_role_arn: Option<String>,
+
+    /// Project-relative CloudFormation template. Empty / omitted → CLI-bundled `cloud-stack.yml`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<PathBuf>,
+
+    /// Extra IAM managed policy ARNs attached to the EC2 instance role (in addition to SSM core).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub instance_managed_policy_arns: Vec<String>,
 }
 
 impl Default for Cloud {
@@ -42,6 +51,8 @@ impl Default for Cloud {
             sns_alarm_topic_arn: None,
             safe_rolling: true,
             kms_administrator_role_arn: None,
+            template: None,
+            instance_managed_policy_arns: Vec::new(),
         }
     }
 }
@@ -82,12 +93,18 @@ impl Cloud {
             )));
         }
 
+        let template = normalize_optional_path(raw.template)?;
+        let instance_managed_policy_arns =
+            normalize_instance_managed_policy_arns(raw.instance_managed_policy_arns)?;
+
         Ok(Self {
             xray_tracing: raw.xray_tracing,
             log_retention_days: raw.log_retention_days,
             sns_alarm_topic_arn,
             safe_rolling: raw.safe_rolling,
             kms_administrator_role_arn,
+            template,
+            instance_managed_policy_arns,
         })
     }
 
@@ -97,6 +114,12 @@ impl Cloud {
         self.kms_administrator_role_arn
             .as_deref()
             .unwrap_or("AWS_ACCOUNT_ROOT")
+    }
+
+    /// CFN `InstanceManagedPolicyArns` value: comma-joined extra policy ARNs, or empty.
+    #[must_use]
+    pub fn instance_managed_policy_arns_cfn_value(&self) -> String {
+        self.instance_managed_policy_arns.join(",")
     }
 
     /// Validate cross-field rules against `[scaling]` (safe rolling needs max headroom).
@@ -124,6 +147,61 @@ fn normalize_optional_arn(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_optional_path(value: Option<String>) -> Result<Option<PathBuf>, CloudError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let path = PathBuf::from(trimmed);
+    if path.is_absolute() {
+        return Err(CloudError(
+            "`cloud.template` must be a project-relative path".into(),
+        ));
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(CloudError(
+            "`cloud.template` must not contain `..` path segments".into(),
+        ));
+    }
+    Ok(Some(path))
+}
+
+fn normalize_instance_managed_policy_arns(values: Vec<String>) -> Result<Vec<String>, CloudError> {
+    let mut arns = Vec::with_capacity(values.len());
+    for raw in values {
+        let arn = raw.trim();
+        if arn.is_empty() {
+            return Err(CloudError(
+                "`cloud.instance_managed_policy_arns` entries must be non-empty IAM policy ARNs"
+                    .into(),
+            ));
+        }
+        if arn.contains(',') {
+            return Err(CloudError(format!(
+                "`cloud.instance_managed_policy_arns` entry must not contain commas (got {arn})"
+            )));
+        }
+        if !is_iam_policy_arn(arn) {
+            return Err(CloudError(format!(
+                "`cloud.instance_managed_policy_arns` must be IAM policy ARNs (got {arn})"
+            )));
+        }
+        arns.push(arn.to_string());
+    }
+    Ok(arns)
+}
+
+fn is_iam_policy_arn(arn: &str) -> bool {
+    let rest = arn
+        .strip_prefix("arn:aws:iam::")
+        .or_else(|| arn.strip_prefix("arn:aws-us-gov:iam::"))
+        .or_else(|| arn.strip_prefix("arn:aws-cn:iam::"));
+    rest.is_some_and(|r| r.contains(":policy/"))
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -144,6 +222,10 @@ struct CloudRaw {
     safe_rolling: bool,
     #[serde(default)]
     kms_administrator_role_arn: Option<String>,
+    #[serde(default)]
+    template: Option<String>,
+    #[serde(default)]
+    instance_managed_policy_arns: Vec<String>,
 }
 
 impl<'de> serde::Deserialize<'de> for Cloud {
@@ -169,7 +251,10 @@ mod tests {
         assert!(cloud.sns_alarm_topic_arn.is_none());
         assert!(cloud.safe_rolling);
         assert!(cloud.kms_administrator_role_arn.is_none());
+        assert!(cloud.template.is_none());
+        assert!(cloud.instance_managed_policy_arns.is_empty());
         assert_eq!(cloud.kms_administrator_cfn_value(), "AWS_ACCOUNT_ROOT");
+        assert_eq!(cloud.instance_managed_policy_arns_cfn_value(), "");
     }
 
     #[test]
@@ -218,5 +303,83 @@ mod tests {
         .expect("empty strings ok");
         assert!(cloud.sns_alarm_topic_arn.is_none());
         assert!(cloud.kms_administrator_role_arn.is_none());
+        assert!(cloud.template.is_none());
+    }
+
+    #[test]
+    fn template_path_passthrough() {
+        let cloud: Cloud = toml::from_str(r#"template = "infra/cloud-stack.yml""#)
+            .expect("relative template path");
+        assert_eq!(
+            cloud.template.as_deref(),
+            Some(std::path::Path::new("infra/cloud-stack.yml"))
+        );
+    }
+
+    #[test]
+    fn empty_template_becomes_none() {
+        let cloud: Cloud = toml::from_str(r#"template = """#).expect("empty template");
+        assert!(cloud.template.is_none());
+    }
+
+    #[test]
+    fn rejects_absolute_template() {
+        let err =
+            toml::from_str::<Cloud>(r#"template = "/tmp/stack.yml""#).expect_err("absolute path");
+        assert!(err.to_string().contains("project-relative"));
+    }
+
+    #[test]
+    fn rejects_parent_dir_template() {
+        let err = toml::from_str::<Cloud>(r#"template = "../stack.yml""#).expect_err("parent dir");
+        assert!(err.to_string().contains("`..`"));
+    }
+
+    #[test]
+    fn instance_managed_policy_arns_join() {
+        let cloud: Cloud = toml::from_str(
+            r#"
+            instance_managed_policy_arns = [
+              "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
+              "arn:aws:iam::123456789012:policy/AppDynamo",
+            ]
+            "#,
+        )
+        .expect("policy arns");
+        assert_eq!(
+            cloud.instance_managed_policy_arns_cfn_value(),
+            "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess,arn:aws:iam::123456789012:policy/AppDynamo"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_instance_policy_arn() {
+        let err =
+            toml::from_str::<Cloud>(r#"instance_managed_policy_arns = ["arn:aws:s3:::bucket"]"#)
+                .expect_err("not an IAM policy ARN");
+        assert!(err.to_string().contains("instance_managed_policy_arns"));
+    }
+
+    #[test]
+    fn rejects_empty_instance_policy_arn() {
+        let err = toml::from_str::<Cloud>(r#"instance_managed_policy_arns = [""]"#)
+            .expect_err("empty entry");
+        assert!(err.to_string().contains("non-empty"));
+    }
+
+    #[test]
+    fn rejects_comma_in_instance_policy_arn() {
+        let err = toml::from_str::<Cloud>(
+            r#"instance_managed_policy_arns = ["arn:aws:iam::aws:policy/Foo,arn:aws:iam::aws:policy/Bar"]"#,
+        )
+        .expect_err("comma in arn");
+        assert!(err.to_string().contains("commas"));
+    }
+
+    #[test]
+    fn omits_empty_optional_fields_on_serialize() {
+        let toml = toml::to_string(&Cloud::default()).expect("serialize");
+        assert!(!toml.contains("template"));
+        assert!(!toml.contains("instance_managed_policy_arns"));
     }
 }

@@ -18,7 +18,7 @@ enum Commands {
     Build(build::BuildArgs),
     /// Local development (docker compose)
     Local(local_cmd::LocalArgs),
-    /// AWS: deploy, destroy, env, logs
+    /// AWS: deploy, destroy, eject, env, logs
     Cloud(cloud_cmd::CloudArgs),
     /// Describe an EIF (`nitro-cli describe-eif` in Docker)
     Describe(describe::DescribeArgs),
