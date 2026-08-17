@@ -3,8 +3,8 @@ use crate::utils::image_digest::ImageDigestResolver;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use config::{
-    Cloud, DockerImageRef, Egress, EgressPattern, HealthCheck, NitrumConfig, Project, ProjectName,
-    Runtime, Scaling, TlsTermination,
+    Cloud, DockerImageRef, Egress, EgressPattern, HealthCheck, Local, NitrumConfig, Project,
+    ProjectName, Runtime, Scaling, TlsTermination,
 };
 use futures_util::future::try_join3;
 use indicatif::ProgressBar;
@@ -84,6 +84,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
             destinations: vec![EgressPattern::try_new(r"ipify\.org$")?],
         },
         cloud: Cloud::default(),
+        local: Local::default(),
     };
 
     let writes: Vec<(&str, &str)> = vec![

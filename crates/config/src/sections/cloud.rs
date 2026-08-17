@@ -1,7 +1,8 @@
 //! `[cloud]` in `nitrum.toml` — CloudFormation-only knobs (ignored by `nitrum local`).
 
 use super::Scaling;
-use std::path::{Component, PathBuf};
+use super::path::normalize_optional_relative_path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{0}")]
@@ -93,7 +94,8 @@ impl Cloud {
             )));
         }
 
-        let template = normalize_optional_path(raw.template)?;
+        let template =
+            normalize_optional_relative_path(raw.template, "cloud.template").map_err(CloudError)?;
         let instance_managed_policy_arns =
             normalize_instance_managed_policy_arns(raw.instance_managed_policy_arns)?;
 
@@ -145,28 +147,6 @@ fn normalize_optional_arn(value: Option<String>) -> Option<String> {
         let t = s.trim().to_string();
         if t.is_empty() { None } else { Some(t) }
     })
-}
-
-fn normalize_optional_path(value: Option<String>) -> Result<Option<PathBuf>, CloudError> {
-    let Some(raw) = value else {
-        return Ok(None);
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let path = PathBuf::from(trimmed);
-    if path.is_absolute() {
-        return Err(CloudError(
-            "`cloud.template` must be a project-relative path".into(),
-        ));
-    }
-    if path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err(CloudError(
-            "`cloud.template` must not contain `..` path segments".into(),
-        ));
-    }
-    Ok(Some(path))
 }
 
 fn normalize_instance_managed_policy_arns(values: Vec<String>) -> Result<Vec<String>, CloudError> {

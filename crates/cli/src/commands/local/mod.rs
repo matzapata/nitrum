@@ -1,4 +1,5 @@
 mod down;
+mod eject;
 mod logs;
 mod up;
 
@@ -19,6 +20,8 @@ pub enum LocalCommand {
     Down(down::DownArgs),
     /// Tail service logs (docker compose logs)
     Logs(logs::LogsArgs),
+    /// Write the bundled Compose template into the project
+    Eject(eject::EjectArgs),
 }
 
 pub async fn run(args: LocalArgs) -> Result<()> {
@@ -26,5 +29,6 @@ pub async fn run(args: LocalArgs) -> Result<()> {
         LocalCommand::Up(a) => up::run(a).await,
         LocalCommand::Down(a) => down::run(a).await,
         LocalCommand::Logs(a) => logs::run(a).await,
+        LocalCommand::Eject(a) => eject::run(a),
     }
 }

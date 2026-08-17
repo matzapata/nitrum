@@ -9,7 +9,7 @@ The generated diagrams used in this document are stored in `docs/diagrams/output
 
 | Crate / area                  | Role                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli` crate / `nitrum` binary | User-facing commands: `init`, `build`, `local`, `cloud deploy`, `cloud destroy`, `cloud eject`, `cloud env`, `cloud logs`, `describe`. Orchestrates Docker, Compose, and AWS APIs. |
+| `cli` crate / `nitrum` binary | User-facing commands: `init`, `build`, `local` (`up`/`down`/`logs`/`eject`), `cloud deploy`, `cloud destroy`, `cloud eject`, `cloud env`, `cloud logs`, `describe`. Orchestrates Docker, Compose, and AWS APIs. |
 | `control-plane`               | Runs on the parent EC2 instance: gvisor-tap-vsock (`gvproxy`) for TAP/VSOCK networking and nitro-cli to start the enclave with the EIF.                             |
 | `data-plane`                  | Runs inside the enclave: loads `nitrum.toml`, wires storage/crypto, runs TLS and HTTP ingress, and hosts the application process.                                   |
 | `config`                      | Shared configuration types (for example `nitrum.toml` deserialization).                                                                                             |

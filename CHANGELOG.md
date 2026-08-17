@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `[cloud].instance_managed_policy_arns` — extra IAM managed policy ARNs on the EC2 instance role (in addition to SSM core).
 - CloudFormation templates larger than 51,200 bytes are uploaded to the EIF bucket and deployed via `TemplateURL` (bucket policy allows CloudFormation `GetObject` on `cloudformation/*`, scoped with `aws:SourceAccount` and `aws:SourceArn`).
 - `# nitrum-template-version:` marker and a skew warning when an ejected template does not match the CLI bundle.
+- `nitrum local eject` writes the bundled Compose template to `infra/local-stack.yml` (optional `--output`; `--force` to overwrite).
+- `[local].template` — project-relative Compose YAML; when set, local up/down/logs use that file without rewriting it. Unmanaged mode still rewrites `.nitrum/local-stack.yml`. Fails if `infra/local-stack.yml` exists without this key.
 
 ## [0.2.0] - 2026-08-12
 

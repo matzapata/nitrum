@@ -109,7 +109,7 @@ impl EnclaveCloudStack {
         };
 
         let (yaml, is_custom) = load_cloud_template(&self.project_root, cloud.template.as_deref())?;
-        warn_template_skew(&yaml, is_custom);
+        warn_template_skew(&yaml, is_custom, "CloudFormation", "nitrum cloud eject");
 
         let params = vec![
             ("ProjectName".to_string(), config.project.name.to_string()),

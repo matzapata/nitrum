@@ -71,6 +71,7 @@ fn sample_nitrum_config() -> NitrumConfig {
         tls_termination: config::TlsTermination::default(),
         egress: config::Egress::default(),
         cloud: config::Cloud::default(),
+        local: config::Local::default(),
     }
 }
 

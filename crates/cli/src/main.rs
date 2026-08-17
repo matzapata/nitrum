@@ -16,7 +16,7 @@ enum Commands {
     Init(init::InitArgs),
     /// Build an enclave image
     Build(build::BuildArgs),
-    /// Local development (docker compose)
+    /// Local development (docker compose; up, down, logs, eject)
     Local(local_cmd::LocalArgs),
     /// AWS: deploy, destroy, eject, env, logs
     Cloud(cloud_cmd::CloudArgs),

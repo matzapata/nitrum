@@ -1,4 +1,5 @@
 # Local development compose for the enclaves.
+# nitrum-template-version: 0.3.0
 #
 # The enclave image is built by `nitrum local up` (CLI), not by Compose.
 # Compose only runs the pre-tagged `ENCLAVE_IMAGE`.
@@ -31,7 +32,8 @@
 #
 # Optional: create `.env.local` in the project root. On `nitrum local up`, each `KEY=value` is written to
 # Floci (Compose service `aws`) SSM under `/nitrum/{nitrum.toml name}/env/KEY` (same layout as production).
-# `nitrum local` rewrites `.nitrum/local-stack.yml` from the CLI template on each up/down/logs.
+# Unmanaged `nitrum local` rewrites `.nitrum/local-stack.yml` from the CLI template on each up/down/logs.
+# After `nitrum local eject`, set `[local].template` to use a project-owned Compose file (not rewritten).
 
 configs:
   pebble-config:

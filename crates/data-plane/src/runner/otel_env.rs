@@ -91,6 +91,7 @@ mod tests {
                 tls_termination: config::TlsTermination::default(),
                 egress: config::Egress::default(),
                 cloud: config::Cloud::default(),
+                local: config::Local::default(),
             },
             layout,
             aws,

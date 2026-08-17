@@ -169,6 +169,18 @@ Local development via Docker Compose:
 - `nitrum local up` — build the enclave image, then start the stack in the background. Applies `[scaling].num_cpus` and `ram_size_mib` as Compose CPU/memory limits on the `enclave` service (same budget cloud passes to `nitro-cli`).
 - `nitrum local down` — stop and remove containers.
 - `nitrum local logs` — follow service logs.
+- `nitrum local eject` — write the bundled Compose template to `infra/local-stack.yml` (or `--output`; `--force` to overwrite).
+
+By default (no `[local].template`), the CLI **rewrites** `.nitrum/local-stack.yml` from the bundled template on every `up` / `down` / `logs` so CLI upgrades apply automatically.
+
+After eject, point Compose at your file:
+
+```toml
+[local]
+template = "infra/local-stack.yml"
+```
+
+When `local.template` is set, that file is used as-is and is **never** overwritten. If `infra/local-stack.yml` exists and the key is missing, local commands **fail** so the rewrite path cannot silently ignore your ejected file. The Compose YAML carries `# nitrum-template-version: 0.3.0`; a mismatch prints a warning (refresh with `nitrum local eject --force`).
 
 The enclave image is built by the CLI (not Compose) before `up`. The Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
 `[runtime].data_plane` in `nitrum.toml` (overridable via
@@ -291,6 +303,8 @@ Options are defined in the `config` crate; the sample project comments point to 
   - `kms_administrator_role_arn` — durable KMS key admin principal (empty → account root). Always re-passed on deploy.
   - `template` — optional project-relative CloudFormation YAML (`nitrum cloud eject` writes `infra/cloud-stack.yml`). Omitted → CLI-bundled template.
   - `instance_managed_policy_arns` — extra IAM managed policy ARNs on the EC2 instance role (in addition to `AmazonSSMManagedInstanceCore`). Empty → SSM-only.
+- `[local]` — Compose-only settings (ignored by `nitrum cloud`):
+  - `template` — optional project-relative Compose YAML (`nitrum local eject` writes `infra/local-stack.yml`). Omitted → CLI rewrites `.nitrum/local-stack.yml` on each local command.
 - `[tls_termination]` — `acme` and `domain` for certificates.
 - `[egress]` — outbound whitelist enforced inside the data-plane when `enabled = true`:
   - `destinations` — list of regex patterns matched against destination hostnames at DNS query time. Blocked names receive NXDOMAIN; TCP connections to uncached IPs are dropped unless they match implicit platform allows.

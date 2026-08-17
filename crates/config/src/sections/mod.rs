@@ -2,6 +2,8 @@ mod cloud;
 mod egress;
 mod health_check;
 mod instance_type;
+mod local;
+mod path;
 mod project;
 mod runtime;
 mod scaling;
@@ -14,6 +16,7 @@ pub use instance_type::{
     ALLOWED_INSTANCE_TYPES, HOST_MEMORY_RESERVE_MIB, HOST_VCPU_RESERVE, InstanceTypeCapacity,
     lookup_instance_type, validate_enclave_fit,
 };
+pub use local::{Local, LocalError};
 pub use project::{Project, ProjectName, ProjectNameError};
 pub use runtime::{
     DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,

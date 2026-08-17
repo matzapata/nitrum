@@ -11,9 +11,9 @@ pub use sections::{
     DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE, ENV_RUNTIME_DATA_PLANE_IMAGE,
     ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern, EgressPatternError,
     HOST_MEMORY_RESERVE_MIB, HOST_VCPU_RESERVE, HealthCheck, HealthCheckPath, HealthCheckPathError,
-    InstanceTypeCapacity, Project, ProjectName, ProjectNameError, Runtime, Scaling, ScalingError,
-    TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError, lookup_instance_type,
-    validate_enclave_fit,
+    InstanceTypeCapacity, Local, LocalError, Project, ProjectName, ProjectNameError, Runtime,
+    Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError,
+    lookup_instance_type, validate_enclave_fit,
 };
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -29,6 +29,9 @@ pub struct NitrumConfig {
     /// CloudFormation-only settings (`nitrum local` ignores this section).
     #[serde(default)]
     pub cloud: Cloud,
+    /// Compose-only settings (`nitrum cloud` ignores this section).
+    #[serde(default)]
+    pub local: Local,
 }
 
 impl NitrumConfig {

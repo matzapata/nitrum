@@ -4,7 +4,7 @@ Customer scaffold copied by `nitrum init`. Uses a git dependency on `nitrum-sdk`
 
 Also holds the bundled stack YAML:
 
-- `local-stack.yml` — Compose template for `nitrum local` (rewritten on every `up`)
+- `local-stack.yml` — Compose template for `nitrum local`. Unmanaged mode rewrites `.nitrum/local-stack.yml` on every `up`/`down`/`logs`. Copy into a project with `nitrum local eject` (not rewritten when `[local].template` is set).
 - `cloud-stack.yml` — CloudFormation template for `nitrum cloud deploy`. Copy into a project with `nitrum cloud eject` (not rewritten on later deploys).
 
 For a monorepo demo that path-depends on `crates/sdk`, see [`examples/hello`](../../../examples/hello).

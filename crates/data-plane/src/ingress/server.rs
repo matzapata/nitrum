@@ -509,6 +509,7 @@ mod proxy_header_tests {
             tls_termination: config::TlsTermination::default(),
             egress: config::Egress::default(),
             cloud: config::Cloud::default(),
+            local: config::Local::default(),
         };
         let layout = PlatformLayout::from_project(&nitrum.project);
         let aws = Arc::new(

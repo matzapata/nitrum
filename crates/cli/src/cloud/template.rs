@@ -65,7 +65,7 @@ pub fn parse_template_version(yaml: &str) -> Option<&str> {
 }
 
 /// Warn when an ejected template's version marker is missing or does not match the bundle.
-pub fn warn_template_skew(yaml: &str, is_custom: bool) {
+pub fn warn_template_skew(yaml: &str, is_custom: bool, kind: &str, eject_cmd: &str) {
     if !is_custom {
         return;
     }
@@ -73,17 +73,17 @@ pub fn warn_template_skew(yaml: &str, is_custom: bool) {
         Some(v) if v == BUNDLED_CLOUD_TEMPLATE_VERSION => {}
         Some(v) => {
             eprintln!(
-                "warning: ejected CloudFormation template version `{v}` does not match the \
+                "warning: ejected {kind} template version `{v}` does not match the \
                  CLI bundled template version `{BUNDLED_CLOUD_TEMPLATE_VERSION}`. Re-run \
-                 `nitrum cloud eject --force` to refresh (overwrites local edits), or merge \
+                 `{eject_cmd} --force` to refresh (overwrites local edits), or merge \
                  upstream changes manually."
             );
         }
         None => {
             eprintln!(
-                "warning: ejected CloudFormation template has no `# nitrum-template-version:` \
+                "warning: ejected {kind} template has no `# nitrum-template-version:` \
                  marker (CLI bundled version is `{BUNDLED_CLOUD_TEMPLATE_VERSION}`). Re-run \
-                 `nitrum cloud eject --force` to refresh, or add the marker after merging."
+                 `{eject_cmd} --force` to refresh, or add the marker after merging."
             );
         }
     }
@@ -108,13 +108,13 @@ pub fn load_cloud_template(project_root: &Path, template: Option<&Path>) -> Resu
     }
 }
 
-/// Write the bundled template to `dest`. Refuses if the file exists unless `force`.
+/// Write `contents` to `dest`. Refuses if the file exists unless `force`.
 ///
 /// # Errors
 ///
 /// Returns an error when the destination exists without `force`, or when creating
 /// directories / writing the file fails.
-pub fn eject_cloud_template(dest: &Path, force: bool) -> Result<()> {
+pub fn write_bundled_template(dest: &Path, force: bool, contents: &str) -> Result<()> {
     if dest.exists() && !force {
         bail!(
             "{} already exists; pass --force to overwrite",
@@ -126,9 +126,17 @@ pub fn eject_cloud_template(dest: &Path, force: bool) -> Result<()> {
     {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    std::fs::write(dest, bundled_cloud_stack_template())
-        .with_context(|| format!("write {}", dest.display()))?;
+    std::fs::write(dest, contents).with_context(|| format!("write {}", dest.display()))?;
     Ok(())
+}
+
+/// Write the bundled CloudFormation template to `dest`.
+///
+/// # Errors
+///
+/// See [`write_bundled_template`].
+pub fn eject_cloud_template(dest: &Path, force: bool) -> Result<()> {
+    write_bundled_template(dest, force, bundled_cloud_stack_template())
 }
 
 /// HTTPS URL CloudFormation accepts as `TemplateURL` for an object in `bucket`.
