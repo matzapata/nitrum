@@ -1,4 +1,4 @@
-.PHONY: lint format check deny test docs-diagrams test-node check-node
+.PHONY: lint format check deny test docs-diagrams test-node check-node ci
 
 lint:
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -23,3 +23,5 @@ test-node:
 	npm test -w nitrum-node
 
 check-node: test-node
+
+ci: check deny test check-node
