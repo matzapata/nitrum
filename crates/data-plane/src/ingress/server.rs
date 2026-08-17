@@ -502,6 +502,7 @@ mod proxy_header_tests {
                 name: "nitrum-test".parse().expect("valid test project name"),
                 port: NonZeroU16::new(backend_port).expect("non-zero port"),
                 start_command: vec![],
+                dockerfile: None,
             },
             runtime: config::Runtime::default(),
             health_check: config::HealthCheck::default(),

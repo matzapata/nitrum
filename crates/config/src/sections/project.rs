@@ -1,3 +1,10 @@
+use super::path::normalize_optional_relative_path;
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
+
+/// Default project-relative Dockerfile used when `[project].dockerfile` is omitted.
+pub const DEFAULT_DOCKERFILE: &str = "Dockerfile";
+
 /// Validated `[project].name` from `nitrum.toml`.
 ///
 /// Must be compatible with CloudFormation, SSM, Docker, and S3 naming rules.
@@ -105,7 +112,7 @@ impl<'de> serde::Deserialize<'de> for ProjectName {
 }
 
 /// `[project]` in `nitrum.toml`.
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Project {
     pub name: ProjectName,
     /// TCP port your application listens on (`127.0.0.1`); the ingress proxies here after TLS.
@@ -113,11 +120,37 @@ pub struct Project {
     /// Process argv for the user workload (read from `nitrum.toml` by the data-plane).
     #[serde(default, alias = "command")]
     pub start_command: Vec<String>,
+    /// Project-relative Dockerfile for `nitrum build` / `nitrum local`. Empty / omitted → [`DEFAULT_DOCKERFILE`].
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_dockerfile",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dockerfile: Option<PathBuf>,
+}
+
+impl Project {
+    /// Project-relative Dockerfile path (`Dockerfile` when unset).
+    #[must_use]
+    pub fn dockerfile_path(&self) -> &Path {
+        self.dockerfile
+            .as_deref()
+            .unwrap_or_else(|| Path::new(DEFAULT_DOCKERFILE))
+    }
+}
+
+fn deserialize_optional_dockerfile<'de, D>(deserializer: D) -> Result<Option<PathBuf>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    normalize_optional_relative_path(value, "project.dockerfile").map_err(serde::de::Error::custom)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ProjectName;
+    use super::{DEFAULT_DOCKERFILE, Project, ProjectName};
+    use std::path::Path;
 
     #[test]
     fn accepts_valid_name() {
@@ -128,5 +161,91 @@ mod tests {
     fn rejects_invalid_name() {
         assert!(ProjectName::try_new("Bad").is_err());
         assert!(ProjectName::try_new("ab").is_err());
+    }
+
+    #[test]
+    fn dockerfile_defaults_to_dockerfile() {
+        let project: Project = toml::from_str(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            "#,
+        )
+        .expect("minimal project");
+        assert!(project.dockerfile.is_none());
+        assert_eq!(project.dockerfile_path(), Path::new(DEFAULT_DOCKERFILE));
+    }
+
+    #[test]
+    fn dockerfile_path_passthrough() {
+        let project: Project = toml::from_str(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            dockerfile = "docker/app.Dockerfile"
+            "#,
+        )
+        .expect("relative dockerfile");
+        assert_eq!(
+            project.dockerfile.as_deref(),
+            Some(Path::new("docker/app.Dockerfile"))
+        );
+        assert_eq!(
+            project.dockerfile_path(),
+            Path::new("docker/app.Dockerfile")
+        );
+    }
+
+    #[test]
+    fn empty_dockerfile_becomes_none() {
+        let project: Project = toml::from_str(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            dockerfile = ""
+            "#,
+        )
+        .expect("empty dockerfile");
+        assert!(project.dockerfile.is_none());
+        assert_eq!(project.dockerfile_path(), Path::new(DEFAULT_DOCKERFILE));
+    }
+
+    #[test]
+    fn rejects_absolute_dockerfile() {
+        let err = toml::from_str::<Project>(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            dockerfile = "/tmp/Dockerfile"
+            "#,
+        )
+        .expect_err("absolute path");
+        assert!(err.to_string().contains("project-relative"));
+    }
+
+    #[test]
+    fn rejects_parent_dir_dockerfile() {
+        let err = toml::from_str::<Project>(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            dockerfile = "../Dockerfile"
+            "#,
+        )
+        .expect_err("parent dir");
+        assert!(err.to_string().contains("`..`"));
+    }
+
+    #[test]
+    fn omits_empty_dockerfile_on_serialize() {
+        let project: Project = toml::from_str(
+            r#"
+            name = "nitrum-hello"
+            port = 8080
+            "#,
+        )
+        .expect("minimal project");
+        let toml = toml::to_string(&project).expect("serialize");
+        assert!(!toml.contains("dockerfile"));
     }
 }

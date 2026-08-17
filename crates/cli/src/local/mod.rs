@@ -50,8 +50,10 @@ pub fn reject_unejected_default_local_template(
 }
 
 pub struct EnclaveLocalStack<'a> {
-    /// Project directory containing `nitrum.toml` and the enclave `Dockerfile`.
+    /// Project directory containing `nitrum.toml` and the enclave Dockerfile.
     project_root: &'a Path,
+    /// Project-relative Dockerfile from `[project].dockerfile` (default `Dockerfile`).
+    dockerfile: &'a Path,
     /// Optional project-relative Compose template from `[local].template`.
     template: Option<&'a Path>,
     /// Local compose tag for the app image (`nitrum-{name}:dev`).
@@ -75,6 +77,7 @@ impl<'a> EnclaveLocalStack<'a> {
         let ram_mib = cfg.scaling.ram_size_mib.get();
         Ok(Self {
             project_root,
+            dockerfile: cfg.project.dockerfile_path(),
             template: cfg.local.template.as_deref(),
             enclave_image: format!("nitrum-{}:dev", cfg.project.name),
             data_plane_image: cfg.runtime.data_plane.with_tag_suffix("local").to_string(),
@@ -101,6 +104,7 @@ impl<'a> EnclaveLocalStack<'a> {
         // project-dir + Dockerfile (same as `nitrum build` / customer projects).
         build_enclave_image(
             self.project_root,
+            self.dockerfile,
             &self.data_plane_image,
             &self.enclave_image,
         )

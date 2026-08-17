@@ -84,6 +84,7 @@ mod tests {
                     name: project_name.parse().expect("valid test project name"),
                     port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
                     start_command: vec![],
+                    dockerfile: None,
                 },
                 runtime: config::Runtime::default(),
                 health_check: config::HealthCheck::default(),

@@ -158,7 +158,7 @@ nitrum build
 
 ### `nitrum build`
 
-Builds the enclave Docker image and produces `.nitrum/artifacts/{name}.eif` in the project directory using nitro-cli inside Docker. Requires a valid `nitrum.toml` and project layout.
+Builds the enclave Docker image and produces `.nitrum/artifacts/{name}.eif` in the project directory using nitro-cli inside Docker. Requires a valid `nitrum.toml` and project layout. Docker build context is the project directory; the Dockerfile path comes from `[project].dockerfile` (default `Dockerfile`).
 
 This command is the core of reproducible builds; see the dedicated section below for how to pin Docker inputs so the same source always yields the same EIF.
 
@@ -182,7 +182,7 @@ template = "infra/local-stack.yml"
 
 When `local.template` is set, that file is used as-is and is **never** overwritten. If `infra/local-stack.yml` exists and the key is missing, local commands **fail** so the rewrite path cannot silently ignore your ejected file. The Compose YAML carries `# nitrum-template-version: 0.3.0`; a mismatch prints a warning (refresh with `nitrum local eject --force`).
 
-The enclave image is built by the CLI (not Compose) before `up`. The Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
+The enclave image is built by the CLI (not Compose) before `up`, using `[project].dockerfile` (default `Dockerfile`). The Dockerfile’s `DATA_PLANE_IMAGE` build arg comes from
 `[runtime].data_plane` in `nitrum.toml` (overridable via
 `NITRUM_RUNTIME_DATA_PLANE_IMAGE`), with a `-local` tag suffix applied
 automatically so the pebble-enabled image is used
@@ -290,6 +290,7 @@ Options are defined in the `config` crate; the sample project comments point to 
 - `[project]` `name` — project identifier; CloudFormation stack name and `ProjectName` match it; S3 bucket is `nitrum-{name}`; SSM paths use `/nitrum/{name}/…` (data-plane infra and app env).
 - `[project]` `port` — TCP port your app listens on at `127.0.0.1` (ingress proxies here after TLS).
 - `[project]` `start_command` — argv for the user process (JSON array in `nitrum.toml`); the data-plane spawns it after loading config.
+- `[project]` `dockerfile` — project-relative Dockerfile for `nitrum build` and `nitrum local` (default `Dockerfile` at the project root). Build context remains the project directory.
 - `[runtime]` `data_plane` — Docker image passed as `DATA_PLANE_IMAGE` / Dockerfile `ARG` for `nitrum build` and, by default, `nitrum local` (base containing the in-enclave data-plane).
 - `[runtime]` `control_plane` — full image ref for the host control-plane on `nitrum cloud deploy` (CloudFormation).
 - `[runtime]` `nitro_cli` — image for `nitro-cli` (EIF build and `nitrum describe`).

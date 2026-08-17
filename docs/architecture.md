@@ -310,7 +310,7 @@ sequenceDiagram
 `nitrum build` and `nitrum cloud deploy` form the standard path from source to running enclave:
 
 - `nitrum build`
-  - Uses Docker to build your application image according to `Dockerfile` and `nitrum.toml`.
+  - Uses Docker to build your application image according to `[project].dockerfile` (default `Dockerfile`) and `nitrum.toml`.
   - Runs `nitro-cli build-enclave` in a dedicated image to produce an EIF.
   - Writes `.nitrum/artifacts/{project.name}.eif` and any build metadata.
 - `nitrum cloud deploy`

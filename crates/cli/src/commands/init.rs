@@ -70,6 +70,7 @@ pub async fn run(args: InitArgs) -> Result<()> {
             name: project_name,
             port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
             start_command: vec!["/app/hello".to_string()],
+            dockerfile: None,
         },
         runtime: Runtime {
             data_plane: DockerImageRef::try_new(&data_plane)?,

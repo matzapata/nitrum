@@ -42,8 +42,13 @@ impl EnclaveArtifact {
         let eif_path = if canonical.is_dir() {
             let image_tag = format!("nitrum-{}:latest", cfg.project.name);
             let eif_path = project_eif_path(&canonical, &cfg.project.name);
-            build::build_enclave_image(&canonical, cfg.runtime.data_plane.as_str(), &image_tag)
-                .await?;
+            build::build_enclave_image(
+                &canonical,
+                cfg.project.dockerfile_path(),
+                cfg.runtime.data_plane.as_str(),
+                &image_tag,
+            )
+            .await?;
             build::build_enclave_eif(
                 &canonical,
                 &image_tag,

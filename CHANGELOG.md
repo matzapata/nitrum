@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `# nitrum-template-version:` marker and a skew warning when an ejected template does not match the CLI bundle.
 - `nitrum local eject` writes the bundled Compose template to `infra/local-stack.yml` (optional `--output`; `--force` to overwrite).
 - `[local].template` — project-relative Compose YAML; when set, local up/down/logs use that file without rewriting it. Unmanaged mode still rewrites `.nitrum/local-stack.yml`. Fails if `infra/local-stack.yml` exists without this key.
+- `[project].dockerfile` — project-relative Dockerfile for `nitrum build` and `nitrum local` (default `Dockerfile`).
 
 ## [0.2.0] - 2026-08-12
 

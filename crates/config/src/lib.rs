@@ -7,13 +7,13 @@ mod sections;
 pub use error::NitrumConfigError;
 pub use platform::PlatformLayout;
 pub use sections::{
-    ALLOWED_INSTANCE_TYPES, ALLOWED_LOG_RETENTION_DAYS, Cloud, CloudError, DockerImageRef,
-    DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE, ENV_RUNTIME_DATA_PLANE_IMAGE,
-    ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern, EgressPatternError,
-    HOST_MEMORY_RESERVE_MIB, HOST_VCPU_RESERVE, HealthCheck, HealthCheckPath, HealthCheckPathError,
-    InstanceTypeCapacity, Local, LocalError, Project, ProjectName, ProjectNameError, Runtime,
-    Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination, TlsTerminationError,
-    lookup_instance_type, validate_enclave_fit,
+    ALLOWED_INSTANCE_TYPES, ALLOWED_LOG_RETENTION_DAYS, Cloud, CloudError, DEFAULT_DOCKERFILE,
+    DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,
+    ENV_RUNTIME_DATA_PLANE_IMAGE, ENV_RUNTIME_NITRO_CLI_IMAGE, Egress, EgressPattern,
+    EgressPatternError, HOST_MEMORY_RESERVE_MIB, HOST_VCPU_RESERVE, HealthCheck, HealthCheckPath,
+    HealthCheckPathError, InstanceTypeCapacity, Local, LocalError, Project, ProjectName,
+    ProjectNameError, Runtime, Scaling, ScalingError, TlsDomain, TlsDomainError, TlsTermination,
+    TlsTerminationError, lookup_instance_type, validate_enclave_fit,
 };
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]

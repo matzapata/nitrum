@@ -64,6 +64,7 @@ fn sample_nitrum_config() -> NitrumConfig {
             name: "nitrum-bench".parse().expect("valid bench project name"),
             port: std::num::NonZeroU16::new(8080).expect("8080 is non-zero"),
             start_command: vec![],
+            dockerfile: None,
         },
         runtime: config::Runtime::default(),
         health_check: config::HealthCheck::default(),

@@ -17,7 +17,7 @@ pub use instance_type::{
     lookup_instance_type, validate_enclave_fit,
 };
 pub use local::{Local, LocalError};
-pub use project::{Project, ProjectName, ProjectNameError};
+pub use project::{DEFAULT_DOCKERFILE, Project, ProjectName, ProjectNameError};
 pub use runtime::{
     DockerImageRef, DockerImageRefError, ENV_RUNTIME_CONTROL_PLANE_IMAGE,
     ENV_RUNTIME_DATA_PLANE_IMAGE, ENV_RUNTIME_NITRO_CLI_IMAGE, Runtime,
