@@ -32,7 +32,7 @@ jobs:
     env:
       AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
