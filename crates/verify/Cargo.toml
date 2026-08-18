@@ -22,5 +22,5 @@ x509-parser = "0.18"
 
 [dev-dependencies]
 base64 = "0.22"
-hex-literal = "0.4"
+hex-literal = "1.1"
 sha2 = "0.10"
