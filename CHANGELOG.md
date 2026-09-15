@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Control-plane watches `describe-enclaves` after `run-enclave` for a settle window instead of a fixed warmup sleep; treats early disappear as a crash loop (`exited_before_stable`) without resetting backoff. Ingress readiness remains the NLB's job.
+- Data-plane logs attested KMS Decrypt AccessDenied as a once-per-boot first-class error (key id, ImageSha384 / PCR0, optional NSM PCR0).
+
+### Fixed
+
+- Data-plane installs a stdout tracing subscriber before networking/IMDS/SSM, then attaches OTLP once the collector endpoint is known; fatal errors are logged while the telemetry guard is alive so Drop flushes exporters on normal process exit.
+- Control-plane likewise logs full anyhow chains; both binaries return `ExitCode` so telemetry Drop runs (no `process::exit` that would skip destructors).
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

@@ -136,6 +136,8 @@ step_wait_active() {
         now=${SECONDS}
         if ((now >= deadline)); then
             echo "error: enclave did not become responsive within ${WAIT_ACTIVE_TIMEOUT_SECONDS}s (${ENCLAVE_URL})" >&2
+            echo "=== dump cloud logs on timeout ===" >&2
+            nitrum cloud logs --path "${PROJECT}" --since-minutes "${LOGS_SINCE}" || true
             exit 1
         fi
 

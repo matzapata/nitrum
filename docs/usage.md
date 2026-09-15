@@ -33,7 +33,7 @@ The in-enclave **data-plane** terminates **TLS** on `NITRUM_INGRESS_LISTEN_ADDR`
 
 #### Endpoints reachable from the Internet (or local TLS client)
 
-- `GET /.well-known/enclave/status` — readiness for the hosted app. On success: `200 OK` and `{"status":"ok"}` when `[health_check]` probes succeed (or there is no `start_command`). On failure: `503` and `{"status":"unhealthy"}`. NLB HTTPS health checks use this path.
+- `GET /.well-known/enclave/status` — readiness for the hosted app. On success: `200 OK` and `{"status":"ok"}` when `[health_check]` probes succeed (or there is no `start_command`). On failure: `503` and `{"status":"unhealthy"}`. NLB HTTPS health checks on **:443** use this path.
 
 - `GET /.well-known/enclave/attestation` — **AWS Nitro attestation document** for the running enclave, with the **current TLS leaf certificate** bound into the NSM request (certificate hash as `public_key` material). Optional query: `nonce` (standard Base64 of raw nonce bytes). On success: `200 OK` and `{"data":"<base64-encoded attestation document>"}`. If the TLS certificate is not yet available: `503` with `{"error":"TLS certificate not yet available"}`. Attestation errors may return `500` with `{"error":"attestation failed: ..."}`.
 
