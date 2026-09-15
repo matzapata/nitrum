@@ -52,13 +52,9 @@ async fn main() -> ExitCode {
         let storage_client = Arc::new(DynamoObjectStore::from_config(&data_plane_config));
         let kms = AwsKms::from_config(&data_plane_config);
         let crypto_client = Arc::new(
-            AesGcmCrypto::from_kms(
-                storage_client.clone(),
-                &kms,
-                &data_plane_config.instance_id,
-            )
-            .await
-            .context("crypto setup failed")?,
+            AesGcmCrypto::from_kms(storage_client.clone(), &kms, &data_plane_config.instance_id)
+                .await
+                .context("crypto setup failed")?,
         );
 
         data_plane::crypto::init(&data_plane_config, &crypto_client);

@@ -5,9 +5,7 @@ mod nitro;
 
 pub use artifact::RuntimeEif;
 
-use crate::constants::{
-    ENCLAVE_HEALTH_POLL, ENCLAVE_SETTLE_TIMEOUT, MAX_BACKOFF_SECS, NITRO_CLI,
-};
+use crate::constants::{ENCLAVE_HEALTH_POLL, ENCLAVE_SETTLE_TIMEOUT, MAX_BACKOFF_SECS, NITRO_CLI};
 use nitro::{
     NitroCommand, attach_debug_consoles, describe_enclaves_stdout, run_enclave_once,
     shutdown_all_enclaves,
@@ -279,10 +277,8 @@ mod tests {
             backoff_secs: 4,
             consecutive_fast_crashes: 1,
         };
-        let after = apply_launch_outcome(
-            LaunchOutcome::ExitedBeforeStable { uptime_ms: 800 },
-            before,
-        );
+        let after =
+            apply_launch_outcome(LaunchOutcome::ExitedBeforeStable { uptime_ms: 800 }, before);
         assert_eq!(after.backoff_secs, 8);
         assert_eq!(after.consecutive_fast_crashes, 2);
     }

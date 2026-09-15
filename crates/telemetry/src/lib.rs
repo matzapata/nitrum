@@ -31,7 +31,9 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::reload;
-use tracing_subscriber::{EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 /// Boxed OTLP layers installed behind a [`reload`] handle (starts as `None`).
 type DynLayer = Box<dyn Layer<Registry> + Send + Sync>;

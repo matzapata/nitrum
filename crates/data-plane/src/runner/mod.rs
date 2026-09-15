@@ -42,10 +42,9 @@ impl RunnerGuard {
             .expect("runner guard wait called without child");
         let status = child.wait().await?;
         self.child = None;
-        Ok(match status.code() {
-            Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
-            None => ExitCode::FAILURE,
-        })
+        Ok(status.code().map_or(ExitCode::FAILURE, |code| {
+            ExitCode::from(u8::try_from(code).unwrap_or(1))
+        }))
     }
 }
 

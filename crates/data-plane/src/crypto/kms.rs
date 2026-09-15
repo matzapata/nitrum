@@ -4,9 +4,9 @@
 //! attestation. KMS returns `CiphertextForRecipient` as **RFC 5652 CMS**; OpenSSL unwraps it. The ephemeral key pair for the
 //! recipient is generated with **OpenSSL** (AWS requires RSA-OAEP-SHA256 to the public key embedded in the attestation — not your CMK).
 
+use crate::DataPlaneConfig;
 use crate::constants::ENV_KMS_ENDPOINT_URL;
 use crate::utils::env::optional_nonempty;
-use crate::DataPlaneConfig;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 #[cfg(feature = "enclave")]
