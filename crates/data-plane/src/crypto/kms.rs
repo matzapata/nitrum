@@ -9,9 +9,13 @@ use crate::constants::ENV_KMS_ENDPOINT_URL;
 use crate::utils::env::optional_nonempty;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+#[cfg(feature = "enclave")]
+use aws_sdk_kms::error::ProvideErrorMetadata;
 use aws_sdk_kms::primitives::Blob;
 use aws_sdk_kms::types::DataKeySpec;
 use std::sync::Arc;
+#[cfg(feature = "enclave")]
+use tracing::error;
 use tracing::instrument;
 
 /// Port for DEK envelope generate / unwrap (construction only).
@@ -123,6 +127,18 @@ impl Kms for AwsKms {
                 .recipient(recipient)
                 .send()
                 .await
+                .inspect_err(|err| {
+                    if matches!(err.code(), Some("AccessDeniedException" | "AccessDenied")) {
+                        let pcr0 = crate::crypto::attest::try_describe_pcr0_hex();
+                        error!(
+                            key_id = %self.key_id,
+                            condition = "kms:RecipientAttestation:ImageSha384",
+                            aws_error_code = err.code().unwrap_or("AccessDenied"),
+                            pcr0 = pcr0.as_deref().unwrap_or("(unavailable)"),
+                            "attested KMS Decrypt denied (ImageSha384 / PCR0 vs key policy); process will exit"
+                        );
+                    }
+                })
                 .context("KMS Decrypt (recipient)")?;
 
             let ciphertext_for_recipient = resp

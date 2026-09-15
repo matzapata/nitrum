@@ -1,4 +1,4 @@
-//! Attestation document generation.
+//! Attestation document generation and best-effort PCR reads.
 
 /// Calls the Nitro Security Module to produce a signed attestation document.
 ///
@@ -30,6 +30,26 @@ pub fn get_attestation_doc(
     match response {
         Response::Attestation { document } => Ok(document),
         other => Err(format!("unexpected NSM response: {other:?}")),
+    }
+}
+
+/// Best-effort read of PCR0 (ImageSha384) from the NSM. Returns `None` on any failure.
+#[cfg(feature = "enclave")]
+pub fn try_describe_pcr0_hex() -> Option<String> {
+    use aws_nitro_enclaves_nsm_api::api::{Request, Response};
+    use aws_nitro_enclaves_nsm_api::driver::{nsm_exit, nsm_init, nsm_process_request};
+
+    let fd = nsm_init();
+    if fd < 0 {
+        return None;
+    }
+
+    let response = nsm_process_request(fd, Request::DescribePCR { index: 0 });
+    nsm_exit(fd);
+
+    match response {
+        Response::DescribePCR { data, .. } if !data.is_empty() => Some(hex::encode(data)),
+        _ => None,
     }
 }
 
