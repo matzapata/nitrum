@@ -49,7 +49,7 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 async-trait = "0.1"
 thiserror = "2"
-rand = "0.8"
+rand = "0.9"
 aes-gcm = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
