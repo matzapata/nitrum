@@ -2071,7 +2071,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "regex",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "control-plane"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2473,7 +2473,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "data-plane"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -4119,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "nitrum-node-native"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "napi",
  "napi-build",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "nitrum-sdk"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "reqwest",
@@ -5913,7 +5913,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -6498,7 +6498,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "verify"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "ciborium",
