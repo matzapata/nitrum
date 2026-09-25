@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-25
+
+### Added
+
+- Control-plane watches `describe-enclaves` after `run-enclave` for a settle window instead of a fixed warmup sleep; treats early disappear as a crash loop (`exited_before_stable`) without resetting backoff. Ingress readiness remains the NLB's job.
+- Data-plane logs attested KMS Decrypt AccessDenied as a once-per-boot first-class error (key id, ImageSha384 / PCR0, optional NSM PCR0).
+- KMS permissions and troubleshooting guide (`docs/kms.md`): key permission model, how PCR0 follows a deploy, and how to debug attested Decrypt denials.
+
+### Fixed
+
+- Data-plane installs a stdout tracing subscriber before networking/IMDS/SSM, then attaches OTLP once the collector endpoint is known; fatal errors are logged while the telemetry guard is alive so Drop flushes exporters on normal process exit.
+- Control-plane likewise logs full anyhow chains; both binaries return `ExitCode` so telemetry Drop runs (no `process::exit` that would skip destructors).
+
+### Security
+
+- Updated `h2` 0.4 to a patched release (RUSTSEC-2026-0258) and refreshed `rustls` 0.23. `cargo-deny` ignores RUSTSEC-2026-0258 for `h2` 0.3, which the AWS SDK still pulls in and which has no upstream patch.
+
+### Upgrading
+
+`nitrum init` pins the runtime images to `@sha256:` digests in `nitrum.toml` when it runs, so existing projects keep using the 0.2.0 control-plane and data-plane until you re-pin `[runtime]` `control_plane` and `data_plane` to the `v0.2.1` images (by tag or new digest). Changing `data_plane` changes the EIF: run `nitrum build` and `nitrum cloud deploy` again, which updates PCR0 in the KMS key policy as usual (see [docs/kms.md](docs/kms.md)).
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

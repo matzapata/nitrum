@@ -5,7 +5,8 @@
 //! - structured logs to stdout (non-ANSI, container-friendly), and
 //! - the application metric instruments (see [`metrics`]).
 //!
-//! When an OTLP/gRPC endpoint is configured, traces, metrics, and logs are also
+//! When an OTLP/gRPC endpoint is configured (at [`init`] or later via
+//! [`TelemetryGuard::enable_otlp`]), traces, metrics, and logs are also
 //! exported over OTLP to a local OpenTelemetry Collector, which is responsible
 //! for translating them into a backend (CloudWatch/X-Ray on AWS, something else
 //! on other platforms). No backend-specific code lives here: swapping platforms
@@ -29,7 +30,14 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_subscriber::filter::FilterFn;
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::reload;
+use tracing_subscriber::{
+    EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+};
+
+/// Boxed OTLP layers installed behind a [`reload`] handle (starts as `None`).
+type DynLayer = Box<dyn Layer<Registry> + Send + Sync>;
+type OtlpReload = reload::Handle<Option<DynLayer>, Registry>;
 
 /// Telemetry configuration supplied by each binary at startup.
 pub struct TelemetryConfig {
@@ -38,7 +46,7 @@ pub struct TelemetryConfig {
     /// Extra OpenTelemetry resource attributes (e.g. `service.instance.id`).
     pub resource_attributes: Vec<(String, String)>,
     /// OTLP/gRPC collector endpoint (e.g. `http://127.0.0.1:4317`).
-    /// When `None`, only stdout logging is configured (local dev / tests).
+    /// When `None`, only stdout logging is configured until [`TelemetryGuard::enable_otlp`].
     pub otlp_endpoint: Option<String>,
 }
 
@@ -87,9 +95,9 @@ impl TelemetryConfig {
 
 /// Owns the OpenTelemetry providers so they stay alive for the process lifetime.
 ///
-/// Flushes and stops all OTLP exporters on [`Drop`]. Call [`drop`] explicitly
-/// before [`std::process::exit`], which skips destructors.
-#[derive(Default)]
+/// Flushes and stops all OTLP exporters on [`Drop`]. Prefer returning from
+/// `main` (e.g. [`std::process::ExitCode`]) so Drop runs. Call [`Self::shutdown`]
+/// only when you must flush before [`std::process::exit`], which skips destructors.
 pub struct TelemetryGuard {
     /// Tracer provider exporting spans over OTLP; `None` in stdout-only mode.
     tracer_provider: Option<SdkTracerProvider>,
@@ -97,6 +105,12 @@ pub struct TelemetryGuard {
     meter_provider: Option<SdkMeterProvider>,
     /// Logger provider exporting log records over OTLP; `None` in stdout-only mode.
     logger_provider: Option<SdkLoggerProvider>,
+    /// Service name for late [`Self::enable_otlp`] resource construction.
+    service_name: String,
+    /// Resource attributes for late [`Self::enable_otlp`].
+    resource_attributes: Vec<(String, String)>,
+    /// Reload handle for optional OTLP layers (always present after [`init`]).
+    otlp_reload: Option<OtlpReload>,
 }
 
 impl TelemetryGuard {
@@ -114,10 +128,68 @@ impl TelemetryGuard {
         }
     }
 
+    /// Attach OTLP export after stdout logging is already running.
+    ///
+    /// Used by the data-plane after config/IMDS resolve the collector endpoint.
+    /// No-op when `endpoint` is empty/`None`, when OTLP is already enabled, or
+    /// when exporters cannot be built (falls back to stdout-only with `eprintln!`).
+    pub fn enable_otlp(&mut self, endpoint: Option<&str>) {
+        let Some(endpoint) = endpoint.filter(|e| !e.is_empty()) else {
+            return;
+        };
+        if self.tracer_provider.is_some() {
+            return;
+        }
+        let Some(handle) = self.otlp_reload.as_ref() else {
+            return;
+        };
+
+        let resource = otel::build_resource(&self.service_name, &self.resource_attributes);
+        let providers = match otel::build_providers(endpoint, resource) {
+            Ok(providers) => providers,
+            Err(error) => {
+                eprintln!(
+                    "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
+                );
+                return;
+            }
+        };
+
+        let trace_layer =
+            tracing_opentelemetry::layer().with_tracer(providers.tracer_provider.tracer("nitrum"));
+        // Filter SDK/internal targets out of the bridge. Their own AfterShutdown
+        // warnings are emitted via `tracing`; feeding them back into the logger
+        // provider recurses until the tokio worker stack overflows.
+        let logs_layer = OpenTelemetryTracingBridge::new(&providers.logger_provider).with_filter(
+            FilterFn::new(|metadata| {
+                let target = metadata.target();
+                !(target.starts_with("opentelemetry") || target.starts_with("tonic"))
+            }),
+        );
+
+        let boxed: DynLayer = Box::new(trace_layer.and_then(logs_layer));
+        if let Err(error) = handle.reload(Some(boxed)) {
+            eprintln!(
+                "telemetry: OTLP layer reload failed ({error}); falling back to stdout-only logging"
+            );
+            let _ = providers.tracer_provider.shutdown();
+            let _ = providers.meter_provider.shutdown();
+            let _ = providers.logger_provider.shutdown();
+            return;
+        }
+
+        opentelemetry::global::set_tracer_provider(providers.tracer_provider.clone());
+        opentelemetry::global::set_meter_provider(providers.meter_provider.clone());
+
+        self.tracer_provider = Some(providers.tracer_provider);
+        self.meter_provider = Some(providers.meter_provider);
+        self.logger_provider = Some(providers.logger_provider);
+    }
+
     /// Flush and stop all OTLP exporters before the guard is dropped.
     ///
-    /// Prefer relying on [`Drop`] when the guard goes out of scope naturally.
-    /// Use this only when you need to flush before other teardown runs.
+    /// Prefer letting the guard drop on normal `main` return. Use this only when
+    /// you must flush before [`std::process::exit`].
     #[allow(clippy::unused_async)]
     pub async fn shutdown(mut self) {
         self.shutdown_providers();
@@ -137,76 +209,41 @@ fn env_filter() -> EnvFilter {
 
 /// Initialize process-wide telemetry and return a guard that flushes on shutdown.
 ///
-/// Always installs a stdout logging layer and application metric instruments.
-/// When `cfg.otlp_endpoint` is set, also installs OTLP trace and log layers,
-/// builds and registers the global OTLP meter provider, and returns the
-/// providers in the guard. If the OTLP exporters cannot be built, telemetry
-/// degrades to stdout-only logging rather than failing.
+/// Always installs a stdout logging layer (so early bootstrap failures are
+/// visible) and application metric instruments. When `cfg.otlp_endpoint` is set,
+/// also attaches OTLP immediately. Otherwise call [`TelemetryGuard::enable_otlp`]
+/// later once the endpoint is known. If OTLP exporters cannot be built,
+/// telemetry degrades to stdout-only logging rather than failing.
 ///
-/// Must be called from within a Tokio runtime: the OTLP gRPC exporters require one.
+/// Must be called from within a Tokio runtime when enabling OTLP: the OTLP gRPC
+/// exporters require one.
 #[must_use]
 pub fn init(cfg: TelemetryConfig) -> TelemetryGuard {
-    let guard = if let Some(endpoint) = cfg.otlp_endpoint.as_deref().filter(|e| !e.is_empty()) {
-        let resource = otel::build_resource(&cfg.service_name, &cfg.resource_attributes);
-        match otel::build_providers(endpoint, resource) {
-            Ok(providers) => install_with_otlp(providers),
-            Err(error) => {
-                eprintln!(
-                    "telemetry: OTLP exporters disabled ({error:#}); falling back to stdout-only logging"
-                );
-                init_stdout_only();
-                TelemetryGuard::default()
-            }
-        }
-    } else {
-        init_stdout_only();
-        TelemetryGuard::default()
+    let (otlp_layer, otlp_reload) = reload::Layer::new(None::<DynLayer>);
+
+    // OTLP reload slot is innermost (`S = Registry`) so [`enable_otlp`] can
+    // install boxed layers typed against `Registry`.
+    tracing_subscriber::registry()
+        .with(otlp_layer)
+        .with(env_filter())
+        .with(fmt::layer().with_ansi(false))
+        .init();
+
+    let mut guard = TelemetryGuard {
+        tracer_provider: None,
+        meter_provider: None,
+        logger_provider: None,
+        service_name: cfg.service_name,
+        resource_attributes: cfg.resource_attributes,
+        otlp_reload: Some(otlp_reload),
     };
+
+    if let Some(endpoint) = cfg.otlp_endpoint.as_deref() {
+        guard.enable_otlp(Some(endpoint));
+    }
+
     metrics::init_instruments();
     guard
-}
-
-/// Install a stdout-only subscriber (structured, non-ANSI logs).
-fn init_stdout_only() {
-    tracing_subscriber::registry()
-        .with(env_filter())
-        .with(fmt::layer().with_ansi(false))
-        .init();
-}
-
-/// Install the full stdout + OTLP (traces, metrics, logs) pipeline.
-fn install_with_otlp(providers: otel::Providers) -> TelemetryGuard {
-    // `tracing-opentelemetry` exports spans; the appender bridge ships `tracing`
-    // events as OTLP log records. Both are bound to the registry below.
-    let trace_layer =
-        tracing_opentelemetry::layer().with_tracer(providers.tracer_provider.tracer("nitrum"));
-    // Filter SDK/internal targets out of the bridge. Their own AfterShutdown
-    // warnings are emitted via `tracing`; feeding them back into the logger
-    // provider recurses until the tokio worker stack overflows.
-    let logs_layer = OpenTelemetryTracingBridge::new(&providers.logger_provider).with_filter(
-        FilterFn::new(|metadata| {
-            let target = metadata.target();
-            !(target.starts_with("opentelemetry") || target.starts_with("tonic"))
-        }),
-    );
-
-    // Register globals so `opentelemetry::global::{tracer,meter}` resolve to the
-    // OTLP providers (used by `metrics` and any library emitting OTel directly).
-    opentelemetry::global::set_tracer_provider(providers.tracer_provider.clone());
-    opentelemetry::global::set_meter_provider(providers.meter_provider.clone());
-
-    tracing_subscriber::registry()
-        .with(env_filter())
-        .with(fmt::layer().with_ansi(false))
-        .with(trace_layer)
-        .with(logs_layer)
-        .init();
-
-    TelemetryGuard {
-        tracer_provider: Some(providers.tracer_provider),
-        meter_provider: Some(providers.meter_provider),
-        logger_provider: Some(providers.logger_provider),
-    }
 }
 
 #[cfg(test)]
