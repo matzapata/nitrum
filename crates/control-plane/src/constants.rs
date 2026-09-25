@@ -16,3 +16,8 @@ pub const ENCLAVE_HEALTH_POLL: Duration = Duration::from_secs(5);
 
 /// Max delay before a restart attempt after the enclave is gone or `run-enclave` fails.
 pub const MAX_BACKOFF_SECS: u64 = 300;
+
+/// After `run-enclave`, how long the enclave must stay listed before the launch
+/// counts as stable (backoff reset). Disappear earlier → crash-loop backoff.
+/// Ingress readiness is left to the NLB; the control-plane only watches nitro lifecycle.
+pub const ENCLAVE_SETTLE_TIMEOUT: Duration = Duration::from_secs(30);

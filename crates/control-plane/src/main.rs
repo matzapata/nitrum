@@ -1,6 +1,7 @@
 use clap::Parser;
 use control_plane::ControlPlaneConfig;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use tracing::error;
 
 #[derive(clap::Parser)]
@@ -37,7 +38,14 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
+    // Host has `NITRUM_OTLP_ENDPOINT` at process start — one-shot init is fine.
+    // Guard drops on return and flushes OTLP exporters (avoid `process::exit`).
+    let _telemetry = telemetry::init(
+        telemetry::TelemetryConfig::platform("control-plane")
+            .with_otlp_endpoint(std::env::var("NITRUM_OTLP_ENDPOINT").ok()),
+    );
+
     let args = Args::parse();
 
     let config = match ControlPlaneConfig::from_cli(
@@ -50,13 +58,16 @@ async fn main() {
     ) {
         Ok(config) => config,
         Err(e) => {
-            error!(error = %e);
-            std::process::exit(1);
+            error!(error = %format!("{:#}", e));
+            return ExitCode::FAILURE;
         }
     };
 
-    if let Err(e) = control_plane::run(config).await {
-        error!(error = %e);
-        std::process::exit(1);
+    match control_plane::run(config).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!(error = %format!("{:#}", e));
+            ExitCode::FAILURE
+        }
     }
 }

@@ -24,7 +24,7 @@ use crate::DataPlaneConfig;
 use anyhow::Result;
 use otel_env::build_user_process_env;
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::process::{ExitCode, Stdio};
 use tokio::process::Child;
 use tracing::{error, info};
 
@@ -35,14 +35,16 @@ struct RunnerGuard {
 }
 
 impl RunnerGuard {
-    async fn wait(&mut self) -> Result<i32> {
+    async fn wait(&mut self) -> Result<ExitCode> {
         let child = self
             .child
             .as_mut()
             .expect("runner guard wait called without child");
         let status = child.wait().await?;
         self.child = None;
-        Ok(status.code().unwrap_or(-1))
+        Ok(status.code().map_or(ExitCode::FAILURE, |code| {
+            ExitCode::from(u8::try_from(code).unwrap_or(1))
+        }))
     }
 }
 
@@ -58,12 +60,12 @@ impl Drop for RunnerGuard {
 ///
 /// Uses `[project].start_command` from config. When no command is configured, the
 /// data-plane runs until SIGINT.
-pub async fn run_until_shutdown(config: &DataPlaneConfig) -> i32 {
+pub async fn run_until_shutdown(config: &DataPlaneConfig) -> ExitCode {
     tokio::select! {
         code = supervise(config) => code,
         () = shutdown_signal() => {
             info!("received SIGINT, shutting down");
-            0
+            ExitCode::SUCCESS
         }
     }
 }
@@ -74,10 +76,10 @@ async fn shutdown_signal() {
         .expect("failed to listen for ctrl_c");
 }
 
-async fn supervise(config: &DataPlaneConfig) -> i32 {
+async fn supervise(config: &DataPlaneConfig) -> ExitCode {
     if config.project.start_command.is_empty() {
         info!("no command provided, running until SIGINT");
-        std::future::pending::<i32>().await
+        std::future::pending::<ExitCode>().await
     } else {
         let (child_env, otel_injected) = build_user_process_env(config);
         if otel_injected {
@@ -91,7 +93,7 @@ async fn supervise(config: &DataPlaneConfig) -> i32 {
             Ok(code) => code,
             Err(error) => {
                 error!(error = %error, "failed to run user process");
-                1
+                ExitCode::FAILURE
             }
         }
     }
@@ -105,7 +107,7 @@ async fn supervise(config: &DataPlaneConfig) -> i32 {
 async fn run<S: std::hash::BuildHasher + Sync>(
     command: &[String],
     child_env: &HashMap<String, String, S>,
-) -> Result<i32> {
+) -> Result<ExitCode> {
     let (program, args) = command
         .split_first()
         .expect("run() called with non-empty command");
@@ -134,7 +136,7 @@ async fn run<S: std::hash::BuildHasher + Sync>(
     })
     .await;
 
-    info!(target: "app", exit_code = code, "user process exited");
+    info!(target: "app", exit_code = ?code, "user process exited");
     Ok(code)
 }
 
