@@ -372,5 +372,6 @@ Nitrum is instrumented with OpenTelemetry as the single export path. The `teleme
 ## Further reading
 
 - [usage.md](usage.md) — CLI commands, config, and reproducible build guidance.
+- [kms.md](kms.md) — KMS key permissions, PCR0 across deploys, and troubleshooting attested `Decrypt` denials.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — building and testing the workspace.
 

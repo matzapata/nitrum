@@ -202,7 +202,7 @@ Each `nitrum cloud deploy` with a new EIF:
 2. Sets `EifImageSha384` to the new EIF’s **PCR0**, which updates the KMS key policy’s `kms:RecipientAttestation:ImageSha384` condition **in place** (same key id).
 3. New hosts download the new EIF; attested `Decrypt` succeeds only for the new PCR0. During the roll, old enclaves may briefly fail attested Decrypt after the policy swaps.
 
-Only the KMS **administrator** principal (`cloud.kms_administrator_role_arn`, or account root when empty) can change that PCR0 condition (`kms:PutKeyPolicy`). The identity running `nitrum cloud deploy` must match that principal (or assume that role); otherwise the stack update fails with `AccessDenied`. The CLI warns when `sts:GetCallerIdentity` does not match a configured admin ARN.
+Only the KMS **administrator** principal (`cloud.kms_administrator_role_arn`, or account root when empty) can change that PCR0 condition (`kms:PutKeyPolicy`). The identity running `nitrum cloud deploy` must match that principal (or assume that role); otherwise the stack update fails with `AccessDenied`. The CLI warns when `sts:GetCallerIdentity` does not match a configured admin ARN. For the full permission model and debugging attested `Decrypt` denials, see [kms.md](kms.md).
 
 #### Production checklist
 
@@ -338,6 +338,7 @@ After deploy, use `nitrum cloud logs` for production debugging and `nitrum descr
 ## Documentation map
 
 - [architecture.md](architecture.md) — how control-plane, data-plane, and AWS pieces fit together.
+- [kms.md](kms.md) — KMS key permissions, how PCR0 follows a deploy, and troubleshooting attested `Decrypt` failures.
 - [releases.md](releases.md) — SemVer, CHANGELOG, CI/release gates, and `nitrum.toml` compatibility.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — developing and testing the Rust workspace.
 

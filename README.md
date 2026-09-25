@@ -64,6 +64,8 @@ For a full list of commands, required AWS permissions, and `nitrum.toml` options
   [docs/networking.md](docs/networking.md)
 - **Usage** — CLI commands, configuration (`nitrum.toml`), and workflows for local and cloud deployments:  
   [docs/usage.md](docs/usage.md)
+- **KMS** — key permissions, how PCR0 follows a deploy, and troubleshooting attested `Decrypt` denials:  
+  [docs/kms.md](docs/kms.md)
 - **Releases** — SemVer, CHANGELOG, CI gates, and `nitrum.toml` compatibility:  
   [docs/releases.md](docs/releases.md)
 - **Contributing** — development environment, style, and CI details:  
