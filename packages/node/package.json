@@ -1,6 +1,6 @@
 {
   "name": "nitrum-node",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Verify AWS Nitro Enclave attestation documents in Node.js (Rust-backed).",
   "main": "index.js",
   "types": "index.d.ts",
@@ -38,7 +38,7 @@
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
     "create-npm-dirs": "napi create-npm-dirs",
-    "prepublishOnly": "napi prepublish -t npm --skip-gh-release",
+    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
     "test": "node --test tests/smoke.test.mjs"
   },
   "publishConfig": {
