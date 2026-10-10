@@ -160,7 +160,7 @@ jobs:
           dest="dist/nitrum-${{ matrix.suffix }}${{ matrix.ext }}"
           cp "$src" "$dest"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nitrum-cli-${{ matrix.suffix }}
           path: dist/*

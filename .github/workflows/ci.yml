@@ -106,12 +106,12 @@ jobs:
         if: matrix.target != 'x86_64-apple-darwin'
         shell: bash
         run: npm test -w nitrum-node
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nitrum-node-${{ matrix.target }}
           path: packages/node/nitrum-node.*.node
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         with:
           name: nitrum-node-js
